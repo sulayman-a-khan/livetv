@@ -23,13 +23,14 @@ import {
   planMaintenance,
 } from "./channelMaintenance";
 
-export type MaintenanceReport = MaintenancePlan["stats"] & {
+export interface MaintenanceReport {
   mode: "mongodb" | "in-memory";
   channelsBefore: number;
   channelsAfter: number;
   streamsBefore: number;
   streamsAfter: number;
-};
+  [key: string]: any;
+}
 
 /* ------------------------------------------------------------------ *
  * In-memory adapter
@@ -62,7 +63,7 @@ function applyPlanInMemory(plan: MaintenancePlan) {
   }
 
   for (const patch of plan.channelPatches) {
-    inMemoryDb.updateChannel(patch._id, patch.patch);
+    inMemoryDb.updateChannel(patch._id, patch.patch as any);
   }
 
   for (const streamId of plan.streamsToDelete) {

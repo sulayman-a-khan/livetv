@@ -1,8 +1,12 @@
 /**
  * SoluPlay Automatic Server-Side Health Checker
- * 
- * Runs every 20 minutes inside the Next.js server process.
- * - Probes ALL stream links for every channel
+ *
+ * Two-tier schedule:
+ *   - Every 5 minutes  : probes only PINNED channels (across every category) —
+ *                        these are the channels on the homepage/top of lists,
+ *                        so they get checked often and recover fast.
+ *   - Every 12 hours   : probes EVERY stream link in the catalogue.
+ *
  * - Marks non-working streams as "degraded" → "broken" (hides channels with 0 active streams)
  * - Automatically re-activates previously broken streams that come back online
  * - Persists results to data/store.json for in-memory mode
@@ -10,31 +14,54 @@
  */
 
 import { connectToDatabase } from "@/lib/db";
+import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { probeStreamUrl } from "@/lib/streamProbe";
-import { runMaintenance } from "@/lib/maintenanceRunner";
+import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
 
-const INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
-const PROBE_TIMEOUT_MS = 6000;       // 6 seconds per stream probe
-const BATCH_CONCURRENCY = 5;         // Probe 5 streams in parallel for speed
+export type HealthCheckScope = "pinned" | "full";
+
+const PINNED_INTERVAL_MS = 5 * 60 * 1000;         // 5 minutes
+const FULL_INTERVAL_MS = 12 * 60 * 60 * 1000;     // 12 hours
+const PROBE_TIMEOUT_MS = 5000;                     // 5 seconds per stream probe
+const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parallel for speed
 
 declare global {
   // eslint-disable-next-line no-var
   var __freetv_health_checker_started: boolean | undefined;
   // eslint-disable-next-line no-var
-  var __freetv_health_checker_interval: NodeJS.Timeout | undefined;
+  var __freetv_pinned_check_interval: NodeJS.Timeout | undefined;
+  // eslint-disable-next-line no-var
+  var __freetv_full_check_interval: NodeJS.Timeout | undefined;
   // eslint-disable-next-line no-var
   var __freetv_last_health_check: string | undefined;
+  // eslint-disable-next-line no-var
+  var __freetv_last_full_health_check: string | undefined;
+  // eslint-disable-next-line no-var
+  var __freetv_health_check_running: boolean | undefined;
 }
 
 interface HealthCheckResult {
+  scope: HealthCheckScope;
   totalChecked: number;
   active: number;
   degraded: number;
   broken: number;
   recovered: number;
   timestamp: string;
+}
+
+function emptyResult(scope: HealthCheckScope): HealthCheckResult {
+  return {
+    scope,
+    totalChecked: 0,
+    active: 0,
+    degraded: 0,
+    broken: 0,
+    recovered: 0,
+    timestamp: global.__freetv_last_health_check || new Date().toISOString(),
+  };
 }
 
 /**
@@ -59,17 +86,25 @@ async function probeBatch<T extends { url: string }>(
 }
 
 /**
- * Run health check on all streams (In-Memory mode)
+ * Run health check on streams (In-Memory mode).
+ * `channelIds`: when set, only streams belonging to these channels are probed
+ * (used for the 5-minute pinned-only pass); `null` probes everything.
  */
-async function runInMemoryHealthCheck(): Promise<HealthCheckResult> {
-  const streams = inMemoryDb.getStreams();
+async function runInMemoryHealthCheck(
+  scope: HealthCheckScope,
+  channelIds: string[] | null
+): Promise<HealthCheckResult> {
+  const allStreams = inMemoryDb.getStreams();
+  const streams = channelIds
+    ? allStreams.filter((s) => channelIds.includes(s.channelId))
+    : allStreams;
   const now = new Date();
   let active = 0;
   let degraded = 0;
   let broken = 0;
   let recovered = 0;
 
-  console.log(`[AutoHealthChecker] Probing ${streams.length} stream links (in-memory mode)...`);
+  console.log(`[AutoHealthChecker] (${scope}) Probing ${streams.length} stream links (in-memory mode)...`);
 
   const probeResults = await probeBatch(streams, PROBE_TIMEOUT_MS);
 
@@ -115,23 +150,28 @@ async function runInMemoryHealthCheck(): Promise<HealthCheckResult> {
   inMemoryDb.saveState();
 
   const timestamp = now.toISOString();
-  return { totalChecked: streams.length, active, degraded, broken, recovered, timestamp };
+  return { scope, totalChecked: streams.length, active, degraded, broken, recovered, timestamp };
 }
 
 /**
- * Run health check on all streams (MongoDB mode)
+ * Run health check on streams (MongoDB mode).
+ * `channelIds`: when set, only streams belonging to these channels are probed
+ * (used for the 5-minute pinned-only pass); `null` probes everything.
  */
-async function runMongoHealthCheck(): Promise<HealthCheckResult> {
+async function runMongoHealthCheck(
+  scope: HealthCheckScope,
+  channelIds: string[] | null
+): Promise<HealthCheckResult> {
   const now = new Date();
   let active = 0;
   let degraded = 0;
   let broken = 0;
   let recovered = 0;
 
-  // Fetch ALL streams sorted by least recently checked
-  const streams = await StreamLink.find().sort({ lastCheckedAt: 1 });
+  const filter = channelIds ? { channelId: { $in: channelIds } } : {};
+  const streams = await StreamLink.find(filter).sort({ lastCheckedAt: 1 });
 
-  console.log(`[AutoHealthChecker] Probing ${streams.length} stream links (MongoDB mode)...`);
+  console.log(`[AutoHealthChecker] (${scope}) Probing ${streams.length} stream links (MongoDB mode)...`);
 
   // Probe in batches
   for (let i = 0; i < streams.length; i += BATCH_CONCURRENCY) {
@@ -174,70 +214,164 @@ async function runMongoHealthCheck(): Promise<HealthCheckResult> {
   }
 
   const timestamp = now.toISOString();
-  return { totalChecked: streams.length, active, degraded, broken, recovered, timestamp };
+  return { scope, totalChecked: streams.length, active, degraded, broken, recovered, timestamp };
 }
 
 /**
- * Main health check runner — detects DB mode and runs appropriate check
+ * Cross-instance lock using MongoDB (when connected). A single Node process's
+ * `global` flag can't stop two separate serverless instances from both
+ * running the checker at once — Vercel can keep several warm simultaneously,
+ * each with its own isolated `global`. This uses an atomic upsert against a
+ * single well-known document: if another instance holds a fresh lock, the
+ * upsert collides on `_id` and throws, which we read as "already locked".
+ * A lock older than STALE_LOCK_MS is treated as abandoned (e.g. the instance
+ * that held it crashed or was recycled mid-run) and can be re-acquired.
+ *
+ * The pinned and full passes share ONE lock: they both mutate StreamLink
+ * documents, so letting them overlap (e.g. a full 12-hour pass and a 5-minute
+ * pinned tick landing at the same moment) risks the same write race we're
+ * trying to avoid. If the lock is held, the pinned tick simply skips and
+ * tries again in 5 minutes — cheap enough that this is a non-issue in practice.
  */
-async function runAutoHealthCheck(): Promise<HealthCheckResult> {
+const STALE_LOCK_MS = 30 * 60 * 1000;
+
+async function acquireMongoLock(conn: typeof import("mongoose")): Promise<boolean> {
+  const db = conn.connection.db;
+  if (!db) return true; // No direct db handle available — fail open rather than block forever.
+  try {
+    await db.collection("_locks").findOneAndUpdate(
+      {
+        _id: "auto_health_check",
+        $or: [{ lockedAt: { $exists: false } }, { lockedAt: { $lt: new Date(Date.now() - STALE_LOCK_MS) } }],
+      },
+      { $set: { lockedAt: new Date() } },
+      { upsert: true }
+    );
+    return true;
+  } catch {
+    // Duplicate-key error: a fresh lock already exists elsewhere.
+    return false;
+  }
+}
+
+async function releaseMongoLock(conn: typeof import("mongoose")): Promise<void> {
+  const db = conn.connection.db;
+  if (!db) return;
+  try {
+    await db.collection("_locks").deleteOne({ _id: "auto_health_check" });
+  } catch {
+    // Non-fatal — the lock will simply go stale and be reclaimed later.
+  }
+}
+
+/**
+ * Main health check runner — detects DB mode and runs the requested scope.
+ * `scope` defaults to "full" (used by the admin panel's manual "Run Now" button).
+ */
+async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<HealthCheckResult> {
+  // Re-entrancy guard: with enough streams a single pass can take longer than
+  // its own interval, and the admin panel's "Run Health Check Now" button
+  // calls this same function. Without this guard, two overlapping runs could
+  // race on the same stream records and on data/store.json.
+  if (global.__freetv_health_check_running) {
+    console.log(`[AutoHealthChecker] (${scope}) Skipped — a health check is already in progress.`);
+    return emptyResult(scope);
+  }
+  global.__freetv_health_check_running = true;
+
   console.log("\n══════════════════════════════════════════════════════");
-  console.log(`[AutoHealthChecker] Starting automated health check at ${new Date().toISOString()}`);
+  console.log(`[AutoHealthChecker] (${scope}) Starting health check at ${new Date().toISOString()}`);
   console.log("══════════════════════════════════════════════════════");
+
+  let mongoLockHeld = false;
+  let mongoConnForLock: typeof import("mongoose") | null = null;
 
   try {
     const conn = await connectToDatabase();
 
-    let result: HealthCheckResult;
     if (conn) {
-      result = await runMongoHealthCheck();
-    } else {
-      result = await runInMemoryHealthCheck();
+      mongoConnForLock = conn;
+      const acquired = await acquireMongoLock(conn);
+      if (!acquired) {
+        console.log(`[AutoHealthChecker] (${scope}) Skipped — another server instance already holds the lock.`);
+        return emptyResult(scope);
+      }
+      mongoLockHeld = true;
     }
 
-    global.__freetv_last_health_check = result.timestamp;
+    // Resolve which channels are in scope. "full" = every channel (null filter).
+    let pinnedChannelIds: string[] | null = null;
+    if (scope === "pinned") {
+      if (conn) {
+        const pinned = await Channel.find({ isPinned: true }).select("_id").lean();
+        pinnedChannelIds = pinned.map((c) => String(c._id));
+      } else {
+        pinnedChannelIds = inMemoryDb
+          .getChannels()
+          .filter((c) => c.isPinned)
+          .map((c) => c._id);
+      }
 
-    // Fresh latencies just landed — re-run the catalogue pass so the fastest
-    // working link is promoted back to Server 1 and any link that recovered is
-    // slotted into the right position. Recovered streams are already marked
-    // "active" above, which is what makes a hidden channel reappear in the UI.
+      if (pinnedChannelIds.length === 0) {
+        console.log("[AutoHealthChecker] (pinned) No pinned channels — nothing to check.");
+        return emptyResult(scope);
+      }
+    }
+
+    const result = conn
+      ? await runMongoHealthCheck(scope, pinnedChannelIds)
+      : await runInMemoryHealthCheck(scope, pinnedChannelIds);
+
+    global.__freetv_last_health_check = result.timestamp;
+    if (scope === "full") {
+      global.__freetv_last_full_health_check = result.timestamp;
+    }
+
+    // Fresh latencies just landed — keep the fastest-first ordering correct.
     try {
-      const maintenance = await runMaintenance();
-      console.log(
-        `[AutoHealthChecker] Maintenance: merged ${maintenance.channelsMerged}, ` +
-          `purged ${maintenance.placeholderLinksPurged} test links, ` +
-          `reordered ${maintenance.channelsReordered} channels`
-      );
+      if (scope === "full") {
+        // Full catalogue pass: normalize, merge duplicates, purge test links,
+        // renumber every channel's servers fastest-first.
+        const maintenance = await runMaintenance();
+        console.log(
+          `[AutoHealthChecker] Maintenance: merged ${maintenance.channelsMerged}, ` +
+            `purged ${maintenance.placeholderLinksPurged} test links, ` +
+            `reordered ${maintenance.channelsReordered} channels`
+        );
+      } else if (pinnedChannelIds) {
+        // Pinned pass: cheap targeted re-sort for just the channels we touched,
+        // instead of the full catalogue sweep every 5 minutes.
+        await Promise.all(pinnedChannelIds.map((id) => refreshChannelLinks(id)));
+      }
     } catch (err: any) {
       console.error("[AutoHealthChecker] Maintenance pass failed:", err?.message || err);
     }
 
-    console.log("\n[AutoHealthChecker] ── Health Check Summary ──");
+    console.log(`\n[AutoHealthChecker] ── Health Check Summary (${scope}) ──`);
     console.log(`  Total Checked : ${result.totalChecked}`);
     console.log(`  Active        : ${result.active}`);
     console.log(`  Degraded      : ${result.degraded}`);
     console.log(`  Broken        : ${result.broken}`);
     console.log(`  Recovered     : ${result.recovered}`);
-    console.log(`  Next check in : 20 minutes`);
+    console.log(`  Next ${scope} check in : ${scope === "pinned" ? "5 minutes" : "12 hours"}`);
     console.log("══════════════════════════════════════════════════════\n");
 
     return result;
   } catch (err: any) {
-    console.error("[AutoHealthChecker] Fatal error:", err.message || err);
-    return {
-      totalChecked: 0,
-      active: 0,
-      degraded: 0,
-      broken: 0,
-      recovered: 0,
-      timestamp: new Date().toISOString(),
-    };
+    console.error(`[AutoHealthChecker] (${scope}) Fatal error:`, err.message || err);
+    return emptyResult(scope);
+  } finally {
+    if (mongoLockHeld && mongoConnForLock) {
+      await releaseMongoLock(mongoConnForLock);
+    }
+    global.__freetv_health_check_running = false;
   }
 }
 
 /**
- * Start the automatic health checker interval.
- * Safe to call multiple times — only starts once per process via global flag.
+ * Start the automatic health checker: pinned channels every 5 minutes, the
+ * full catalogue every 12 hours. Safe to call multiple times — only starts
+ * once per process via a global flag.
  */
 export function startAutoHealthChecker() {
   if (global.__freetv_health_checker_started) {
@@ -246,32 +380,51 @@ export function startAutoHealthChecker() {
 
   global.__freetv_health_checker_started = true;
 
-  console.log("[AutoHealthChecker] ✦ Automatic health checker ACTIVATED (every 20 minutes)");
+  console.log(
+    "[AutoHealthChecker] ✦ Activated — pinned channels every 5 minutes, full catalogue every 12 hours"
+  );
 
-  // Run first check after 30 seconds (give server time to fully start)
+  // Pinned channels: first run after 30s, then every 5 minutes.
   setTimeout(() => {
-    runAutoHealthCheck();
+    runAutoHealthCheck("pinned");
   }, 30_000);
+  global.__freetv_pinned_check_interval = setInterval(() => {
+    runAutoHealthCheck("pinned");
+  }, PINNED_INTERVAL_MS);
 
-  // Then schedule every 20 minutes
-  global.__freetv_health_checker_interval = setInterval(() => {
-    runAutoHealthCheck();
-  }, INTERVAL_MS);
+  // Full catalogue: first run after 2 minutes (let the pinned check settle
+  // in first), then every 12 hours.
+  setTimeout(() => {
+    runAutoHealthCheck("full");
+  }, 2 * 60_000);
+  global.__freetv_full_check_interval = setInterval(() => {
+    runAutoHealthCheck("full");
+  }, FULL_INTERVAL_MS);
 
-  // Don't let the interval block Node.js from exiting
-  if (global.__freetv_health_checker_interval?.unref) {
-    global.__freetv_health_checker_interval.unref();
+  // Don't let either interval block Node.js from exiting
+  if (global.__freetv_pinned_check_interval?.unref) {
+    global.__freetv_pinned_check_interval.unref();
+  }
+  if (global.__freetv_full_check_interval?.unref) {
+    global.__freetv_full_check_interval.unref();
   }
 }
 
 /**
- * Get the last health check timestamp
+ * Get the last health check timestamp (pinned or full, whichever ran last).
  */
 export function getLastHealthCheckTime(): string | null {
   return global.__freetv_last_health_check || null;
 }
 
 /**
- * Manually trigger a health check (for admin API)
+ * Get the last FULL (all-streams) health check timestamp specifically.
+ */
+export function getLastFullHealthCheckTime(): string | null {
+  return global.__freetv_last_full_health_check || null;
+}
+
+/**
+ * Manually trigger a health check (for admin API). Defaults to a full pass.
  */
 export { runAutoHealthCheck };

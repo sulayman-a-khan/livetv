@@ -209,6 +209,17 @@ export default function HlsPlayer({
   /** Late-bound reference to `loadStream`, which is declared further down. */
   const loadStreamRef = useRef<((url: string) => void) | null>(null);
 
+  /** Latest volume/mute so `loadStream` can apply them without needing to be
+   *  recreated (and thus re-triggering a reload) every time they change. */
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const isMutedRef = useRef(isMuted);
+  isMutedRef.current = isMuted;
+  /** True once the very first stream (of this player's lifetime) has loaded —
+   *  only then do we apply the user's own volume/mute choice on every
+   *  subsequent channel switch instead of the initial sensible defaults. */
+  const hasLoadedOnceRef = useRef(false);
+
   const activeStream = streams[currentStreamIndex] || null;
 
   // Clear 5-second stall timer helper
@@ -230,12 +241,16 @@ export default function HlsPlayer({
     }
   };
 
-  // A fresh channel means a fresh set of servers to try.
+  // A fresh channel means a fresh set of servers to try. (Volume/mute are
+  // deliberately NOT reset here — they should carry over like a real remote,
+  // now that the player survives a channel switch instead of remounting.)
   useEffect(() => {
     deadServersRef.current = new Set();
     retriedCurrentRef.current = false;
     recoveringRef.current = false;
     setRecoveryPhase("idle");
+    setFailoverToast(null);
+    setShowQualityMenu(false);
     return () => {
       clearStallTimer();
       clearRecoveryTimers();
@@ -486,6 +501,9 @@ export default function HlsPlayer({
           maxBufferHole: 0.5,
           highBufferWatchdogPeriod: 2,
           nudgeMaxRetry: 6,
+          // Start fetching the next fragment before the current one finishes
+          // decoding, so a fragment boundary doesn't cause a visible micro-stall.
+          startFragPrefetch: true,
 
           // ---- Loader timeouts / retries ----
           manifestLoadingTimeOut: 10000,
@@ -513,10 +531,19 @@ export default function HlsPlayer({
           applyNetworkCap(hls);
 
           setIsLoading(false);
-          video.muted = false;
-          video.volume = 1.0;
-          setIsMuted(false);
-          setVolume(1.0);
+          // First-ever load on this player: start unmuted at full volume.
+          // Every subsequent channel switch keeps whatever the user last set,
+          // instead of snapping back to defaults like a fresh remote battery.
+          if (!hasLoadedOnceRef.current) {
+            hasLoadedOnceRef.current = true;
+            video.muted = false;
+            video.volume = 1.0;
+            setIsMuted(false);
+            setVolume(1.0);
+          } else {
+            video.muted = isMutedRef.current;
+            video.volume = volumeRef.current;
+          }
           video
             .play()
             .then(() => setIsPlaying(true))

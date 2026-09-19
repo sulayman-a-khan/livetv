@@ -55,6 +55,7 @@ export default function WatchPage() {
   const [channel, setChannel] = useState<ChannelDetails | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [pendingChannelName, setPendingChannelName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentStreamIndex, setCurrentStreamIndex] = useState(0);
 
@@ -161,6 +162,7 @@ export default function WatchPage() {
       if (requestId === latestRequestIdRef.current) {
         setInitialLoading(false);
         setIsSwitching(false);
+        setPendingChannelName(null);
       }
     }
   }, [categoryParamSlug]);
@@ -272,12 +274,14 @@ export default function WatchPage() {
       if (newChannelId === activeChannelId) return;
 
       setActiveChannelId(newChannelId);
+      const target = filteredSidebarChannels.find((c) => c._id === newChannelId);
+      setPendingChannelName(target?.name || null);
       const catQuery = currentCategoryConfig?.slug ? `?category=${currentCategoryConfig.slug}` : "";
       window.history.pushState(null, "", `/watch/${newChannelId}${catQuery}`);
 
       loadChannelData(newChannelId, false);
     },
-    [activeChannelId, currentCategoryConfig, loadChannelData]
+    [activeChannelId, currentCategoryConfig, loadChannelData, filteredSidebarChannels]
   );
 
   /**
@@ -407,7 +411,6 @@ export default function WatchPage() {
                 {/* TV Player Box */}
                 <div className="relative rounded-2xl overflow-hidden border border-slate-800/90 bg-black shadow-2xl">
                   <HlsPlayer
-                    key={channel._id}
                     channelName={channel.name}
                     streams={channel.streams}
                     currentStreamIndex={currentStreamIndex}
@@ -419,7 +422,7 @@ export default function WatchPage() {
                     <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs rounded-2xl flex items-center justify-center z-30 pointer-events-none">
                       <div className="flex items-center gap-2.5 bg-black/90 px-4 py-2.5 rounded-xl border border-slate-700 text-xs font-bold text-white shadow-2xl">
                         <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
-                        <span>Tuning into {channel.name}...</span>
+                        <span>Tuning into {pendingChannelName || channel.name}...</span>
                       </div>
                     </div>
                   )}

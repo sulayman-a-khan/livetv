@@ -39,8 +39,43 @@ export async function probeStreamUrl(
 
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
 
-    // Read initial body snippet to detect HTML error/landing pages
-    const textSnippet = (await response.text()).slice(0, 2048).toLowerCase();
+    // Read only the first ~4KB of the body ourselves, even if the server
+    // ignores our Range header and tries to hand back an entire live stream.
+    // response.text() has no size cap and would otherwise buffer the whole
+    // (potentially endless) live feed into memory until the abort timer
+    // fires, wasting bandwidth/memory on every probe of every stream.
+    const MAX_SNIFF_BYTES = 4096;
+    let textSnippet = "";
+    if (response.body) {
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let collected = 0;
+      try {
+        while (collected < MAX_SNIFF_BYTES) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) {
+            const remaining = MAX_SNIFF_BYTES - collected;
+            const piece = value.length > remaining ? value.subarray(0, remaining) : value;
+            chunks.push(piece);
+            collected += piece.length;
+          }
+        }
+      } finally {
+        // Stop the underlying connection now that we have enough to sniff —
+        // don't let it keep streaming in the background.
+        reader.cancel().catch(() => {});
+      }
+      const merged = new Uint8Array(collected);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.length;
+      }
+      textSnippet = new TextDecoder("utf-8", { fatal: false })
+        .decode(merged)
+        .toLowerCase();
+    }
 
     // 1. Explicit HTML document rejection (error pages returned as 200 OK)
     if (

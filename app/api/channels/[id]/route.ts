@@ -18,16 +18,15 @@ export async function GET(
 
     // 1. If MongoDB is connected and id is a valid 24-char ObjectId, query MongoDB
     if (conn && mongoose.isValidObjectId(id)) {
-      const channel = await Channel.findById(id).lean();
-      if (channel) {
-        // Fetch active stream links for this channel
-        const streams = await StreamLink.find({
-          channelId: id,
-          status: "active",
-        })
-          .sort({ priority: 1, latency: 1 })
-          .lean();
+      // These two queries don't depend on each other — running them in
+      // parallel instead of sequentially shaves a full round-trip off every
+      // single channel switch, which is where this lag is most noticeable.
+      const [channel, streams] = await Promise.all([
+        Channel.findById(id).lean(),
+        StreamLink.find({ channelId: id, status: "active" }).sort({ priority: 1, latency: 1 }).lean(),
+      ]);
 
+      if (channel) {
         return NextResponse.json({
           success: true,
           channel: { ...channel, logo: getChannelLogo(channel.name, channel.logo), streams },

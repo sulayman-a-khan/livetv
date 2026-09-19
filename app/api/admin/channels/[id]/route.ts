@@ -14,14 +14,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    const authHeader = req.headers.get("x-admin-secret");
-    const { searchParams } = new URL(req.url);
-    const rawSecret = authHeader || searchParams.get("secretKey") || "";
-    const secretKey = rawSecret.trim();
-
-    const expectedSecret = (process.env.ADMIN_SECRET_KEY || "supersecret123").trim();
-
-    if (!secretKey || secretKey !== expectedSecret) {
+    if (!isAuthorizedAdmin(req)) {
       return NextResponse.json(
         { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
         { status: 401 }

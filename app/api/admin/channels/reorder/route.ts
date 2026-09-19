@@ -3,25 +3,21 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import { inMemoryDb } from "@/lib/inMemoryStore";
+import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("x-admin-secret");
-    const rawSecret = authHeader || "";
-    const secretKey = rawSecret.trim();
+    const body = await req.json().catch(() => ({}));
 
-    const expectedSecret = (process.env.ADMIN_SECRET_KEY || "supersecret123").trim();
-
-    if (!secretKey || secretKey !== expectedSecret) {
+    if (!isAuthorizedAdmin(req, body.secretKey)) {
       return NextResponse.json(
         { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
         { status: 401 }
       );
     }
 
-    const body = await req.json();
     const { orderedIds } = body;
 
     if (!Array.isArray(orderedIds) || orderedIds.length === 0) {

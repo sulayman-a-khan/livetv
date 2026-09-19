@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getLastHealthCheckTime, runAutoHealthCheck } from "@/lib/autoHealthChecker";
+import { NextRequest, NextResponse } from "next/server";
+import { getLastHealthCheckTime, getLastFullHealthCheckTime, runAutoHealthCheck } from "@/lib/autoHealthChecker";
+import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,14 +10,17 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const lastCheck = getLastHealthCheckTime();
+  const lastFullCheck = getLastFullHealthCheckTime();
   const isRunning = !!global.__freetv_health_checker_started;
 
   return NextResponse.json({
     success: true,
     autoHealthChecker: {
       running: isRunning,
-      intervalMinutes: 20,
+      pinnedIntervalMinutes: 5,
+      fullIntervalHours: 12,
       lastCheckAt: lastCheck || "Not yet run",
+      lastFullCheckAt: lastFullCheck || "Not yet run",
     },
   });
 }
@@ -25,15 +29,11 @@ export async function GET() {
  * POST /api/admin/health-status
  * Manually trigger an immediate health check (requires admin key)
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const authHeader = req.headers.get("x-admin-secret");
-    const rawSecret = authHeader || body.secretKey || "";
-    const secretKey = rawSecret.trim();
-    const expectedSecret = (process.env.ADMIN_SECRET_KEY || "supersecret123").trim();
 
-    if (!secretKey || secretKey !== expectedSecret) {
+    if (!isAuthorizedAdmin(req, body.secretKey)) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
         { status: 401 }

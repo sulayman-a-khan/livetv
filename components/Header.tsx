@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Search, Tv } from "lucide-react";
+import { Search } from "lucide-react";
 
 interface HeaderProps {
   searchQuery?: string;
@@ -18,15 +18,13 @@ export default function Header({
     <header className="sticky top-0 z-50 bg-[#070d18]/90 backdrop-blur-md border-b border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-            <Tv className="w-5 h-5 text-white stroke-[2.2]" />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xl font-black tracking-tight text-white">
-              Free<span className="text-emerald-400 font-extrabold">TV</span>
-            </span>
-          </div>
+        <Link href="/" className="flex items-center group shrink-0 py-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/logo.png"
+            alt="SoluPlay"
+            className="h-7 sm:h-8 w-auto object-contain group-hover:scale-105 transition-transform"
+          />
         </Link>
 
         {/* Search Bar */}

@@ -1,5 +1,5 @@
 /**
- * FreeTV — Channel Identity Layer
+ * SoluPlay — Channel Identity Layer
  * ================================
  * Single source of truth for deciding whether two channel entries are "the same
  * channel". Every part of the system (M3U ingest, merge pass, admin edit,

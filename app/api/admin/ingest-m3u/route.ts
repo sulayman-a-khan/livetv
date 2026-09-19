@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const m3uUrl = body.m3uUrl || "";
 
     if (m3uUrl) {
-      const response = await fetch(m3uUrl, { headers: { "User-Agent": "FreeTV/1.0" } });
+      const response = await fetch(m3uUrl, { headers: { "User-Agent": "SoluPlay/1.0" } });
       if (!response.ok) {
         return NextResponse.json(
           { success: false, error: `Failed to fetch M3U URL: ${response.statusText}` },

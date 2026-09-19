@@ -5,7 +5,7 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 
-// FreeTV Channels API Route - Force Recompile for Logo Fix
+// SoluPlay Channels API Route - Force Recompile for Logo Fix
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 

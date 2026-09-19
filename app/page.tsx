@@ -61,8 +61,8 @@ export default function HomePage() {
 
               <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
                 Welcome to <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-emerald-500">
-                  FreeTV
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-300 to-emerald-400">
+                  SoluPlay
                 </span>
               </h1>
 
@@ -129,47 +129,44 @@ export default function HomePage() {
 
         {/* Category Cards Section - hidden on mobile (flag buttons are used there instead) */}
         <section className="hidden sm:block space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
+            Browse Categories
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
             {CATEGORIES.map((category) => (
               <Link
                 key={category.slug}
                 href={`/category/${category.slug}`}
-                className="group relative rounded-2xl overflow-hidden border border-slate-800/90 bg-[#0d1628] hover:border-emerald-500/60 hover:shadow-2xl hover:shadow-emerald-500/15 transition-all duration-300 flex flex-col justify-between aspect-[4/3.1] sm:aspect-[4/3.4]"
+                className="group relative rounded-2xl p-[1.5px] bg-gradient-to-br from-slate-800 via-slate-800 to-slate-800 hover:from-blue-500 hover:via-cyan-400 hover:to-emerald-400 transition-colors duration-300"
               >
-                {/* Background Artwork */}
-                <div className="absolute inset-0 z-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={category.image}
-                    alt={category.name}
-                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 filter saturate-[1.15]"
-                  />
-                  {/* Multi-layer gradient overlays for contrast and readability */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#09101f] via-[#09101f]/75 to-transparent" />
-                  <div className="absolute inset-0 bg-black/25 group-hover:bg-black/10 transition-colors duration-300" />
-                </div>
-
-                {/* Top Badge Area */}
-                <div className="relative z-10 p-4 sm:p-5">
-                  <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-slate-950/80 backdrop-blur-md border border-slate-700/80 flex items-center justify-center text-lg sm:text-xl shadow-lg group-hover:border-emerald-500/50 transition-colors">
-                    <span>{category.badge}</span>
+                <div className="relative rounded-[15px] bg-[#0b1220] overflow-hidden flex items-center gap-4 p-3.5 lg:p-4 h-full">
+                  {/* Thumbnail tile */}
+                  <div className="relative w-20 h-20 lg:w-24 lg:h-24 rounded-xl overflow-hidden shrink-0 border border-slate-800">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={category.image}
+                      alt={category.name}
+                      className="w-full h-full object-cover object-center group-hover:scale-110 transition-transform duration-500 filter saturate-[1.15]"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    <span className="absolute bottom-1 left-1 w-6 h-6 rounded-full bg-slate-950/90 backdrop-blur-sm border border-slate-700/80 flex items-center justify-center text-xs shadow-md">
+                      {category.badge}
+                    </span>
                   </div>
-                </div>
 
-                {/* Bottom Content Area & Action Button */}
-                <div className="relative z-10 p-4 sm:p-5 flex items-end justify-between gap-3 bg-gradient-to-t from-[#060b14] via-[#060b14]/90 to-transparent pt-6">
+                  {/* Text content */}
                   <div className="flex-1 min-w-0">
-                    <h2 className="text-base sm:text-lg font-black text-white tracking-tight group-hover:text-emerald-300 transition-colors">
+                    <h3 className="text-sm lg:text-base font-black text-white tracking-tight truncate group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-blue-400 group-hover:via-cyan-300 group-hover:to-emerald-400 transition-colors">
                       {category.title}
-                    </h2>
-                    <p className="text-[11px] sm:text-xs text-slate-300 font-medium line-clamp-1 mt-0.5">
+                    </h3>
+                    <p className="text-[11px] lg:text-xs text-slate-400 font-medium line-clamp-1 mt-0.5">
                       {category.subtitle}
                     </p>
                   </div>
 
-                  {/* Circular Emerald Arrow Button */}
-                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#00c978] group-hover:bg-[#00e589] text-slate-950 flex items-center justify-center shrink-0 shadow-lg shadow-emerald-500/25 group-hover:scale-105 transition-all">
-                    <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
+                  {/* Gradient arrow chip */}
+                  <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-slate-900 border border-slate-700/80 group-hover:border-transparent group-hover:bg-gradient-to-tr group-hover:from-blue-500 group-hover:via-cyan-400 group-hover:to-emerald-400 text-slate-400 group-hover:text-slate-950 flex items-center justify-center shrink-0 transition-all group-hover:scale-105">
+                    <ArrowRight className="w-4 h-4 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
                   </div>
                 </div>
               </Link>
@@ -181,7 +178,7 @@ export default function HomePage() {
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>FreeTV • 24/7 Automated Live HD Streams</span>
+          <span>SoluPlay • 24/7 Automated Live HD Streams</span>
           <div className="flex items-center gap-4 text-slate-400">
             <Link href="/category/sports-tv" className="hover:text-white">Sports</Link>
             <Link href="/category/bangladeshi-tv" className="hover:text-white">Bangladesh</Link>

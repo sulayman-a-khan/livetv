@@ -1,5 +1,5 @@
 /**
- * FreeTV — Channel Maintenance Engine
+ * SoluPlay — Channel Maintenance Engine
  * ===================================
  * Implements the four backend invariants as PURE functions over plain records:
  *

@@ -139,46 +139,30 @@ export default function CategoryPage() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Top Back to Home Button */}
-        <div>
+        {/* Back button + category name + active channel count, unified bar */}
+        <section className="flex items-center gap-3 rounded-2xl border border-slate-800/80 bg-[#0a1222] pl-3 pr-4 py-2.5 sm:py-3 shadow-lg">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors group"
+            aria-label="Back to Home"
+            className="group shrink-0 w-9 h-9 rounded-xl bg-[#0d1628] border border-slate-800 flex items-center justify-center hover:border-transparent hover:bg-gradient-to-tr hover:from-blue-500 hover:via-cyan-400 hover:to-emerald-400 transition-all"
           >
-            <div className="w-7 h-7 rounded-lg bg-[#0d1628] border border-slate-800 flex items-center justify-center group-hover:border-emerald-500 transition-colors">
-              <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-emerald-400" />
-            </div>
-            <span>Back to Home</span>
+            <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-slate-950 transition-colors" />
           </Link>
-        </div>
 
-        {/* Category Header Banner */}
-        <section className="rounded-2xl border border-slate-800/80 bg-[#0a1222] p-5 sm:p-6 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            {/* Category Round Badge / Flag */}
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-slate-900 border border-slate-700/80 flex items-center justify-center text-2xl sm:text-3xl shrink-0 shadow-lg">
-              <span>{categoryConfig.badge}</span>
-            </div>
+          <div className="w-px h-6 bg-slate-800 shrink-0" />
 
-            {/* Title & Description */}
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-                {categoryConfig.title}
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400 font-normal mt-0.5 max-w-2xl">
-                {categoryConfig.description}
-              </p>
-            </div>
-          </div>
+          <span className="text-lg shrink-0">{categoryConfig.badge}</span>
+          <h1 className="text-sm sm:text-lg font-black text-white tracking-tight truncate min-w-0">
+            {categoryConfig.title}
+          </h1>
 
-          {/* Right Channel Count Badge */}
-          <div className="shrink-0 self-start sm:self-center">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#0d172e] border border-emerald-500/40 text-emerald-400 text-xs font-bold shadow-md">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>{categoryChannels.length} Channels</span>
-            </div>
-          </div>
+          <span className="ml-auto inline-flex items-center gap-1.5 pl-3 sm:pl-4 py-1 sm:py-1.5 pr-1 sm:pr-1 rounded-full text-[11px] sm:text-xs font-bold text-emerald-400 shrink-0 border-l border-slate-800">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="hidden sm:inline">{categoryChannels.length} Active Channel{categoryChannels.length === 1 ? "" : "s"}</span>
+            <span className="sm:hidden">{categoryChannels.length}</span>
+          </span>
         </section>
+
 
         {/* In-Page Sub-Category / Genre Filter Tabs */}
         <section className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center sm:gap-3 sm:overflow-x-auto sm:scrollbar-none pb-1">
@@ -294,7 +278,7 @@ export default function CategoryPage() {
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400 mt-12">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>FreeTV • {categoryConfig.title} Stream Hub</span>
+          <span>SoluPlay • {categoryConfig.title} Stream Hub</span>
           <div className="flex items-center gap-4 text-slate-400">
             {CATEGORIES.map((c) => (
               <Link

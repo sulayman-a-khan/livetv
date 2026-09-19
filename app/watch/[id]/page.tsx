@@ -605,7 +605,7 @@ export default function WatchPage() {
       {/* Footer */}
       <footer className="hidden lg:block border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400 mt-8">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>FreeTV • {currentCategoryConfig.title} Stream</span>
+          <span>SoluPlay • {currentCategoryConfig.title} Stream</span>
           <div className="flex items-center gap-4 text-slate-400">
             {CATEGORIES.map((c) => (
               <Link

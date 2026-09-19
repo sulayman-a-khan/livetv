@@ -1,5 +1,5 @@
 /**
- * FreeTV Stream Probe Utility
+ * SoluPlay Stream Probe Utility
  * Performs deep inspection of stream links (HLS manifests, video/audio payloads)
  * to verify if a stream is genuinely playable vs returning HTML error pages or 200 OK stubs.
  */

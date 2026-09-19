@@ -1,5 +1,5 @@
 /**
- * FreeTV — Maintenance Runner (storage adapters)
+ * SoluPlay — Maintenance Runner (storage adapters)
  * ==============================================
  * Applies a `MaintenancePlan` to whichever backend is active. The rules live in
  * `channelMaintenance.ts`; this file only knows how to persist them.
@@ -23,14 +23,13 @@ import {
   planMaintenance,
 } from "./channelMaintenance";
 
-export interface MaintenanceReport {
+export type MaintenanceReport = MaintenancePlan["stats"] & {
   mode: "mongodb" | "in-memory";
   channelsBefore: number;
   channelsAfter: number;
   streamsBefore: number;
   streamsAfter: number;
-  [key: string]: any;
-}
+};
 
 /* ------------------------------------------------------------------ *
  * In-memory adapter
@@ -63,7 +62,7 @@ function applyPlanInMemory(plan: MaintenancePlan) {
   }
 
   for (const patch of plan.channelPatches) {
-    inMemoryDb.updateChannel(patch._id, patch.patch as any);
+    inMemoryDb.updateChannel(patch._id, patch.patch);
   }
 
   for (const streamId of plan.streamsToDelete) {

@@ -1,5 +1,5 @@
 /**
- * FreeTV Automatic Server-Side Health Checker
+ * SoluPlay Automatic Server-Side Health Checker
  * 
  * Runs every 20 minutes inside the Next.js server process.
  * - Probes ALL stream links for every channel

@@ -1,5 +1,5 @@
 /**
- * FreeTV Data Store & Persistence Layer
+ * SoluPlay Data Store & Persistence Layer
  * Automatically persists channels and stream links to `data/store.json`
  * so ingested playlists remain permanent even across dev server restarts and code edits.
  */

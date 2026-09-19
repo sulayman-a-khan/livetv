@@ -62,6 +62,13 @@ export default function WatchPage() {
   const listRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
 
+  // Guards against out-of-order responses: only the response matching the
+  // most recently requested channel is allowed to update state. Without this,
+  // switching channels quickly (or a slow/stale request resolving late) could
+  // overwrite the screen with an error for a channel that isn't even showing
+  // anymore, wiping out the player.
+  const latestRequestIdRef = useRef(0);
+
   // Height measurement to equalize left and right columns on desktop
   const leftColRef = useRef<HTMLDivElement>(null);
   const [leftHeight, setLeftHeight] = useState<number | null>(null);
@@ -116,6 +123,8 @@ export default function WatchPage() {
 
   // Fetch channel details
   const loadChannelData = useCallback(async (channelId: string, isInitial: boolean = false) => {
+    const requestId = ++latestRequestIdRef.current;
+
     if (isInitial) {
       setInitialLoading(true);
     } else {
@@ -126,6 +135,11 @@ export default function WatchPage() {
     try {
       const res = await fetch(`/api/channels/${channelId}`);
       const data = await res.json();
+
+      // A newer channel switch has started since this request went out —
+      // discard this response instead of letting it clobber the current screen.
+      if (requestId !== latestRequestIdRef.current) return;
+
       if (data.success && data.channel) {
         setChannel(data.channel);
         setCurrentStreamIndex(0);
@@ -141,10 +155,13 @@ export default function WatchPage() {
         setError(data.error || "Channel stream not found");
       }
     } catch {
+      if (requestId !== latestRequestIdRef.current) return;
       setError("Network error fetching stream configuration");
     } finally {
-      setInitialLoading(false);
-      setIsSwitching(false);
+      if (requestId === latestRequestIdRef.current) {
+        setInitialLoading(false);
+        setIsSwitching(false);
+      }
     }
   }, [categoryParamSlug]);
 
@@ -338,7 +355,7 @@ export default function WatchPage() {
           </div>
         )}
 
-        {!initialLoading && channel && (
+        {!initialLoading && channel && !error && (
           <div className="flex flex-col flex-1 min-h-0 gap-3 lg:grid lg:grid-cols-12 lg:gap-6 lg:items-start lg:flex-none lg:min-h-0">
             {/* ========== LEFT: Player + Channel Info Card (8 cols) ========== */}
             <div ref={leftColRef} className="lg:col-span-8 space-y-4 shrink-0">

@@ -14,7 +14,7 @@
 import { connectToDatabase } from "./db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
-import { inMemoryDb } from "./inMemoryStore";
+import { inMemoryDb, type InMemoryChannel } from "./inMemoryStore";
 import {
   MaintChannel,
   MaintStream,
@@ -62,7 +62,7 @@ function applyPlanInMemory(plan: MaintenancePlan) {
   }
 
   for (const patch of plan.channelPatches) {
-    inMemoryDb.updateChannel(patch._id, patch.patch);
+    inMemoryDb.updateChannel(patch._id, patch.patch as Partial<InMemoryChannel>);
   }
 
   for (const streamId of plan.streamsToDelete) {

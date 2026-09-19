@@ -235,11 +235,18 @@ async function runMongoHealthCheck(
  */
 const STALE_LOCK_MS = 30 * 60 * 1000;
 
+/** Shape of the single lock document, so `_id` is a plain string instead of
+ *  the driver's default ObjectId type. */
+interface HealthCheckLockDoc {
+  _id: string;
+  lockedAt?: Date;
+}
+
 async function acquireMongoLock(conn: typeof import("mongoose")): Promise<boolean> {
   const db = conn.connection.db;
   if (!db) return true; // No direct db handle available — fail open rather than block forever.
   try {
-    await db.collection("_locks").findOneAndUpdate(
+    await db.collection<HealthCheckLockDoc>("_locks").findOneAndUpdate(
       {
         _id: "auto_health_check",
         $or: [{ lockedAt: { $exists: false } }, { lockedAt: { $lt: new Date(Date.now() - STALE_LOCK_MS) } }],
@@ -258,7 +265,7 @@ async function releaseMongoLock(conn: typeof import("mongoose")): Promise<void> 
   const db = conn.connection.db;
   if (!db) return;
   try {
-    await db.collection("_locks").deleteOne({ _id: "auto_health_check" });
+    await db.collection<HealthCheckLockDoc>("_locks").deleteOne({ _id: "auto_health_check" });
   } catch {
     // Non-fatal — the lock will simply go stale and be reclaimed later.
   }
@@ -335,8 +342,8 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
         const maintenance = await runMaintenance();
         console.log(
           `[AutoHealthChecker] Maintenance: merged ${maintenance.channelsMerged}, ` +
-            `purged ${maintenance.placeholderLinksPurged} test links, ` +
-            `reordered ${maintenance.channelsReordered} channels`
+          `purged ${maintenance.placeholderLinksPurged} test links, ` +
+          `reordered ${maintenance.channelsReordered} channels`
         );
       } else if (pinnedChannelIds) {
         // Pinned pass: cheap targeted re-sort for just the channels we touched,

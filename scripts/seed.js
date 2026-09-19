@@ -1,14 +1,31 @@
 /**
- * FreeTV Seed Script - Populates MongoDB with sample Live Channels & Stream Links
- * 
+ * SoluPlay Seed Script - Populates MongoDB with sample Live Channels & Stream Links
+ *
  * Usage:
  *   node scripts/seed.js
+ *
+ * SAFETY: this script wipes the Channel and StreamLink collections before
+ * reseeding. To stop it from ever being run by accident against a live/
+ * production database, it refuses to run unless MONGODB_URI points at a
+ * local database (127.0.0.1/localhost) OR you explicitly pass --force.
  */
-
 require("dotenv").config({ path: ".env.local" });
 const mongoose = require("mongoose");
 
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/freetv";
+const FORCE = process.argv.includes("--force");
+const looksLocal = /^(mongodb:\/\/)?(127\.0\.0\.1|localhost)([:/]|$)/i.test(MONGODB_URI);
+
+if (!looksLocal && !FORCE) {
+  console.error(
+    "\nRefusing to run: MONGODB_URI does not look like a local database.\n" +
+      "This script DELETES all channels & streams before reseeding with sample data,\n" +
+      "so it must never be pointed at your live/production database by accident.\n\n" +
+      "If you really want to wipe & reseed this database, re-run with --force:\n" +
+      "  node scripts/seed.js --force\n"
+  );
+  process.exit(1);
+}
 
 const ChannelSchema = new mongoose.Schema(
   {
@@ -48,8 +65,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Cricket",
     country: "Bangladesh",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://playertest.longtailvideo.com/adaptive/bipbop/gear4/prog_index.m3u8",
     ],
   },
   {
@@ -60,8 +75,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Cricket",
     country: "Bangladesh",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://demo.unified-streaming.com/k8s/live/stable/sintel.ism/.m3u8",
     ],
   },
   {
@@ -72,8 +85,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Cricket",
     country: "India",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
     ],
   },
   {
@@ -84,8 +95,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Football",
     country: "India",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://playertest.longtailvideo.com/adaptive/bipbop/gear4/prog_index.m3u8",
     ],
   },
   {
@@ -96,8 +105,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Cricket",
     country: "Pakistan",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8",
     ],
   },
   {
@@ -108,8 +115,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "Football",
     country: "Pakistan",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-      "https://demo.unified-streaming.com/k8s/live/stable/sintel.ism/.m3u8",
     ],
   },
   {
@@ -120,7 +125,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "News",
     country: "Bangladesh",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
     ],
   },
   {
@@ -131,7 +135,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "News",
     country: "India",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
     ],
   },
   {
@@ -142,7 +145,6 @@ const SAMPLE_CHANNELS = [
     subCategory: "News",
     country: "Pakistan",
     urls: [
-      "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
     ],
   },
 ];

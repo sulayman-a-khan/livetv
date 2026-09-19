@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { getCountryFlag } from "@/lib/utils";
 import {
   X,
   Save,
@@ -254,7 +255,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             >
               {COUNTRY_OPTIONS.map((c) => (
                 <option key={c} value={c}>
-                  {c}
+                  {getCountryFlag(c)} {c}
                 </option>
               ))}
             </select>

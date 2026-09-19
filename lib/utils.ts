@@ -307,3 +307,15 @@ export function getChannelLogo(name: string, existingLogo?: string): string {
     cleanName
   )}&background=0284c7&color=ffffff&size=256&bold=true&font-size=0.3&rounded=true`;
 }
+
+/** Maps a channel/category country name to its flag emoji (falls back to a globe icon). */
+export function getCountryFlag(country?: string): string {
+  const key = (country || "").trim().toLowerCase();
+  const flags: Record<string, string> = {
+    bangladesh: "🇧🇩",
+    india: "🇮🇳",
+    pakistan: "🇵🇰",
+    global: "🌍",
+  };
+  return flags[key] || "🌐";
+}

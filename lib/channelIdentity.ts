@@ -85,6 +85,7 @@ const PLACEHOLDER_HOSTS = [
   "storage.googleapis.com/shaka-demo",
   "devstreaming-cdn.apple.com",
   "sample-videos.com",
+  "playertest.longtailvideo.com",
   "example.com",
   "example.org",
   "localhost",
@@ -105,6 +106,9 @@ const PLACEHOLDER_PATTERNS = [
   "dummy",
   "placeholder",
   "testsrc",
+  "/streamtest/",
+  "/test/master.m3u8",
+  "bipbop",
   "/test.m3u8",
   "demo.m3u8",
 ];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { getChannelLogo } from "@/lib/utils";
+import { getChannelLogo, getCountryFlag } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
 import {
   ShieldAlert,
@@ -883,7 +883,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                     <div className="truncate">
                       <span className="text-xs font-bold text-white">{ch.name}</span>
                       <span className="block text-[10px] text-slate-400">
-                        {ch.category} • {ch.country}
+                        {ch.category} • {getCountryFlag(ch.country)} {ch.country}
                       </span>
                     </div>
                   </div>
@@ -1017,7 +1017,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                 <option value="all">All Regions</option>
                 {countries.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {getCountryFlag(c)} {c}
                   </option>
                 ))}
               </select>
@@ -1062,7 +1062,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                 )}
                 {countryFilter !== "all" && (
                   <span className="px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/30 text-brand-300 text-[10px] font-medium">
-                    Region: {countryFilter}
+                    Region: {getCountryFlag(countryFilter)} {countryFilter}
                   </span>
                 )}
                 {sortBy !== "name-asc" && (
@@ -1199,7 +1199,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
                       <td className="px-2 py-2.5 align-middle">
                         <span className="inline-block px-2 py-0.5 rounded bg-slate-900 text-slate-300 font-medium text-[11px] truncate max-w-full">
-                          {ch.category} ({ch.country})
+                          {ch.category} ({getCountryFlag(ch.country)} {ch.country})
                         </span>
                       </td>
 

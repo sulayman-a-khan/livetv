@@ -24,6 +24,9 @@ export interface StreamMirror {
   latency: number;
 }
 
+/** Which of the two ping-ponged <video>/Hls instances is doing what. */
+type Slot = "A" | "B";
+
 /* ------------------------------------------------------------------
    Network-aware adaptive streaming helpers
    ------------------------------------------------------------------ */
@@ -138,6 +141,8 @@ const EXHAUSTED_HOLD_MS = 5000;
 const STABLE_PLAYBACK_MS = 8000;
 /** Buffering longer than this counts as a failure. */
 const STALL_TIMEOUT_MS = 5000;
+/** How long we give ONE mirror to start playing in the background before trying the next mirror for the channel we're tuning into. */
+const PRELOAD_MIRROR_TIMEOUT_MS = 8000;
 
 /** Overlay text shown when every server for a channel is down. */
 const ALL_SERVERS_DOWN_BN =
@@ -151,9 +156,19 @@ export default function HlsPlayer({
   onAllServersFailed,
   onStreamFailed,
 }: HlsPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  /* ------------------------------------------------------------------
+   * Dual-buffer playback: two <video>/Hls.js instances are ping-ponged.
+   * Whichever one is "front" is the one on screen and driving all of the
+   * controls / resilience-ladder state below. Switching channels loads the
+   * new stream into the hidden "back" instance; only once it is actually
+   * playing do we flip which one is on top — so the channel that's already
+   * playing never stops, and there is no black frame / spinner gap.
+   * ------------------------------------------------------------------ */
+  const videoRefA = useRef<HTMLVideoElement>(null);
+  const videoRefB = useRef<HTMLVideoElement>(null);
+  const hlsRefA = useRef<Hls | null>(null);
+  const hlsRefB = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
 
   const [internalStreamIndex, setInternalStreamIndex] = useState(0);
   const isControlled = controlledStreamIndex !== undefined;
@@ -167,6 +182,7 @@ export default function HlsPlayer({
     [isControlled, onStreamIndexChange]
   );
 
+  // ---- Player chrome state (always describes whichever slot is FRONT) ----
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1.0);
@@ -174,7 +190,7 @@ export default function HlsPlayer({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [failoverToast, setFailoverToast] = useState<string | null>(null);
 
-  // ---- Adaptive quality state ----
+  // ---- Adaptive quality state (front slot only) ----
   const [levels, setLevels] = useState<{ index: number; height: number; bitrate: number }[]>([]);
   /** -1 = AUTO (network adaptive), otherwise a manually pinned level index */
   const [selectedLevel, setSelectedLevel] = useState(-1);
@@ -186,30 +202,23 @@ export default function HlsPlayer({
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ---- Resilience ladder state ----
+  // ---- Resilience ladder state (front slot only) ----
   /** idle → retrying (1s) → switching (5s) → exhausted (all servers dead) */
   const [recoveryPhase, setRecoveryPhase] = useState<
     "idle" | "retrying" | "switching" | "exhausted"
   >("idle");
-
   const stallTimerRef = useRef<NodeJS.Timeout | null>(null);
   const recoveryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const stableTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  /** Server indexes already proven dead for this channel. */
+  /** Server indexes (within `displayedMirrors`) already proven dead for the on-screen channel. */
   const deadServersRef = useRef<Set<number>>(new Set());
   /** Whether the instant 1s retry has been spent on the current server. */
   const retriedCurrentRef = useRef(false);
   /** Guards against two failure handlers firing for the same breakage. */
   const recoveringRef = useRef(false);
-  /** Latest values for use inside timers without re-creating them. */
-  const currentIndexRef = useRef(currentStreamIndex);
-  currentIndexRef.current = currentStreamIndex;
 
-  /** Late-bound reference to `loadStream`, which is declared further down. */
-  const loadStreamRef = useRef<((url: string) => void) | null>(null);
-
-  /** Latest volume/mute so `loadStream` can apply them without needing to be
+  /** Latest volume/mute so loaders can apply them without needing to be
    *  recreated (and thus re-triggering a reload) every time they change. */
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
@@ -220,7 +229,45 @@ export default function HlsPlayer({
    *  subsequent channel switch instead of the initial sensible defaults. */
   const hasLoadedOnceRef = useRef(false);
 
-  const activeStream = streams[currentStreamIndex] || null;
+  // ---- Which slot is on screen right now, and what it's actually playing ----
+  const [frontSlot, setFrontSlot] = useState<Slot>("A");
+  const frontSlotRef = useRef<Slot>("A");
+  const [displayedMirrors, setDisplayedMirrors] = useState<StreamMirror[]>([]);
+  const displayedMirrorsRef = useRef<StreamMirror[]>([]);
+  const [displayedIndex, setDisplayedIndex] = useState(0);
+  const displayedIndexRef = useRef(0);
+  /** The mirror _id currently applied to the front slot — the single source of
+   *  truth used to decide whether an incoming `streams`/`currentStreamIndex`
+   *  change is a real switch or just a redundant re-render. */
+  const lastAppliedStreamIdRef = useRef<string | null>(null);
+  const frontEverLoadedRef = useRef(false);
+  const activeDisplayedStream = displayedMirrors[displayedIndex] || null;
+
+  // ---- Background "tuning into the next channel" state ----
+  const [switching, setSwitching] = useState(false);
+  const [pendingChannelLabel, setPendingChannelLabel] = useState<string | null>(null);
+  const [switchFailedMsg, setSwitchFailedMsg] = useState<string | null>(null);
+  const switchGenerationRef = useRef(0);
+  const pendingStreamsRef = useRef<StreamMirror[]>([]);
+  const pendingChannelNameRef = useRef<string>("");
+  const pendingMirrorOrderRef = useRef<StreamMirror[]>([]);
+  const preloadAttemptIndexRef = useRef(0);
+  const preloadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const switchFailTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ---- Fullscreen state ----
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fsGuardPushedRef = useRef(false);
+
+  /** Late-bound refs so functions declared earlier can call ones declared
+   *  later without circular useCallback dependencies (same pattern the
+   *  resilience ladder already relies on). */
+  const loadIntoSlotRef = useRef<
+    ((slot: Slot, url: string, opts: { front: boolean; generation?: number }) => void) | null
+  >(null);
+  const attemptPreloadRef = useRef<((generation: number) => void) | null>(null);
+  const commitSwapRef = useRef<((slot: Slot) => void) | null>(null);
+  const failPreloadAttemptRef = useRef<((slot: Slot) => void) | null>(null);
 
   // Clear 5-second stall timer helper
   const clearStallTimer = () => {
@@ -241,21 +288,34 @@ export default function HlsPlayer({
     }
   };
 
-  // A fresh channel means a fresh set of servers to try. (Volume/mute are
-  // deliberately NOT reset here — they should carry over like a real remote,
-  // now that the player survives a channel switch instead of remounting.)
-  useEffect(() => {
-    deadServersRef.current = new Set();
-    retriedCurrentRef.current = false;
-    recoveringRef.current = false;
-    setRecoveryPhase("idle");
-    setFailoverToast(null);
-    setShowQualityMenu(false);
-    return () => {
-      clearStallTimer();
-      clearRecoveryTimers();
-    };
-  }, [streams]);
+  const getVideoEl = useCallback(
+    (slot: Slot) => (slot === "A" ? videoRefA.current : videoRefB.current),
+    []
+  );
+  const getHlsRefObj = useCallback((slot: Slot) => (slot === "A" ? hlsRefA : hlsRefB), []);
+
+  /** Tears down whatever a slot is doing — used both to retire the old front
+   *  after a successful swap and to abandon a failed preload attempt. */
+  const cleanupSlot = useCallback(
+    (slot: Slot) => {
+      const hlsRefObj = getHlsRefObj(slot);
+      if (hlsRefObj.current) {
+        hlsRefObj.current.destroy();
+        hlsRefObj.current = null;
+      }
+      const video = getVideoEl(slot);
+      if (video) {
+        try {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [getHlsRefObj, getVideoEl]
+  );
 
   /** Tells the backend a link is down so it can be hidden from the catalogue. */
   const reportBrokenStream = useCallback(
@@ -271,20 +331,21 @@ export default function HlsPlayer({
     [onStreamFailed]
   );
 
-  /** Reloads the CURRENT link in place — step 1 of the ladder. */
+  /** Reloads the CURRENT front link in place — step 1 of the ladder. */
   const reloadCurrentStream = useCallback(() => {
-    const url = streams[currentIndexRef.current]?.url;
-    if (url) loadStreamRef.current?.(url);
-  }, [streams]);
+    const url = displayedMirrorsRef.current[displayedIndexRef.current]?.url;
+    if (url) loadIntoSlotRef.current?.(frontSlotRef.current, url, { front: true });
+  }, []);
 
   /**
-   * Moves to the next link that hasn't already proven dead — step 2. Returns
-   * false when every server has been exhausted.
+   * Moves the FRONT slot to the next link that hasn't already proven dead —
+   * step 2. Returns false when every server has been exhausted.
    */
   const advanceToNextServer = useCallback((): boolean => {
-    const total = streams.length;
+    const mirrors = displayedMirrorsRef.current;
+    const total = mirrors.length;
     for (let offset = 1; offset <= total; offset++) {
-      const candidate = (currentIndexRef.current + offset) % total;
+      const candidate = (displayedIndexRef.current + offset) % total;
       if (!deadServersRef.current.has(candidate)) {
         console.warn(`[Resilience] Switching to Server ${candidate + 1}`);
         retriedCurrentRef.current = false;
@@ -292,15 +353,20 @@ export default function HlsPlayer({
         setRecoveryPhase("idle");
         setFailoverToast(`Switching to Server ${candidate + 1}...`);
         setTimeout(() => setFailoverToast(null), 4000);
+        displayedIndexRef.current = candidate;
+        setDisplayedIndex(candidate);
+        lastAppliedStreamIdRef.current = mirrors[candidate]?._id || lastAppliedStreamIdRef.current;
         setCurrentStreamIndex(candidate);
+        loadIntoSlotRef.current?.(frontSlotRef.current, mirrors[candidate].url, { front: true });
         return true;
       }
     }
     return false;
-  }, [streams, setCurrentStreamIndex]);
+  }, [setCurrentStreamIndex]);
 
   /**
-   * The resilience ladder. Every playback breakage funnels through here:
+   * The resilience ladder. Every playback breakage on the FRONT (on-screen)
+   * slot funnels through here:
    *
    *   1. INSTANT RETRY  — reload the same link after 1s (covers transient CDN
    *                       hiccups, token refreshes and brief network drops).
@@ -319,7 +385,8 @@ export default function HlsPlayer({
       clearStallTimer();
       clearRecoveryTimers();
 
-      const index = currentIndexRef.current;
+      const index = displayedIndexRef.current;
+      const mirrors = displayedMirrorsRef.current;
       console.warn(`[Resilience] Server ${index + 1} failed: ${reason}`);
 
       // ---- Step 1: instant retry of the same link ----
@@ -339,9 +406,9 @@ export default function HlsPlayer({
 
       // ---- The retry failed too: this server is dead ----
       deadServersRef.current.add(index);
-      reportBrokenStream(streams[index]?._id);
+      reportBrokenStream(mirrors[index]?._id);
 
-      const hasUntriedServer = streams.some((_, i) => !deadServersRef.current.has(i));
+      const hasUntriedServer = mirrors.some((_, i) => !deadServersRef.current.has(i));
 
       if (hasUntriedServer) {
         // ---- Step 2: cool off, then switch servers ----
@@ -362,7 +429,7 @@ export default function HlsPlayer({
       setFailoverToast(null);
       setIsLoading(false);
     },
-    [streams, reloadCurrentStream, advanceToNextServer, reportBrokenStream]
+    [reloadCurrentStream, advanceToNextServer, reportBrokenStream]
   );
 
   /**
@@ -427,18 +494,18 @@ export default function HlsPlayer({
     if (!conn?.addEventListener) return;
 
     const onChange = () => {
-      const hls = hlsRef.current;
+      const hls = getHlsRefObj(frontSlotRef.current).current;
       if (hls && selectedLevel === -1) applyNetworkCap(hls);
       else setNetLabel(readNetworkInfo().label);
     };
 
     conn.addEventListener("change", onChange);
     return () => conn.removeEventListener?.("change", onChange);
-  }, [applyNetworkCap, selectedLevel]);
+  }, [applyNetworkCap, selectedLevel, getHlsRefObj]);
 
-  /** Manual quality override from the picker. -1 puts it back on AUTO. */
+  /** Manual quality override from the picker (acts on the FRONT slot). */
   const handleSelectQuality = (levelIndex: number) => {
-    const hls = hlsRef.current;
+    const hls = getHlsRefObj(frontSlotRef.current).current;
     setSelectedLevel(levelIndex);
     setShowQualityMenu(false);
     if (!hls) return;
@@ -453,26 +520,34 @@ export default function HlsPlayer({
     }
   };
 
-  // Initialize HLS.js or native HTML5 video player
-  const loadStream = useCallback(
-    (streamUrl: string) => {
-      clearStallTimer();
-      setIsLoading(true);
-      setErrorMsg(null);
-
-      const video = videoRef.current;
+  /**
+   * Unified loader for EITHER slot. `opts.front` decides how events are
+   * handled: the front slot drives all the visible player chrome and the
+   * full resilience ladder; the back slot is a silent, muted, low-quality
+   * pre-buffer whose only job is to prove a mirror works before it's shown.
+   */
+  const loadIntoSlot = useCallback(
+    (slot: Slot, url: string, opts: { front: boolean; generation?: number }) => {
+      const video = getVideoEl(slot);
       if (!video) return;
 
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
+      const hlsRefObj = getHlsRefObj(slot);
+      if (hlsRefObj.current) {
+        hlsRefObj.current.destroy();
+        hlsRefObj.current = null;
+      }
+
+      if (opts.front) {
+        clearStallTimer();
+        setIsLoading(true);
+        setErrorMsg(null);
       }
 
       if (Hls.isSupported()) {
         // Seed the ABR controller with what the browser knows about the
         // current connection so the very first segment is already the right size.
         const net = readNetworkInfo();
-        setNetLabel(net.label);
+        if (opts.front) setNetLabel(net.label);
         const isSlow = net.bandwidth < 1_500_000;
 
         const hls = new Hls({
@@ -514,54 +589,73 @@ export default function HlsPlayer({
           fragLoadingMaxRetry: 6,
         });
 
-        hlsRef.current = hls;
-        hls.loadSource(streamUrl);
+        hlsRefObj.current = hls;
+        hls.loadSource(url);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          // Build the quality ladder for the manual picker
-          const parsed = hls.levels.map((l, i) => ({
-            index: i,
-            height: l.height || Math.round((l.bitrate || 0) / 3000),
-            bitrate: l.bitrate || 0,
-          }));
-          setLevels(parsed);
-          setSelectedLevel(-1);
-          hls.currentLevel = -1; // AUTO
-          applyNetworkCap(hls);
+          if (opts.front) {
+            // Build the quality ladder for the manual picker
+            const parsed = hls.levels.map((l, i) => ({
+              index: i,
+              height: l.height || Math.round((l.bitrate || 0) / 3000),
+              bitrate: l.bitrate || 0,
+            }));
+            setLevels(parsed);
+            setSelectedLevel(-1);
+            hls.currentLevel = -1; // AUTO
+            applyNetworkCap(hls);
+            setIsLoading(false);
 
-          setIsLoading(false);
-          // First-ever load on this player: start unmuted at full volume.
-          // Every subsequent channel switch keeps whatever the user last set,
-          // instead of snapping back to defaults like a fresh remote battery.
-          if (!hasLoadedOnceRef.current) {
-            hasLoadedOnceRef.current = true;
-            video.muted = false;
-            video.volume = 1.0;
-            setIsMuted(false);
-            setVolume(1.0);
+            // First-ever load on this player: start unmuted at full volume.
+            // Every subsequent channel switch keeps whatever the user last set,
+            // instead of snapping back to defaults like a fresh remote battery.
+            if (!hasLoadedOnceRef.current) {
+              hasLoadedOnceRef.current = true;
+              video.muted = false;
+              video.volume = 1.0;
+              setIsMuted(false);
+              setVolume(1.0);
+            } else {
+              video.muted = isMutedRef.current;
+              video.volume = volumeRef.current;
+            }
           } else {
-            video.muted = isMutedRef.current;
-            video.volume = volumeRef.current;
+            // Pre-buffering in the background: always muted (never audible
+            // until it's promoted), and capped to the lowest rendition so it
+            // doesn't compete for bandwidth with the channel actually on screen.
+            video.muted = true;
+            if (hls.levels.length > 0) {
+              const lowest = hls.levels.reduce(
+                (best, l, i) => ((l.height || 0) < (hls.levels[best].height || 0) ? i : best),
+                0
+              );
+              hls.autoLevelCapping = lowest;
+              hls.currentLevel = lowest;
+            }
           }
-          video
-            .play()
-            .then(() => setIsPlaying(true))
-            .catch((err) => {
+
+          video.play().catch((err) => {
+            if (opts.front) {
               console.warn("[Autoplay warning]", err);
-            });
+            } else {
+              failPreloadAttemptRef.current?.(slot);
+            }
+          });
         });
 
         // Keep the on-screen quality badge in sync with what ABR picked
         hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+          if (slot !== frontSlotRef.current) return;
           const lvl = hls.levels[data.level];
           if (lvl) setActiveLevelHeight(lvl.height || null);
         });
 
-        // 5-second Smart Auto-Failover on Network/Media Error
+        // Smart Auto-Failover on Network/Media Error
         hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data.fatal) return;
           console.warn("[HLS Event Error]:", data.type, data.details);
-          if (data.fatal) {
+          if (opts.front) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 handleStreamFailure("network error / link offline");
@@ -573,77 +667,284 @@ export default function HlsPlayer({
                 handleStreamFailure("fatal video playback error");
                 break;
             }
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            failPreloadAttemptRef.current?.(slot);
           }
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         // Native Safari HLS support
-        video.src = streamUrl;
-        video.play().then(() => setIsPlaying(true));
-      } else {
+        video.muted = opts.front ? isMutedRef.current : true;
+        video.src = url;
+        video
+          .play()
+          .then(() => {
+            if (opts.front) setIsPlaying(true);
+          })
+          .catch(() => {
+            if (!opts.front) failPreloadAttemptRef.current?.(slot);
+          });
+        if (opts.front) setIsLoading(false);
+      } else if (opts.front) {
         setErrorMsg("HLS streaming is not supported in your browser.");
         setIsLoading(false);
+      } else {
+        failPreloadAttemptRef.current?.(slot);
       }
     },
-    [handleStreamFailure, applyNetworkCap]
+    [applyNetworkCap, handleStreamFailure, getVideoEl, getHlsRefObj]
+  );
+  loadIntoSlotRef.current = loadIntoSlot;
+
+  /** A background mirror attempt failed — try the next mirror in the queue. */
+  const failPreloadAttempt = useCallback(
+    (slot: Slot) => {
+      if (slot === frontSlotRef.current) return; // safety: never abandon a live front this way
+      cleanupSlot(slot);
+      preloadAttemptIndexRef.current += 1;
+      attemptPreloadRef.current?.(switchGenerationRef.current);
+    },
+    [cleanupSlot]
+  );
+  failPreloadAttemptRef.current = failPreloadAttempt;
+
+  /** Tries the next candidate mirror for the channel we're tuning into. */
+  const attemptPreload = useCallback(
+    (generation: number) => {
+      if (generation !== switchGenerationRef.current) return; // superseded by a newer switch
+
+      const order = pendingMirrorOrderRef.current;
+      const idx = preloadAttemptIndexRef.current;
+      const mirror = order[idx];
+      const backSlot: Slot = frontSlotRef.current === "A" ? "B" : "A";
+
+      if (!mirror) {
+        // Every mirror for the target channel failed — abandon the switch and
+        // stay on whatever is already playing.
+        cleanupSlot(backSlot);
+        setSwitching(false);
+        setPendingChannelLabel(null);
+        setSwitchFailedMsg(
+          `Couldn't tune into ${pendingChannelNameRef.current || "that channel"} right now`
+        );
+        if (switchFailTimeoutRef.current) clearTimeout(switchFailTimeoutRef.current);
+        switchFailTimeoutRef.current = setTimeout(() => setSwitchFailedMsg(null), 3500);
+        return;
+      }
+
+      if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
+      loadIntoSlot(backSlot, mirror.url, { front: false, generation });
+
+      // Don't let one hung mirror stall the switch forever.
+      preloadTimeoutRef.current = setTimeout(() => {
+        if (generation !== switchGenerationRef.current) return;
+        preloadAttemptIndexRef.current += 1;
+        cleanupSlot(backSlot);
+        attemptPreloadRef.current?.(generation);
+      }, PRELOAD_MIRROR_TIMEOUT_MS);
+    },
+    [loadIntoSlot, cleanupSlot]
+  );
+  attemptPreloadRef.current = attemptPreload;
+
+  /** The back slot is confirmed playing — flip it to the front, instantly and invisibly. */
+  const commitSwap = useCallback(
+    (slot: Slot) => {
+      if (preloadTimeoutRef.current) {
+        clearTimeout(preloadTimeoutRef.current);
+        preloadTimeoutRef.current = null;
+      }
+
+      const video = getVideoEl(slot);
+      if (video) {
+        video.muted = isMutedRef.current;
+        video.volume = volumeRef.current;
+      }
+
+      const oldFront = frontSlotRef.current;
+      const mirrors = pendingStreamsRef.current;
+      const appliedMirror = pendingMirrorOrderRef.current[preloadAttemptIndexRef.current];
+      const appliedIndex = Math.max(
+        0,
+        mirrors.findIndex((m) => m._id === appliedMirror?._id)
+      );
+
+      frontSlotRef.current = slot;
+      setFrontSlot(slot);
+
+      displayedMirrorsRef.current = mirrors;
+      setDisplayedMirrors(mirrors);
+      displayedIndexRef.current = appliedIndex;
+      setDisplayedIndex(appliedIndex);
+      lastAppliedStreamIdRef.current = appliedMirror?._id || lastAppliedStreamIdRef.current;
+
+      // Fresh resilience ladder for the channel that's now on screen.
+      deadServersRef.current = new Set();
+      retriedCurrentRef.current = false;
+      recoveringRef.current = false;
+      clearStallTimer();
+      clearRecoveryTimers();
+      setRecoveryPhase("idle");
+      setFailoverToast(null);
+      setShowQualityMenu(false);
+
+      const hls = getHlsRefObj(slot).current;
+      if (hls) {
+        const parsed = hls.levels.map((l, i) => ({
+          index: i,
+          height: l.height || Math.round((l.bitrate || 0) / 3000),
+          bitrate: l.bitrate || 0,
+        }));
+        setLevels(parsed);
+        setSelectedLevel(-1);
+        hls.currentLevel = -1;
+        applyNetworkCap(hls); // lift the "cheap preload" cap now that it's front
+        setActiveLevelHeight(hls.levels[hls.currentLevel]?.height || null);
+      }
+
+      setIsPlaying(true);
+      setIsLoading(false);
+      setSwitching(false);
+      setPendingChannelLabel(null);
+      setSwitchFailedMsg(null);
+
+      setCurrentStreamIndex(appliedIndex);
+
+      // The old front is no longer needed — free it up as the next back slot.
+      cleanupSlot(oldFront);
+    },
+    [getVideoEl, getHlsRefObj, cleanupSlot, applyNetworkCap, setCurrentStreamIndex]
+  );
+  commitSwapRef.current = commitSwap;
+
+  /**
+   * Single entry point for "the stream that should be showing changed" —
+   * whether that's a brand-new channel from the sidebar or a manual mirror
+   * pick within the same channel. The very first stream this player ever
+   * shows loads directly (nothing to preserve); every switch after that
+   * pre-buffers in the background and crossfades in once ready.
+   */
+  const requestSwitch = useCallback(
+    (target: StreamMirror, fullMirrors: StreamMirror[], label: string) => {
+      const generation = ++switchGenerationRef.current;
+
+      if (!frontEverLoadedRef.current) {
+        frontEverLoadedRef.current = true;
+        lastAppliedStreamIdRef.current = target._id;
+        displayedMirrorsRef.current = fullMirrors;
+        setDisplayedMirrors(fullMirrors);
+        const idx = Math.max(
+          0,
+          fullMirrors.findIndex((m) => m._id === target._id)
+        );
+        displayedIndexRef.current = idx;
+        setDisplayedIndex(idx);
+        deadServersRef.current = new Set();
+        retriedCurrentRef.current = false;
+        recoveringRef.current = false;
+        setRecoveryPhase("idle");
+        loadIntoSlot(frontSlotRef.current, target.url, { front: true, generation });
+        return;
+      }
+
+      setSwitching(true);
+      setPendingChannelLabel(label);
+      setSwitchFailedMsg(null);
+      pendingStreamsRef.current = fullMirrors;
+      pendingChannelNameRef.current = label;
+      pendingMirrorOrderRef.current = [target, ...fullMirrors.filter((m) => m._id !== target._id)];
+      preloadAttemptIndexRef.current = 0;
+      attemptPreloadRef.current?.(generation);
+    },
+    [loadIntoSlot]
   );
 
-  // Publish loadStream so the resilience ladder (declared above it) can reload
-  // the current link without a circular dependency between the two callbacks.
-  loadStreamRef.current = loadStream;
-
+  // Fires whenever the parent asks for a different channel/mirror. Guarded so
+  // it only acts on genuine changes — not re-renders, and not the ladder's own
+  // internal index updates (those already applied directly to the front slot).
   useEffect(() => {
-    if (activeStream?.url) {
-      loadStream(activeStream.url);
-    }
+    if (!streams || streams.length === 0) return;
+    const target = streams[currentStreamIndex] || streams[0];
+    if (!target) return;
+    if (target._id === lastAppliedStreamIdRef.current) return;
+    requestSwitch(target, streams, channelName);
+  }, [streams, currentStreamIndex, channelName, requestSwitch]);
 
+  // Full teardown on unmount only.
+  useEffect(() => {
     return () => {
       clearStallTimer();
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      clearRecoveryTimers();
+      if (preloadTimeoutRef.current) clearTimeout(preloadTimeoutRef.current);
+      if (switchFailTimeoutRef.current) clearTimeout(switchFailTimeoutRef.current);
+      cleanupSlot("A");
+      cleanupSlot("B");
     };
-  }, [activeStream, loadStream]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Buffering longer than STALL_TIMEOUT_MS is treated as a failure and enters
-   * the resilience ladder (instant retry first, server switch second).
+   * the resilience ladder — but only for the FRONT slot. A back slot buffering
+   * while it warms up is completely normal.
    */
-  const handleWaiting = () => {
+  const handleSlotWaiting = (slot: Slot) => {
+    if (slot !== frontSlotRef.current) return;
     if (recoveryPhase === "exhausted") return;
     setIsLoading(true);
     clearStallTimer();
-
     stallTimerRef.current = setTimeout(() => {
       handleStreamFailure("stalled/buffering for > 5s");
     }, STALL_TIMEOUT_MS);
   };
 
   /**
-   * Playback resumed. The ladder is only fully reset once the link has run
-   * uninterrupted for STABLE_PLAYBACK_MS — that is what makes the player
-   * "stay on the new server once playing" instead of drifting back.
+   * Playback resumed. If this is the front slot, the ladder is only fully
+   * reset once the link has run uninterrupted for STABLE_PLAYBACK_MS. If this
+   * is the BACK slot, "playing" is exactly the signal we've been waiting for —
+   * commit the swap right now, instantly and invisibly.
    */
-  const handlePlaying = () => {
-    setIsLoading(false);
-    setIsPlaying(true);
-    clearStallTimer();
-    clearRecoveryTimers();
-    recoveringRef.current = false;
-    setFailoverToast(null);
-    if (recoveryPhase !== "idle") setRecoveryPhase("idle");
+  const handleSlotPlaying = (slot: Slot) => {
+    if (slot === frontSlotRef.current) {
+      setIsLoading(false);
+      setIsPlaying(true);
+      clearStallTimer();
+      clearRecoveryTimers();
+      recoveringRef.current = false;
+      setFailoverToast(null);
+      if (recoveryPhase !== "idle") setRecoveryPhase("idle");
 
-    stableTimerRef.current = setTimeout(() => {
-      // Proven healthy: give this server a fresh instant-retry allowance and
-      // forget it was ever marked dead.
-      retriedCurrentRef.current = false;
-      deadServersRef.current.delete(currentIndexRef.current);
-    }, STABLE_PLAYBACK_MS);
+      stableTimerRef.current = setTimeout(() => {
+        retriedCurrentRef.current = false;
+        deadServersRef.current.delete(displayedIndexRef.current);
+      }, STABLE_PLAYBACK_MS);
+    } else {
+      commitSwapRef.current?.(slot);
+    }
   };
 
-  const handlePause = () => {
+  const handleSlotPause = (slot: Slot) => {
+    if (slot !== frontSlotRef.current) return;
     setIsPlaying(false);
     clearStallTimer();
+  };
+
+  const handleSlotNativeError = (slot: Slot) => {
+    if (slot === frontSlotRef.current) {
+      handleStreamFailure("media stream error");
+    } else {
+      failPreloadAttemptRef.current?.(slot);
+    }
+  };
+
+  /** Manual mirror pick from the on-player server list (desktop). */
+  const handleManualServerSelect = (idx: number) => {
+    const mirrors = displayedMirrorsRef.current;
+    if (idx === displayedIndexRef.current) return;
+    const target = mirrors[idx];
+    if (!target) return;
+    requestSwitch(target, mirrors, channelName);
   };
 
   /** Starts the 3s countdown after which the overlay controls fade out. */
@@ -676,7 +977,7 @@ export default function HlsPlayer({
   }, [isPlaying, isLoading, errorMsg, showQualityMenu, scheduleControlsHide]);
 
   const togglePlay = () => {
-    const video = videoRef.current;
+    const video = getVideoEl(frontSlotRef.current);
     if (!video) return;
     if (isPlaying) {
       video.pause();
@@ -699,7 +1000,7 @@ export default function HlsPlayer({
   };
 
   const toggleMute = () => {
-    const video = videoRef.current;
+    const video = getVideoEl(frontSlotRef.current);
     if (!video) return;
     video.muted = !isMuted;
     setIsMuted(!isMuted);
@@ -708,20 +1009,75 @@ export default function HlsPlayer({
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
-    if (videoRef.current) {
-      videoRef.current.volume = val;
-      videoRef.current.muted = val === 0;
+    const video = getVideoEl(frontSlotRef.current);
+    if (video) {
+      video.volume = val;
+      video.muted = val === 0;
       setIsMuted(val === 0);
     }
   };
 
+  // ------------------------------------------------------------------
+  // Fullscreen: keep `isFullscreen` in sync with the real browser state,
+  // release the orientation lock on exit, and let a hardware/gesture back
+  // press close fullscreen first instead of leaving the page.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    const onFsChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+      if (!active) {
+        fsGuardPushedRef.current = false;
+        const so = screen.orientation as ScreenOrientation & { unlock?: () => void };
+        so?.unlock?.();
+      }
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    // A throwaway history entry is pushed the moment fullscreen opens (see
+    // toggleFullscreen). This means the first back-press just exits
+    // fullscreen — the same "back closes the overlay first" behaviour users
+    // expect from every native video app — instead of navigating away.
+    const onPopState = () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // On phones/tablets, rotating to landscape is the universal "go widescreen"
+  // gesture for a video app — mirror that instead of requiring a button tap.
+  useEffect(() => {
+    const handleOrientation = () => {
+      if (window.innerWidth >= 1024) return; // desktop already shows the full player
+      const isLandscape = window.matchMedia("(orientation: landscape)").matches;
+      if (isLandscape && !document.fullscreenElement) {
+        toggleFullscreen();
+      } else if (!isLandscape && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    window.addEventListener("orientationchange", handleOrientation);
+    return () => window.removeEventListener("orientationchange", handleOrientation);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const toggleFullscreen = () => {
     // Fullscreen the whole frame (not just the <video>) so the custom
     // controls and quality picker stay usable on mobile.
-    const target = containerRef.current || videoRef.current;
-    const video = videoRef.current as (HTMLVideoElement & {
-      webkitEnterFullscreen?: () => void;
-    }) | null;
+    const target = containerRef.current;
+    const video = getVideoEl(frontSlotRef.current) as
+      | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+      | null;
     if (!target) return;
 
     if (document.fullscreenElement) {
@@ -729,8 +1085,21 @@ export default function HlsPlayer({
       return;
     }
 
+    const afterEnter = () => {
+      if (!fsGuardPushedRef.current) {
+        fsGuardPushedRef.current = true;
+        window.history.pushState({ __fsGuard: true }, "");
+      }
+      const so = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      so?.lock?.("landscape").catch(() => {
+        /* not supported on this device (e.g. iOS Safari) — ignore */
+      });
+    };
+
     if (target.requestFullscreen) {
-      target.requestFullscreen().catch(() => {
+      target.requestFullscreen().then(afterEnter).catch(() => {
         // iOS Safari only allows fullscreen on the video element itself
         video?.webkitEnterFullscreen?.();
       });
@@ -744,25 +1113,46 @@ export default function HlsPlayer({
       {/* Video Container Frame */}
       <div
         ref={containerRef}
-        className="relative aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none rounded-2xl bg-black overflow-hidden border border-slate-800 shadow-2xl group"
+        className={`relative bg-black overflow-hidden group ${
+          isFullscreen
+            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none rounded-none border-0"
+            : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none rounded-2xl border border-slate-800 shadow-2xl"
+        }`}
         onMouseMove={revealControls}
         onMouseLeave={() => {
           if (isPlaying && !isLoading && !errorMsg && !showQualityMenu) setControlsVisible(false);
         }}
         onTouchStart={revealControls}
       >
+        {/* Slot A */}
         <video
-          ref={videoRef}
-          className="w-full h-full object-contain cursor-pointer"
-          onClick={handleVideoClick}
-          onWaiting={handleWaiting}
-          onPlaying={handlePlaying}
-          onPause={handlePause}
-          onError={() => handleStreamFailure("media stream error")}
+          ref={videoRefA}
+          className={`absolute inset-0 w-full h-full object-contain cursor-pointer transition-opacity duration-200 ${
+            frontSlot === "A" ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
+          }`}
+          onClick={frontSlot === "A" ? handleVideoClick : undefined}
+          onWaiting={() => handleSlotWaiting("A")}
+          onPlaying={() => handleSlotPlaying("A")}
+          onPause={() => handleSlotPause("A")}
+          onError={() => handleSlotNativeError("A")}
+          playsInline
+        />
+        {/* Slot B */}
+        <video
+          ref={videoRefB}
+          className={`absolute inset-0 w-full h-full object-contain cursor-pointer transition-opacity duration-200 ${
+            frontSlot === "B" ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
+          }`}
+          onClick={frontSlot === "B" ? handleVideoClick : undefined}
+          onWaiting={() => handleSlotWaiting("B")}
+          onPlaying={() => handleSlotPlaying("B")}
+          onPause={() => handleSlotPause("B")}
+          onError={() => handleSlotNativeError("B")}
           playsInline
         />
 
-        {/* Loading Overlay */}
+        {/* Loading Overlay — only for the very first stream this player ever shows,
+            or if the front channel itself stalls later. Never shown for a background switch. */}
         {isLoading && (
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-20">
             <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin" />
@@ -780,12 +1170,15 @@ export default function HlsPlayer({
             <p className="text-xs text-slate-400 max-w-md mb-4">{errorMsg}</p>
             <div className="flex gap-2">
               <button
-                onClick={() => activeStream && loadStream(activeStream.url)}
+                onClick={() => {
+                  const m = displayedMirrorsRef.current[displayedIndexRef.current];
+                  if (m) loadIntoSlot(frontSlotRef.current, m.url, { front: true });
+                }}
                 className="px-4 py-2 bg-[#00c978] hover:bg-[#00db84] text-slate-950 rounded-xl text-xs font-bold transition-colors shadow-lg"
               >
                 Retry Link
               </button>
-              {streams.length > 1 && (
+              {displayedMirrors.length > 1 && (
                 <button
                   onClick={() => {
                     retriedCurrentRef.current = true;
@@ -834,6 +1227,23 @@ export default function HlsPlayer({
           </div>
         )}
 
+        {/* ===== Tuning overlay: shown WHILE the currently-playing channel stays
+            fully visible underneath, and cleared the instant the new one is
+            actually ready — no black screen, no interruption. ===== */}
+        {switching && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+            <div className="flex items-center gap-2.5 bg-black/85 backdrop-blur-sm px-4 py-2 rounded-xl border border-emerald-500/40 text-xs font-bold text-white shadow-2xl">
+              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+              <span>Tuning into {pendingChannelLabel || "next channel"}...</span>
+            </div>
+          </div>
+        )}
+        {switchFailedMsg && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-red-950/95 text-red-200 text-xs font-bold px-4 py-2 rounded-xl shadow-2xl border border-red-500/40">
+            {switchFailedMsg}
+          </div>
+        )}
+
         {/* Top Channel Title Bar Overlay */}
         <div
           className={`absolute top-0 inset-x-0 p-2.5 sm:p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 flex items-center justify-between gap-2 z-10 ${
@@ -854,7 +1264,7 @@ export default function HlsPlayer({
             </span>
             <span className="hidden sm:inline px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-900/80 text-emerald-400 border border-emerald-500/30">
               <Zap className="w-2.5 h-2.5 inline mr-1" />
-              Server {currentStreamIndex + 1} ({activeStream?.latency || 120}ms)
+              Server {displayedIndex + 1} ({activeDisplayedStream?.latency || 120}ms)
             </span>
           </div>
         </div>
@@ -950,14 +1360,14 @@ export default function HlsPlayer({
       </div>
 
       {/* Minimal Server Link Selector Tags Directly Below Player (hidden on mobile; shown next to the back button instead) */}
-      {streams.length > 0 && (
+      {displayedMirrors.length > 0 && (
         <div className="hidden lg:flex flex-wrap items-center gap-2 pt-0.5">
-          {streams.map((st, idx) => {
-            const isSelected = idx === currentStreamIndex;
+          {displayedMirrors.map((st, idx) => {
+            const isSelected = idx === displayedIndex;
             return (
               <button
                 key={st._id}
-                onClick={() => setCurrentStreamIndex(idx)}
+                onClick={() => handleManualServerSelect(idx)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   isSelected
                     ? "bg-[#00c978] text-slate-950 shadow-md shadow-emerald-500/20 ring-1 ring-emerald-400/50"

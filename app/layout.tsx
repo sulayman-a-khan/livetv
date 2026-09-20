@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
 import AdManager from "@/components/AdManager";
@@ -8,6 +8,14 @@ export const metadata: Metadata = {
   title: "SoluPlay - Automated Production Live Streaming Platform",
   description: "Watch 24/7 Live Sports, Cricket, Football, News and Entertainment streams with Smart 5-second Auto-Failover mirror links.",
   keywords: ["SoluPlay", "Live TV", "Cricket Live", "Live Sports", "Football Stream", "Automated Streaming"],
+};
+
+// viewport-fit=cover lets the fullscreen player extend edge-to-edge under a
+// phone's notch/status bar instead of leaving black bars there.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
+import { recordStreamFailure, type StoredStreamStatus } from "@/lib/streamHealth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +21,13 @@ export async function POST(req: NextRequest) {
     if (conn && mongoose.isValidObjectId(streamId)) {
       const stream = await StreamLink.findById(streamId);
       if (stream) {
-        stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-        if (!stream.firstFailedAt) {
-          stream.firstFailedAt = now;
-        }
-        stream.lastCheckedAt = now;
-
-        if (stream.failedAttempts >= 2) {
-          stream.status = "broken";
-        } else {
-          stream.status = "degraded";
-        }
+        const decision = recordStreamFailure(
+          stream.status as StoredStreamStatus, stream.failedAttempts || 0, stream.firstFailedAt, now
+        );
+        stream.status = decision.status;
+        stream.failedAttempts = decision.failedAttempts;
+        stream.firstFailedAt = decision.firstFailedAt;
+        stream.lastCheckedAt = decision.lastCheckedAt;
 
         await stream.save();
 
@@ -56,16 +53,13 @@ export async function POST(req: NextRequest) {
     const streams = inMemoryDb.getStreams();
     const stream = streams.find((s) => s._id === streamId);
     if (stream) {
-      stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-      if (!stream.firstFailedAt) {
-        stream.firstFailedAt = now;
-      }
-      stream.lastCheckedAt = now;
-      if (stream.failedAttempts >= 2) {
-        stream.status = "broken";
-      } else {
-        stream.status = "degraded";
-      }
+      const decision = recordStreamFailure(
+        stream.status as StoredStreamStatus, stream.failedAttempts || 0, stream.firstFailedAt, now
+      );
+      stream.status = decision.status;
+      stream.failedAttempts = decision.failedAttempts;
+      stream.firstFailedAt = decision.firstFailedAt;
+      stream.lastCheckedAt = decision.lastCheckedAt;
       inMemoryDb.saveState();
 
       const remainingActive = streams.filter(

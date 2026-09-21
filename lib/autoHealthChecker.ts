@@ -18,6 +18,7 @@ import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
+import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
 import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
 
 export type HealthCheckScope = "pinned" | "full";
@@ -134,37 +135,39 @@ async function runInMemoryHealthCheck(
     const result = probeResults.get(stream.url);
     if (!result) continue;
 
-    const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
+    const previousStatus = stream.status as StoredStreamStatus;
+    const wasBrokenOrDegraded = previousStatus !== "active";
     stream.lastCheck = toLastCheckDetail(result);
 
-    if (result.ok) {
+    const decision = decideStreamHealth(
+      previousStatus, stream.failedAttempts || 0, stream.firstFailedAt, result, now
+    );
+
+    if (decision.status === "active") {
       // Stream is WORKING — mark active (re-activate if was broken)
       if (wasBrokenOrDegraded) {
         recovered++;
         console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
       }
-      stream.status = "active";
-      stream.latency = result.latency;
-      stream.failedAttempts = 0;
-      stream.firstFailedAt = null;
-      stream.lastCheckedAt = now;
+      stream.status = decision.status;
+      stream.latency = decision.latency;
+      stream.failedAttempts = decision.failedAttempts;
+      stream.firstFailedAt = decision.firstFailedAt;
+      stream.lastCheckedAt = decision.lastCheckedAt;
       active++;
     } else {
-      // Stream is NOT WORKING
-      stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-      if (!stream.firstFailedAt) {
-        stream.firstFailedAt = now;
-      }
-      stream.lastCheckedAt = now;
+      stream.status = decision.status;
+      stream.latency = decision.latency;
+      stream.failedAttempts = decision.failedAttempts;
+      stream.firstFailedAt = decision.firstFailedAt;
+      stream.lastCheckedAt = decision.lastCheckedAt;
 
-      if (stream.failedAttempts >= 3) {
-        stream.status = "broken";
+      if (decision.status === "broken") {
         broken++;
         console.log(
           `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
         );
       } else {
-        stream.status = "degraded";
         degraded++;
         console.log(
           `  [DEGRADED] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
@@ -208,7 +211,8 @@ async function runMongoHealthCheck(
         timeoutMs: PROBE_TIMEOUT_MS,
         headers: (stream as unknown as { headers?: Record<string, string> }).headers,
       });
-      const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
+      const previousStatus = stream.status as StoredStreamStatus;
+      const wasBrokenOrDegraded = previousStatus !== "active";
 
       // Best-effort: only persists if the StreamLink schema has a `lastCheck`
       // Mixed/Object field. A strict Mongoose schema silently drops unknown
@@ -217,27 +221,24 @@ async function runMongoHealthCheck(
       // detail to actually persist in MongoDB mode.
       (stream as unknown as { lastCheck?: unknown }).lastCheck = toLastCheckDetail(result);
 
-      if (result.ok) {
+      const decision = decideStreamHealth(
+        previousStatus, stream.failedAttempts || 0, stream.firstFailedAt, result, now
+      );
+      stream.status = decision.status;
+      stream.latency = decision.latency;
+      stream.failedAttempts = decision.failedAttempts;
+      stream.firstFailedAt = decision.firstFailedAt;
+      stream.lastCheckedAt = decision.lastCheckedAt;
+
+      if (decision.status === "active") {
         if (wasBrokenOrDegraded) {
           recovered++;
           console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
         }
-        stream.status = "active";
-        stream.latency = result.latency;
-        stream.failedAttempts = 0;
-        stream.firstFailedAt = null;
-        stream.lastCheckedAt = now;
         await stream.save();
         active++;
       } else {
-        stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-        if (!stream.firstFailedAt) {
-          stream.firstFailedAt = now;
-        }
-        stream.lastCheckedAt = now;
-
-        if (stream.failedAttempts >= 3) {
-          stream.status = "broken";
+        if (decision.status === "broken") {
           broken++;
           console.log(
             `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
@@ -278,7 +279,7 @@ async function acquireMongoLock(conn: typeof import("mongoose")): Promise<boolea
   const db = conn.connection.db;
   if (!db) return true; // No direct db handle available — fail open rather than block forever.
   try {
-    await db.collection("_locks").findOneAndUpdate(
+    await db.collection<{ _id: string; lockedAt?: Date }>("_locks").findOneAndUpdate(
       {
         _id: "auto_health_check",
         $or: [{ lockedAt: { $exists: false } }, { lockedAt: { $lt: new Date(Date.now() - STALE_LOCK_MS) } }],
@@ -297,7 +298,7 @@ async function releaseMongoLock(conn: typeof import("mongoose")): Promise<void> 
   const db = conn.connection.db;
   if (!db) return;
   try {
-    await db.collection("_locks").deleteOne({ _id: "auto_health_check" });
+    await db.collection<{ _id: string }>("_locks").deleteOne({ _id: "auto_health_check" });
   } catch {
     // Non-fatal — the lock will simply go stale and be reclaimed later.
   }

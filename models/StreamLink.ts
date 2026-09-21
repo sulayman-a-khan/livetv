@@ -9,6 +9,8 @@ export interface IStreamLink extends Document {
   firstFailedAt: Date | null;
   lastCheckedAt: Date | null;
   latency: number;
+  headers?: Record<string, string>;
+  lastCheck?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +30,10 @@ const StreamLinkSchema = new Schema<IStreamLink>(
     firstFailedAt: { type: Date, default: null },
     lastCheckedAt: { type: Date, default: null },
     latency: { type: Number, default: 0 },
+    // Some providers require a Referer or Origin; retain it for probes.
+    headers: { type: Schema.Types.Mixed, default: undefined },
+    // Flexible diagnostics from the last health check.
+    lastCheck: { type: Schema.Types.Mixed, default: undefined },
   },
   { timestamps: true }
 );

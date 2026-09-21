@@ -18,23 +18,14 @@ import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
-import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
 import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
 
 export type HealthCheckScope = "pinned" | "full";
 
 const PINNED_INTERVAL_MS = 5 * 60 * 1000;         // 5 minutes
 const FULL_INTERVAL_MS = 12 * 60 * 60 * 1000;     // 12 hours
-const PROBE_TIMEOUT_MS = 8000;                     // IPTV playlists + one segment fetch
-const BATCH_CONCURRENCY = 12;                      // Parallel probes without saturating CDNs
-
-const HEALTH_PROBE_OPTIONS = {
-  timeoutMs: PROBE_TIMEOUT_MS,
-  checkLiveRefresh: false,
-  useFfprobe: false,
-  maxAttempts: 2,
-  segmentSampleSize: 1,
-} as const;
+const PROBE_TIMEOUT_MS = 5000;                     // 5 seconds per stream probe
+const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parallel for speed
 
 declare global {
   // eslint-disable-next-line no-var
@@ -76,19 +67,17 @@ function emptyResult(scope: HealthCheckScope): HealthCheckResult {
 /**
  * Probe streams in batches of BATCH_CONCURRENCY for faster checking
  */
-async function probeBatch<T extends { _id: string; url: string; headers?: Record<string, string> }>(
-  streams: T[]
+async function probeBatch<T extends { url: string; headers?: Record<string, string> }>(
+  streams: T[],
+  timeoutMs: number
 ): Promise<Map<string, HlsCheckResult>> {
   const results = new Map<string, HlsCheckResult>();
 
   for (let i = 0; i < streams.length; i += BATCH_CONCURRENCY) {
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
-      const result = await checkHlsStream(stream.url, {
-        ...HEALTH_PROBE_OPTIONS,
-        headers: stream.headers,
-      });
-      results.set(String(stream._id), result);
+      const result = await checkHlsStream(stream.url, { timeoutMs, headers: stream.headers });
+      results.set(stream.url, result);
     });
     await Promise.allSettled(probePromises);
   }
@@ -139,45 +128,48 @@ async function runInMemoryHealthCheck(
 
   console.log(`[AutoHealthChecker] (${scope}) Probing ${streams.length} stream links (in-memory mode)...`);
 
-  const probeResults = await probeBatch(streams);
+  const probeResults = await probeBatch(streams, PROBE_TIMEOUT_MS);
 
   for (const stream of streams) {
-    const result = probeResults.get(stream._id);
+    const result = probeResults.get(stream.url);
     if (!result) continue;
 
+    const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
     stream.lastCheck = toLastCheckDetail(result);
-    const previous = stream.status as StoredStreamStatus;
-    const decision = decideStreamHealth(
-      previous,
-      stream.failedAttempts || 0,
-      stream.firstFailedAt,
-      result,
-      now
-    );
 
-    stream.status = decision.status;
-    stream.latency = decision.latency;
-    stream.failedAttempts = decision.failedAttempts;
-    stream.firstFailedAt = decision.firstFailedAt;
-    stream.lastCheckedAt = decision.lastCheckedAt;
-
-    if (decision.recovered) {
-      recovered++;
-      console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${previous})`);
-    }
-
-    if (decision.status === "active") {
+    if (result.ok) {
+      // Stream is WORKING — mark active (re-activate if was broken)
+      if (wasBrokenOrDegraded) {
+        recovered++;
+        console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
+      }
+      stream.status = "active";
+      stream.latency = result.latency;
+      stream.failedAttempts = 0;
+      stream.firstFailedAt = null;
+      stream.lastCheckedAt = now;
       active++;
-    } else if (decision.status === "degraded") {
-      degraded++;
-      console.log(
-        `  [DEGRADED] ${redactUrl(stream.url)} (${decision.failedAttempts} fails: ${result.status} — ${result.reason})`
-      );
     } else {
-      broken++;
-      console.log(
-        `  [BROKEN] ${redactUrl(stream.url)} (${decision.failedAttempts} fails: ${result.status} — ${result.reason})`
-      );
+      // Stream is NOT WORKING
+      stream.failedAttempts = (stream.failedAttempts || 0) + 1;
+      if (!stream.firstFailedAt) {
+        stream.firstFailedAt = now;
+      }
+      stream.lastCheckedAt = now;
+
+      if (stream.failedAttempts >= 3) {
+        stream.status = "broken";
+        broken++;
+        console.log(
+          `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+        );
+      } else {
+        stream.status = "degraded";
+        degraded++;
+        console.log(
+          `  [DEGRADED] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+        );
+      }
     }
   }
 
@@ -213,43 +205,48 @@ async function runMongoHealthCheck(
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
       const result = await checkHlsStream(stream.url, {
-        ...HEALTH_PROBE_OPTIONS,
+        timeoutMs: PROBE_TIMEOUT_MS,
         headers: (stream as unknown as { headers?: Record<string, string> }).headers,
       });
-      const previous = stream.status as StoredStreamStatus;
+      const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
+
+      // Best-effort: only persists if the StreamLink schema has a `lastCheck`
+      // Mixed/Object field. A strict Mongoose schema silently drops unknown
+      // paths on save rather than erroring, so this is safe either way — see
+      // the integration notes for the schema snippet to add if you want this
+      // detail to actually persist in MongoDB mode.
       (stream as unknown as { lastCheck?: unknown }).lastCheck = toLastCheckDetail(result);
 
-      const decision = decideStreamHealth(
-        previous,
-        stream.failedAttempts || 0,
-        stream.firstFailedAt,
-        result,
-        now
-      );
-
-      stream.status = decision.status;
-      stream.latency = decision.latency;
-      stream.failedAttempts = decision.failedAttempts;
-      stream.firstFailedAt = decision.firstFailedAt;
-      stream.lastCheckedAt = decision.lastCheckedAt;
-      await stream.save();
-
-      if (decision.recovered) {
-        recovered++;
-        console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${previous})`);
-      }
-      if (decision.status === "active") {
+      if (result.ok) {
+        if (wasBrokenOrDegraded) {
+          recovered++;
+          console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
+        }
+        stream.status = "active";
+        stream.latency = result.latency;
+        stream.failedAttempts = 0;
+        stream.firstFailedAt = null;
+        stream.lastCheckedAt = now;
+        await stream.save();
         active++;
-      } else if (decision.status === "degraded") {
-        degraded++;
-        console.log(
-          `  [DEGRADED] ${redactUrl(stream.url)} (${decision.failedAttempts} fails: ${result.status} — ${result.reason})`
-        );
       } else {
-        broken++;
-        console.log(
-          `  [BROKEN] ${redactUrl(stream.url)} (${decision.failedAttempts} fails: ${result.status} — ${result.reason})`
-        );
+        stream.failedAttempts = (stream.failedAttempts || 0) + 1;
+        if (!stream.firstFailedAt) {
+          stream.firstFailedAt = now;
+        }
+        stream.lastCheckedAt = now;
+
+        if (stream.failedAttempts >= 3) {
+          stream.status = "broken";
+          broken++;
+          console.log(
+            `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+          );
+        } else {
+          stream.status = "degraded";
+          degraded++;
+        }
+        await stream.save();
       }
     });
     await Promise.allSettled(probePromises);

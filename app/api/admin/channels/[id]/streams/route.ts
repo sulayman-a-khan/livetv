@@ -44,7 +44,7 @@ export async function POST(
       );
     }
 
-    const probe = await probeStreamUrl(url, 6000);
+    const probe = await probeStreamUrl(url, 8000);
     const status: "active" | "broken" = probe.ok ? "active" : "broken";
     const now = new Date();
     const conn = await connectToDatabase();

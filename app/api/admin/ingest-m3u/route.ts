@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
         });
 
         if (!existingLink) {
-          const probe = await probeStreamUrl(item.streamUrl, 4000);
+          const probe = await probeStreamUrl(item.streamUrl, 8000);
           const status = probe.ok ? "active" : "broken";
           const existingCount = await StreamLink.countDocuments({ channelId: channel._id });
 
@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
         );
 
         if (!existingLink) {
-          const probe = await probeStreamUrl(item.streamUrl, 4000);
+          const probe = await probeStreamUrl(item.streamUrl, 8000);
           const status = probe.ok ? "active" : "broken";
           const chStreams = memoryStreams.filter((s) => s.channelId === channel!._id);
 

@@ -3,12 +3,20 @@ import { connectToDatabase } from "@/lib/db";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream } from "@/lib/streamProbe";
+import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
 const BATCH_LIMIT = 30;
 const BATCH_CONCURRENCY = 6;
+const PROBE_OPTS = {
+  timeoutMs: 8000,
+  checkLiveRefresh: false,
+  useFfprobe: false,
+  maxAttempts: 2,
+  segmentSampleSize: 1,
+} as const;
 
 export async function POST(req: NextRequest) {
   try {
@@ -39,37 +47,36 @@ export async function POST(req: NextRequest) {
 
       for (const stream of streamsToTest) {
         checkedCount++;
-        const result = await checkHlsStream(stream.url, { timeoutMs: 5000 });
+        const result = await checkHlsStream(stream.url, { ...PROBE_OPTS });
+        const previous = stream.status as StoredStreamStatus;
+        const decision = decideStreamHealth(
+          previous,
+          stream.failedAttempts || 0,
+          stream.firstFailedAt,
+          result,
+          now
+        );
 
-        if (result.ok) {
-          stream.status = "active";
-          stream.latency = result.latency;
-          stream.failedAttempts = 0;
-          stream.firstFailedAt = null;
-          stream.lastCheckedAt = now;
-          await stream.save();
-          activeCount++;
-        } else {
-          stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-          if (!stream.firstFailedAt) {
-            stream.firstFailedAt = now;
-          }
-          stream.lastCheckedAt = now;
-
-          const failureDuration = now.getTime() - new Date(stream.firstFailedAt).getTime();
+        if (decision.status !== "active" && decision.firstFailedAt) {
+          const failureDuration = now.getTime() - new Date(decision.firstFailedAt).getTime();
           if (failureDuration > THREE_DAYS_MS) {
             await StreamLink.findByIdAndDelete(stream._id);
             deletedCount++;
-          } else if (stream.failedAttempts >= 2) {
-            stream.status = "broken";
-            await stream.save();
-            brokenCount++;
-          } else {
-            stream.status = "degraded";
-            await stream.save();
-            degradedCount++;
+            checkedCount++;
+            continue;
           }
         }
+
+        stream.status = decision.status;
+        stream.latency = decision.latency;
+        stream.failedAttempts = decision.failedAttempts;
+        stream.firstFailedAt = decision.firstFailedAt;
+        stream.lastCheckedAt = decision.lastCheckedAt;
+        await stream.save();
+        checkedCount++;
+        if (decision.status === "active") activeCount++;
+        else if (decision.status === "degraded") degradedCount++;
+        else brokenCount++;
       }
 
       return NextResponse.json({
@@ -100,7 +107,10 @@ export async function POST(req: NextRequest) {
         await Promise.allSettled(
           batch.map(async (stream) => {
             checkedCount++;
-            const result = await checkHlsStream(stream.url, { timeoutMs: 4000 });
+            const result = await checkHlsStream(stream.url, {
+              ...PROBE_OPTS,
+              headers: stream.headers,
+            });
             stream.lastCheck = {
               healthStatus: result.status,
               errorCode: result.errorCode,
@@ -119,27 +129,23 @@ export async function POST(req: NextRequest) {
               error: result.error,
               checkedAt: result.checkedAt,
             };
-            if (result.ok) {
-              stream.status = "active";
-              stream.latency = result.latency;
-              stream.failedAttempts = 0;
-              stream.firstFailedAt = null;
-              stream.lastCheckedAt = now;
-              activeCount++;
-            } else {
-              stream.failedAttempts = (stream.failedAttempts || 0) + 1;
-              if (!stream.firstFailedAt) {
-                stream.firstFailedAt = now;
-              }
-              stream.lastCheckedAt = now;
-              if (stream.failedAttempts >= 2) {
-                stream.status = "broken";
-                brokenCount++;
-              } else {
-                stream.status = "degraded";
-                degradedCount++;
-              }
-            }
+            const previous = stream.status as StoredStreamStatus;
+            const decision = decideStreamHealth(
+              previous,
+              stream.failedAttempts || 0,
+              stream.firstFailedAt,
+              result,
+              now
+            );
+            stream.status = decision.status;
+            stream.latency = decision.latency;
+            stream.failedAttempts = decision.failedAttempts;
+            stream.firstFailedAt = decision.firstFailedAt;
+            stream.lastCheckedAt = decision.lastCheckedAt;
+            checkedCount++;
+            if (decision.status === "active") activeCount++;
+            else if (decision.status === "degraded") degradedCount++;
+            else brokenCount++;
           })
         );
       }

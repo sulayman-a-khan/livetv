@@ -74,7 +74,11 @@ export type HlsErrorCode =
 export type PlaylistType = "MASTER" | "MEDIA" | null;
 
 export interface HlsCheckResult {
-  /** Backward-compat: true only for a fully healthy (ONLINE) stream. */
+  /**
+   * True when the link is playable enough to show on the public UI.
+   * ONLINE always; DEGRADED too, except an empty live window
+   * (`NO_SEGMENTS_LISTED`) which has nothing to watch.
+   */
   ok: boolean;
   /** Backward-compat: round-trip time of the primary playlist request, ms. */
   latency: number;
@@ -105,29 +109,29 @@ export interface HlsCheckResult {
 export type ProbeResult = HlsCheckResult;
 
 export interface ProbeOptions {
-  /** Per-request timeout for the playlist/segment fetches. Default 5000ms. */
+  /** Per-request timeout for the playlist/segment fetches. Default 8000ms. */
   timeoutMs?: number;
-  /** How many of the most recent segments to sample. Default 2, max 3. */
+  /** How many of the most recent segments to sample. Default 1, max 3. */
   segmentSampleSize?: number;
-  /** Whether to re-fetch a live playlist after a short delay to confirm it's advancing. Default true. */
+  /** Whether to re-fetch a live playlist after a short delay to confirm it's advancing. Default false. */
   checkLiveRefresh?: boolean;
   /** Delay before the live-refresh re-check, ms. Default 3500. */
   liveRefreshDelayMs?: number;
-  /** Whether to attempt an ffprobe decode confirmation when ffmpeg is installed. Default true. */
+  /** Whether to attempt an ffprobe decode confirmation when ffmpeg is installed. Default false. */
   useFfprobe?: boolean;
-  /** Max attempts for the retry/backoff wrapper. Default 3. */
+  /** Max attempts for the retry/backoff wrapper. Default 2. */
   maxAttempts?: number;
   /** Extra headers merged over the defaults (User-Agent, Referer, Origin, Authorization, Cookie...). */
   headers?: Record<string, string>;
 }
 
 const DEFAULTS = {
-  timeoutMs: 5000,
-  segmentSampleSize: 2,
-  checkLiveRefresh: true,
+  timeoutMs: 8000,
+  segmentSampleSize: 1,
+  checkLiveRefresh: false,
   liveRefreshDelayMs: 3500,
-  useFfprobe: true,
-  maxAttempts: 3,
+  useFfprobe: false,
+  maxAttempts: 2,
 };
 
 const DEFAULT_USER_AGENT =
@@ -198,10 +202,20 @@ function resolveUrl(uri: string, baseUrl: string): string | null {
   }
 }
 
-function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+function buildHeaders(extra?: Record<string, string>, url?: string): Record<string, string> {
+  let originHeaders: Record<string, string> = {};
+  if (url) {
+    try {
+      const origin = new URL(url).origin;
+      originHeaders = { Referer: `${origin}/`, Origin: origin };
+    } catch {
+      originHeaders = {};
+    }
+  }
   return {
     "User-Agent": DEFAULT_USER_AGENT,
     Accept: "*/*",
+    ...originHeaders,
     ...extra,
   };
 }
@@ -299,18 +313,23 @@ async function readBodyCapped(
 }
 
 function looksLikeHtmlErrorPage(text: string, contentType: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    contentType.includes("text/html") ||
-    lower.includes("<!doctype html") ||
-    lower.includes("<html") ||
-    lower.includes("<head") ||
-    lower.includes("access denied") ||
-    lower.includes("404 not found") ||
-    lower.includes("error 404") ||
-    lower.includes("stream offline") ||
-    lower.includes("forbidden")
-  );
+  const trimmed = text.trimStart();
+  const lower = trimmed.toLowerCase();
+  // Real HLS playlists must never be treated as error pages, even when a
+  // misconfigured CDN labels them text/html or a comment mentions "forbidden".
+  if (lower.startsWith("#extm3u") || lower.startsWith("#ext-x-") || lower.startsWith("#extinf")) {
+    return false;
+  }
+  const structuredHtml =
+    lower.startsWith("<!doctype html") ||
+    lower.startsWith("<html") ||
+    (lower.includes("<html") && lower.includes("</html>")) ||
+    (lower.includes("<head") && lower.includes("<body"));
+  if (structuredHtml) return true;
+  if (contentType.includes("text/html") && (lower.startsWith("<") || lower.length < 32)) {
+    return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ *
@@ -340,10 +359,10 @@ interface ParsedPlaylist {
 /** Parses an M3U8 body. Deliberately tolerant of unknown tags — HLS has many
  *  vendor extensions we don't need to understand to check basic health. */
 function parseM3U8(text: string): ParsedPlaylist {
-  const lines = text.split(/\r?\n/).map((l) => l.trim());
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).map((l) => l.trim());
   // #EXTM3U must be the first non-blank line of a real playlist.
   const firstMeaningful = lines.find((l) => l.length > 0);
-  const isValidHls = firstMeaningful === "#EXTM3U";
+  const isValidHls = firstMeaningful === "#EXTM3U" || firstMeaningful?.toUpperCase() === "#EXTM3U";
 
   const variants: ParsedVariant[] = [];
   const segments: ParsedSegment[] = [];
@@ -420,38 +439,39 @@ interface SegmentCheckOutcome {
   bytesRead: number;
 }
 
-/** Verifies one media segment is actually downloadable and isn't an HTML error page. HEAD first (cheap); falls back to a small ranged GET for CDNs that don't implement HEAD correctly. */
+/** Verifies one media segment is actually downloadable and isn't an HTML error page.
+ *  Always uses GET — many IPTV CDNs return HEAD 200 for dead URLs (false online)
+ *  or reject HEAD entirely (false offline). Range is preferred; a full GET with
+ *  a capped body is the fallback because some CDNs 403 ranged requests. */
 async function checkSegment(
   url: string,
   headers: Record<string, string>,
   timeoutMs: number
 ): Promise<SegmentCheckOutcome> {
-  const head = await timedFetch(url, { method: "HEAD", headers }, timeoutMs);
-  if (head.response && (head.response.ok || head.response.status === 206)) {
-    const len = parseInt(head.response.headers.get("content-length") || "0", 10);
-    if (len > 0 || head.response.status === 206) {
-      return { ok: true, status: head.response.status, bytesRead: len };
+  const tryGet = async (extraHeaders: Record<string, string>) => {
+    const get = await timedFetch(url, { method: "GET", headers: { ...headers, ...extraHeaders } }, timeoutMs);
+    if (!get.response) return { ok: false as const, status: null, bytesRead: 0, retryWithoutRange: false };
+    const status = get.response.status;
+    if (!get.response.ok && status !== 206) {
+      const retryWithoutRange = status === 403 || status === 416 || status === 405 || status === 501;
+      return { ok: false as const, status, bytesRead: 0, retryWithoutRange };
     }
-    // HEAD succeeded but reported 0 bytes — verify with a real GET before giving up on it.
-  }
+    const contentType = (get.response.headers.get("content-type") || "").toLowerCase();
+    const { text, bytesRead } = await readBodyCapped(get.response, 4096);
+    if (bytesRead === 0) return { ok: false as const, status, bytesRead: 0, retryWithoutRange: false };
+    if (looksLikeHtmlErrorPage(text, contentType)) {
+      return { ok: false as const, status, bytesRead, retryWithoutRange: false };
+    }
+    return { ok: true as const, status, bytesRead, retryWithoutRange: false };
+  };
 
-  const get = await timedFetch(
-    url,
-    { method: "GET", headers: { ...headers, Range: "bytes=0-4096" } },
-    timeoutMs
-  );
-  if (!get.response) return { ok: false, status: null, bytesRead: 0 };
-  if (!get.response.ok && get.response.status !== 206) {
-    return { ok: false, status: get.response.status, bytesRead: 0 };
+  const ranged = await tryGet({ Range: "bytes=0-4096" });
+  if (ranged.ok) return { ok: true, status: ranged.status, bytesRead: ranged.bytesRead };
+  if (ranged.retryWithoutRange) {
+    const full = await tryGet({});
+    return { ok: full.ok, status: full.status, bytesRead: full.bytesRead };
   }
-
-  const contentType = (get.response.headers.get("content-type") || "").toLowerCase();
-  const { text, bytesRead } = await readBodyCapped(get.response, 4096);
-  if (bytesRead === 0) return { ok: false, status: get.response.status, bytesRead: 0 };
-  if (looksLikeHtmlErrorPage(text, contentType)) {
-    return { ok: false, status: get.response.status, bytesRead };
-  }
-  return { ok: true, status: get.response.status, bytesRead };
+  return { ok: false, status: ranged.status, bytesRead: ranged.bytesRead };
 }
 
 /* ------------------------------------------------------------------ *
@@ -564,14 +584,23 @@ async function runFfprobe(
  * Result builders
  * ------------------------------------------------------------------ */
 
+/** Playable for the public UI: healthy, or degraded-but-still-serving-media. */
+export function isPlayableHealthStatus(status: HlsHealthStatus, errorCode: HlsErrorCode): boolean {
+  if (status === "ONLINE") return true;
+  if (status === "DEGRADED" && errorCode !== "NO_SEGMENTS_LISTED") return true;
+  return false;
+}
+
 function baseResult(overrides: Partial<HlsCheckResult>): HlsCheckResult {
   const status = overrides.status || "UNKNOWN";
+  const errorCode = overrides.errorCode || "UNKNOWN_ERROR";
+  const playable = isPlayableHealthStatus(status, errorCode);
   return {
-    ok: status === "ONLINE",
+    ok: playable,
     latency: overrides.responseTime ?? 0,
-    reason: status === "ONLINE" ? undefined : overrides.error || status,
+    reason: playable ? undefined : overrides.error || status,
     status,
-    errorCode: overrides.errorCode || "UNKNOWN_ERROR",
+    errorCode,
     httpStatus: overrides.httpStatus ?? null,
     responseTime: overrides.responseTime ?? 0,
     finalUrl: overrides.finalUrl,
@@ -613,7 +642,7 @@ async function probeOnce(
   url: string,
   options: typeof DEFAULTS & { headers?: Record<string, string> }
 ): Promise<HlsCheckResult> {
-  const headers = buildHeaders(options.headers);
+  const headers = buildHeaders(options.headers, url);
 
   // ---- STEP 1: HTTP request for the playlist itself ----
   const playlistFetch = await timedFetch(url, { method: "GET", headers }, options.timeoutMs);
@@ -694,7 +723,7 @@ async function probeOnce(
     const orderedVariants = [...parsed.variants].sort((a, b) => (a.bandwidth ?? 0) - (b.bandwidth ?? 0));
     let resolvedOk = false;
 
-    for (const variant of orderedVariants.slice(0, 3)) {
+    for (const variant of orderedVariants.slice(0, 5)) {
       const variantUrl = resolveUrl(variant.uri, finalUrl);
       if (!variantUrl) continue;
 
@@ -778,20 +807,9 @@ async function probeOnce(
     });
   }
 
-  if (okSegments < segmentResults.length) {
-    return baseResult({
-      status: "DEGRADED",
-      errorCode: "PARTIAL_SEGMENTS_UNAVAILABLE",
-      httpStatus: response.status,
-      responseTime: playlistFetch.responseTime,
-      finalUrl: mediaPlaylistUrl,
-      playlistType,
-      isLive: mediaParsed.isLive,
-      segmentCount: mediaParsed.segments.length,
-      latestSegment,
-      error: `${segmentResults.length - okSegments}/${segmentResults.length} sampled segments failed`,
-    });
-  }
+  // One reachable segment is enough to call the stream playable. Extra
+  // sampled segments that 404 are a quality signal, not a hide-this-channel
+  // signal — IPTV CDNs routinely drop the oldest chunk in the window.
 
   // ---- STEP 5: For live playlists, confirm the segment window is advancing ----
   let newSegmentDetected: boolean | null = null;
@@ -815,7 +833,6 @@ async function probeOnce(
   let resolution: string | null = null;
   let codec: string | null = null;
   let fps: number | null = null;
-  let ffprobeFailed = false;
 
   if (options.useFfprobe && (await isFfprobeAvailable())) {
     const probeTarget =
@@ -826,31 +843,11 @@ async function probeOnce(
     resolution = ff.resolution;
     codec = ff.codec;
     fps = ff.fps;
-    ffprobeFailed = !ff.ok;
+    // Never hide a stream because ffprobe is missing, slow, or can't decode
+    // an encrypted/fMP4 rendition the browser player handles fine.
   }
 
-  if (ffprobeFailed) {
-    return baseResult({
-      status: "DEGRADED",
-      errorCode: "FFPROBE_DECODE_FAILED",
-      httpStatus: response.status,
-      responseTime: playlistFetch.responseTime,
-      finalUrl: mediaPlaylistUrl,
-      playlistType,
-      isLive: mediaParsed.isLive,
-      segmentCount: mediaParsed.segments.length,
-      latestSegment,
-      newSegmentDetected,
-      video,
-      audio,
-      resolution,
-      codec,
-      fps,
-      error: "HTTP checks passed but ffprobe could not decode the media",
-    });
-  }
-
-  // ---- Every layer agrees: this stream is genuinely healthy ----
+  // Playlist + at least one media segment are reachable.
   return baseResult({
     status: "ONLINE",
     errorCode: "OK",
@@ -871,8 +868,15 @@ async function probeOnce(
   });
 }
 
-/** Failure statuses worth retrying — transient/network-shaped, not content-deterministic. */
-const RETRYABLE_STATUSES: HlsHealthStatus[] = ["TIMEOUT", "OFFLINE", "UNKNOWN"];
+/** Retry only flakes — a 404/expired token/HTML page will not change on retry. */
+const RETRYABLE_ERROR_CODES: HlsErrorCode[] = [
+  "TIMEOUT",
+  "DNS_FAILURE",
+  "CONNECTION_REFUSED",
+  "TLS_FAILURE",
+  "SERVER_ERROR",
+  "UNKNOWN_ERROR",
+];
 
 /**
  * Full health check with retry/backoff. A single transient blip (one dropped
@@ -891,7 +895,11 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
     lastResult = await probeOnce(url, merged);
     lastResult.attempts = attempt;
 
-    const shouldRetry = RETRYABLE_STATUSES.includes(lastResult.status) && attempt < maxAttempts;
+    const shouldRetry =
+      attempt < maxAttempts &&
+      (lastResult.status === "TIMEOUT" ||
+        lastResult.status === "UNKNOWN" ||
+        RETRYABLE_ERROR_CODES.includes(lastResult.errorCode));
     if (!shouldRetry) break;
 
     // 1-2s after the first failure, 2-3s after the second, etc.
@@ -910,8 +918,14 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
  * Same signature as before (`url, timeoutMs`), same `{ ok, latency, reason }`
  * shape — plus every extra diagnostic field for callers that want it.
  */
-export async function probeStreamUrl(url: string, timeoutMs: number = 5000): Promise<HlsCheckResult> {
-  return checkHlsStream(url, { timeoutMs });
+export async function probeStreamUrl(url: string, timeoutMs: number = 8000): Promise<HlsCheckResult> {
+  return checkHlsStream(url, {
+    timeoutMs,
+    checkLiveRefresh: false,
+    useFfprobe: false,
+    maxAttempts: 2,
+    segmentSampleSize: 1,
+  });
 }
 
 // Exported for potential reuse/testing elsewhere in the project.

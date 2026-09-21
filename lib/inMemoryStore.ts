@@ -41,6 +41,37 @@ export interface InMemoryStreamLink {
   latency: number;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Optional per-stream request headers (User-Agent/Referer/Origin/
+   * Authorization/Cookie) forwarded to the health checker. Undefined means
+   * "use the checker's sensible defaults" — nothing else in the app reads
+   * this, so it's safe to leave unset on existing records.
+   */
+  headers?: Record<string, string>;
+  /**
+   * Rich diagnostics from the last HLS health check (see
+   * `lib/streamProbe.ts`). Additive/optional so existing records and code
+   * that only know about `status`/`latency` keep working untouched — this
+   * is purely extra detail for the admin UI/logs.
+   */
+  lastCheck?: {
+    healthStatus: string; // ONLINE | DEGRADED | OFFLINE | EXPIRED | BLOCKED | INVALID | TIMEOUT | UNKNOWN
+    errorCode: string;
+    httpStatus: number | null;
+    responseTime: number;
+    playlistType: string | null;
+    isLive: boolean | null;
+    segmentCount: number | null;
+    newSegmentDetected: boolean | null;
+    video: boolean | null;
+    audio: boolean | null;
+    resolution: string | null;
+    codec: string | null;
+    fps: number | null;
+    attempts: number;
+    error: string | null;
+    checkedAt: string;
+  };
 }
 
 const DATA_DIR = path.join(process.cwd(), "data");

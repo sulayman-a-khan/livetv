@@ -17,7 +17,7 @@ import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
-import { probeStreamUrl } from "@/lib/streamProbe";
+import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
 import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
 
 export type HealthCheckScope = "pinned" | "full";
@@ -67,22 +67,44 @@ function emptyResult(scope: HealthCheckScope): HealthCheckResult {
 /**
  * Probe streams in batches of BATCH_CONCURRENCY for faster checking
  */
-async function probeBatch<T extends { url: string }>(
+async function probeBatch<T extends { url: string; headers?: Record<string, string> }>(
   streams: T[],
   timeoutMs: number
-): Promise<Map<string, { ok: boolean; latency: number; reason?: string }>> {
-  const results = new Map<string, { ok: boolean; latency: number; reason?: string }>();
+): Promise<Map<string, HlsCheckResult>> {
+  const results = new Map<string, HlsCheckResult>();
 
   for (let i = 0; i < streams.length; i += BATCH_CONCURRENCY) {
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
-      const result = await probeStreamUrl(stream.url, timeoutMs);
+      const result = await checkHlsStream(stream.url, { timeoutMs, headers: stream.headers });
       results.set(stream.url, result);
     });
     await Promise.allSettled(probePromises);
   }
 
   return results;
+}
+
+/** Shrinks a full HLS check result down to the subset worth persisting on the stream record. */
+function toLastCheckDetail(result: HlsCheckResult) {
+  return {
+    healthStatus: result.status,
+    errorCode: result.errorCode,
+    httpStatus: result.httpStatus,
+    responseTime: result.responseTime,
+    playlistType: result.playlistType,
+    isLive: result.isLive,
+    segmentCount: result.segmentCount,
+    newSegmentDetected: result.newSegmentDetected,
+    video: result.video,
+    audio: result.audio,
+    resolution: result.resolution,
+    codec: result.codec,
+    fps: result.fps,
+    attempts: result.attempts,
+    error: result.error,
+    checkedAt: result.checkedAt,
+  };
 }
 
 /**
@@ -113,12 +135,13 @@ async function runInMemoryHealthCheck(
     if (!result) continue;
 
     const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
+    stream.lastCheck = toLastCheckDetail(result);
 
     if (result.ok) {
       // Stream is WORKING — mark active (re-activate if was broken)
       if (wasBrokenOrDegraded) {
         recovered++;
-        console.log(`  [RECOVERED] ${stream.url.substring(0, 50)}... → ACTIVE (was ${stream.status})`);
+        console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
       }
       stream.status = "active";
       stream.latency = result.latency;
@@ -137,11 +160,15 @@ async function runInMemoryHealthCheck(
       if (stream.failedAttempts >= 3) {
         stream.status = "broken";
         broken++;
-        console.log(`  [BROKEN] ${stream.url.substring(0, 50)}... (${stream.failedAttempts} fails: ${result.reason})`);
+        console.log(
+          `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+        );
       } else {
         stream.status = "degraded";
         degraded++;
-        console.log(`  [DEGRADED] ${stream.url.substring(0, 50)}... (${stream.failedAttempts} fails: ${result.reason})`);
+        console.log(
+          `  [DEGRADED] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+        );
       }
     }
   }
@@ -177,13 +204,23 @@ async function runMongoHealthCheck(
   for (let i = 0; i < streams.length; i += BATCH_CONCURRENCY) {
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
-      const result = await probeStreamUrl(stream.url, PROBE_TIMEOUT_MS);
+      const result = await checkHlsStream(stream.url, {
+        timeoutMs: PROBE_TIMEOUT_MS,
+        headers: (stream as unknown as { headers?: Record<string, string> }).headers,
+      });
       const wasBrokenOrDegraded = stream.status === "broken" || stream.status === "degraded";
+
+      // Best-effort: only persists if the StreamLink schema has a `lastCheck`
+      // Mixed/Object field. A strict Mongoose schema silently drops unknown
+      // paths on save rather than erroring, so this is safe either way — see
+      // the integration notes for the schema snippet to add if you want this
+      // detail to actually persist in MongoDB mode.
+      (stream as unknown as { lastCheck?: unknown }).lastCheck = toLastCheckDetail(result);
 
       if (result.ok) {
         if (wasBrokenOrDegraded) {
           recovered++;
-          console.log(`  [RECOVERED] ${stream.url.substring(0, 50)}... → ACTIVE (was ${stream.status})`);
+          console.log(`  [RECOVERED] ${redactUrl(stream.url)} → ACTIVE (was ${stream.status})`);
         }
         stream.status = "active";
         stream.latency = result.latency;
@@ -202,7 +239,9 @@ async function runMongoHealthCheck(
         if (stream.failedAttempts >= 3) {
           stream.status = "broken";
           broken++;
-          console.log(`  [BROKEN] ${stream.url.substring(0, 50)}... (${stream.failedAttempts} fails: ${result.reason})`);
+          console.log(
+            `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} fails: ${result.status} — ${result.reason})`
+          );
         } else {
           stream.status = "degraded";
           degraded++;
@@ -235,18 +274,11 @@ async function runMongoHealthCheck(
  */
 const STALE_LOCK_MS = 30 * 60 * 1000;
 
-/** Shape of the single lock document, so `_id` is a plain string instead of
- *  the driver's default ObjectId type. */
-interface HealthCheckLockDoc {
-  _id: string;
-  lockedAt?: Date;
-}
-
 async function acquireMongoLock(conn: typeof import("mongoose")): Promise<boolean> {
   const db = conn.connection.db;
   if (!db) return true; // No direct db handle available — fail open rather than block forever.
   try {
-    await db.collection<HealthCheckLockDoc>("_locks").findOneAndUpdate(
+    await db.collection("_locks").findOneAndUpdate(
       {
         _id: "auto_health_check",
         $or: [{ lockedAt: { $exists: false } }, { lockedAt: { $lt: new Date(Date.now() - STALE_LOCK_MS) } }],
@@ -265,7 +297,7 @@ async function releaseMongoLock(conn: typeof import("mongoose")): Promise<void> 
   const db = conn.connection.db;
   if (!db) return;
   try {
-    await db.collection<HealthCheckLockDoc>("_locks").deleteOne({ _id: "auto_health_check" });
+    await db.collection("_locks").deleteOne({ _id: "auto_health_check" });
   } catch {
     // Non-fatal — the lock will simply go stale and be reclaimed later.
   }
@@ -342,8 +374,8 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
         const maintenance = await runMaintenance();
         console.log(
           `[AutoHealthChecker] Maintenance: merged ${maintenance.channelsMerged}, ` +
-          `purged ${maintenance.placeholderLinksPurged} test links, ` +
-          `reordered ${maintenance.channelsReordered} channels`
+            `purged ${maintenance.placeholderLinksPurged} test links, ` +
+            `reordered ${maintenance.channelsReordered} channels`
         );
       } else if (pinnedChannelIds) {
         // Pinned pass: cheap targeted re-sort for just the channels we touched,

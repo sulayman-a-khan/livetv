@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
-import { probeStreamUrl } from "@/lib/streamProbe";
+import { checkHlsStream } from "@/lib/streamProbe";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
 
       for (const stream of streamsToTest) {
         checkedCount++;
-        const result = await probeStreamUrl(stream.url, 5000);
+        const result = await checkHlsStream(stream.url, { timeoutMs: 5000 });
 
         if (result.ok) {
           stream.status = "active";
@@ -100,7 +100,25 @@ export async function POST(req: NextRequest) {
         await Promise.allSettled(
           batch.map(async (stream) => {
             checkedCount++;
-            const result = await probeStreamUrl(stream.url, 4000);
+            const result = await checkHlsStream(stream.url, { timeoutMs: 4000 });
+            stream.lastCheck = {
+              healthStatus: result.status,
+              errorCode: result.errorCode,
+              httpStatus: result.httpStatus,
+              responseTime: result.responseTime,
+              playlistType: result.playlistType,
+              isLive: result.isLive,
+              segmentCount: result.segmentCount,
+              newSegmentDetected: result.newSegmentDetected,
+              video: result.video,
+              audio: result.audio,
+              resolution: result.resolution,
+              codec: result.codec,
+              fps: result.fps,
+              attempts: result.attempts,
+              error: result.error,
+              checkedAt: result.checkedAt,
+            };
             if (result.ok) {
               stream.status = "active";
               stream.latency = result.latency;

@@ -4,6 +4,7 @@ import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
+import { MAX_CONSECUTIVE_FAILURES } from "@/lib/streamHealth";
 
 // SoluPlay Channels API Route - Force Recompile for Logo Fix
 export const dynamic = "force-dynamic";
@@ -33,10 +34,14 @@ export async function GET(req: NextRequest) {
         .lean();
       const channelIds = channels.map((c) => c._id);
 
-      // Only fetch stream links with status === "active"
-      const activeStreams = await StreamLink.find({
+      // Prefer confirmed-active streams. A degraded mirror is only exposed as
+      // a per-channel fallback when every active mirror is temporarily absent.
+      const usableStreams = await StreamLink.find({
         channelId: { $in: channelIds },
-        status: "active",
+        $or: [
+          { status: "active" },
+          { status: "degraded", failedAttempts: { $lt: MAX_CONSECUTIVE_FAILURES } },
+        ],
       })
         .sort({ priority: 1, latency: 1 })
         .lean();
@@ -44,24 +49,26 @@ export async function GET(req: NextRequest) {
       // Group active streams by channelId
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const streamMap = new Map<string, any[]>();
-      for (const stream of activeStreams) {
+      for (const stream of usableStreams) {
         const cId = stream.channelId.toString();
         if (!streamMap.has(cId)) streamMap.set(cId, []);
         streamMap.get(cId)!.push(stream);
       }
 
-      // Filter OUT channels with ZERO active stream links
+      // A degraded link is a last resort, never shown beside confirmed-active links.
       const result = channels
-        .filter((c) => (streamMap.get(c._id.toString()) || []).length > 0)
         .map((c) => {
-          const streams = streamMap.get(c._id.toString()) || [];
+          const candidates = streamMap.get(c._id.toString()) || [];
+          const active = candidates.filter((stream) => stream.status === "active");
+          const streams = active.length > 0 ? active : candidates;
           return {
             ...c,
             logo: getChannelLogo(c.name, c.logo),
             activeStreamCount: streams.length,
             primaryStream: streams[0] || null,
           };
-        });
+        })
+        .filter((channel) => channel.activeStreamCount > 0);
 
       return NextResponse.json({ success: true, count: result.length, channels: result });
     } else {
@@ -82,12 +89,16 @@ export async function GET(req: NextRequest) {
         channels = channels.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
       }
 
-      // Filter OUT channels with ZERO active streams
+      // Keep a degraded mirror only when the channel has no active mirror.
       const result = channels
         .map((c) => {
-          const chActiveStreams = streams.filter(
-            (s) => s.channelId === c._id && s.status === "active"
+          const candidates = streams.filter(
+            (s) => s.channelId === c._id &&
+              (s.status === "active" ||
+                (s.status === "degraded" && s.failedAttempts < MAX_CONSECUTIVE_FAILURES))
           );
+          const active = candidates.filter((stream) => stream.status === "active");
+          const chActiveStreams = active.length > 0 ? active : candidates;
           return {
             ...c,
             logo: getChannelLogo(c.name, c.logo),

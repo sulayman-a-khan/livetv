@@ -319,22 +319,46 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     setHealthCheckLoading(true);
     setHealthCheckLog(null);
     try {
-      const res = await fetch("/api/admin/health-check", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-secret": secretKey.trim(),
-        },
-      });
-      const data = await res.json();
-      if (data.success) {
-        setHealthCheckLog(
-          `Health check finished! Tested ${data.summary.checkedCount} links: ${data.summary.activeCount} Active, ${data.summary.degradedCount} Degraded, ${data.summary.brokenCount} Broken.`
-        );
-        fetchStats();
-      } else {
-        setHealthCheckLog(`Health check failed: ${data.error}`);
+      let before: string | undefined;
+      let checked = 0;
+      let active = 0;
+      let degraded = 0;
+      let broken = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const res = await fetch("/api/admin/health-check", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-admin-secret": secretKey.trim(),
+          },
+          body: JSON.stringify(before ? { before } : {}),
+        });
+        const raw = await res.text();
+        let data: any;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          throw new Error(`Server returned ${res.status} instead of JSON. Please try again; the batch did not finish.`);
+        }
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `Health check failed (${res.status})`);
+        }
+
+        before = data.runStartedAt;
+        checked += data.summary.checkedCount;
+        active += data.summary.activeCount;
+        degraded += data.summary.degradedCount;
+        broken += data.summary.brokenCount;
+        hasMore = data.hasMore === true;
+        setHealthCheckLog(`Checking all links... ${checked} tested so far.`);
       }
+
+      setHealthCheckLog(
+        `Health check finished! Tested ${checked} links: ${active} Active, ${degraded} Degraded, ${broken} Broken.`
+      );
+      fetchStats();
     } catch (err: any) {
       setHealthCheckLog(`Error running health check: ${err.message}`);
     } finally {

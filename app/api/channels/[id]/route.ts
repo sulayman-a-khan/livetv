@@ -5,6 +5,7 @@ import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
+import { MAX_CONSECUTIVE_FAILURES } from "@/lib/streamHealth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,13 +24,20 @@ export async function GET(
       // single channel switch, which is where this lag is most noticeable.
       const [channel, streams] = await Promise.all([
         Channel.findById(id).lean(),
-        StreamLink.find({ channelId: id, status: "active" }).sort({ priority: 1, latency: 1 }).lean(),
+        StreamLink.find({
+          channelId: id,
+          $or: [
+            { status: "active" },
+            { status: "degraded", failedAttempts: { $lt: MAX_CONSECUTIVE_FAILURES } },
+          ],
+        }).sort({ priority: 1, latency: 1 }).lean(),
       ]);
 
       if (channel) {
+        const active = streams.filter((stream) => stream.status === "active");
         return NextResponse.json({
           success: true,
-          channel: { ...channel, logo: getChannelLogo(channel.name, channel.logo), streams },
+          channel: { ...channel, logo: getChannelLogo(channel.name, channel.logo), streams: active.length > 0 ? active : streams },
         });
       }
     }
@@ -45,9 +53,13 @@ export async function GET(
 
     // Serve links in priority order (maintenance guarantees priority 1 is the
     // fastest working mirror), falling back to raw latency as a tiebreaker.
-    const chStreams = streams
-      .filter((s) => s.channelId === id && s.status === "active")
+    const candidates = streams
+      .filter((s) => s.channelId === id &&
+        (s.status === "active" ||
+          (s.status === "degraded" && s.failedAttempts < MAX_CONSECUTIVE_FAILURES)))
       .sort((a, b) => (a.priority || 99) - (b.priority || 99) || (a.latency || 0) - (b.latency || 0));
+    const active = candidates.filter((stream) => stream.status === "active");
+    const chStreams = active.length > 0 ? active : candidates;
 
     return NextResponse.json({
       success: true,

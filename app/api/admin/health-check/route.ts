@@ -8,6 +8,8 @@ import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
+// Keep each serverless request short; the admin UI repeats batches until done.
+const BATCH_LIMIT = 12;
 const BATCH_CONCURRENCY = 6;
 const PROBE_OPTS = {
   timeoutMs: 8000,
@@ -30,6 +32,8 @@ export async function POST(req: NextRequest) {
 
     const conn = await connectToDatabase();
     const now = new Date();
+    const requestedCutoff = typeof body.before === "string" ? new Date(body.before) : null;
+    const cutoff = requestedCutoff && !Number.isNaN(requestedCutoff.getTime()) ? requestedCutoff : now;
 
     let checkedCount = 0;
     let activeCount = 0;
@@ -38,9 +42,12 @@ export async function POST(req: NextRequest) {
     const deletedCount = 0;
 
     if (conn) {
-      // Check the entire catalogue, oldest checks first.
-      const streamsToTest = await StreamLink.find()
-        .sort({ lastCheckedAt: 1 });
+      const pendingFilter = {
+        $or: [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: cutoff } }],
+      };
+      const streamsToTest = await StreamLink.find(pendingFilter)
+        .sort({ lastCheckedAt: 1 })
+        .limit(BATCH_LIMIT);
 
       for (let i = 0; i < streamsToTest.length; i += BATCH_CONCURRENCY) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
@@ -74,6 +81,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         batchSize: streamsToTest.length,
+        runStartedAt: cutoff.toISOString(),
+        hasMore: (await StreamLink.countDocuments(pendingFilter)) > 0,
         summary: {
           checkedCount,
           activeCount,
@@ -92,7 +101,9 @@ export async function POST(req: NextRequest) {
         const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
         return aTime - bTime;
       });
-      const streamsToTest = streams;
+      const streamsToTest = streams
+        .filter((stream) => !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime())
+        .slice(0, BATCH_LIMIT);
 
       for (let i = 0; i < streamsToTest.length; i += BATCH_CONCURRENCY) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
@@ -146,6 +157,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         batchSize: streamsToTest.length,
+        runStartedAt: cutoff.toISOString(),
+        hasMore: streams.some(
+          (stream) => !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime()
+        ),
         summary: {
           checkedCount,
           activeCount,

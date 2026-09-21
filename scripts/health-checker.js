@@ -87,7 +87,11 @@ async function probeStreamUrl(url, timeoutMs = 5000) {
 
     const hasStreamExtension = url.includes(".m3u8") || url.includes(".ts") || url.includes(".mpd");
 
-    if (hasHlsTag || isMediaContentType || (hasStreamExtension && !textSnippet.includes("<"))) {
+    // A content-type or .m3u8 suffix is not proof of a playable stream: many
+    // dead providers return an error payload with one of those properties.
+    // Only accept an actual HLS manifest marker here. The app checker performs
+    // the deeper playlist/segment validation before it can promote a link.
+    if (hasHlsTag) {
       return { ok: true, latency };
     }
 
@@ -162,13 +166,14 @@ async function runHealthChecker() {
           await StreamLink.findByIdAndDelete(stream._id);
           deletedCount++;
           console.log(`[FAILED] (${failureHours}h dead) -> PERMANENTLY DELETED (72h rule)`);
-        } else if (stream.failedAttempts >= 2) {
+        } else if (stream.failedAttempts >= 3) {
           stream.status = "broken";
           await stream.save();
           brokenCount++;
           console.log(`[FAILED] (${stream.failedAttempts} fails, reason: ${result.reason}) -> BROKEN`);
         } else {
-          stream.status = "degraded";
+          // Keep a previously verified stream visible during a short failure streak.
+          stream.status = stream.status === "active" ? "active" : "degraded";
           await stream.save();
           degradedCount++;
           console.log(`[FAILED] (${stream.failedAttempts} fails, reason: ${result.reason}) -> DEGRADED`);

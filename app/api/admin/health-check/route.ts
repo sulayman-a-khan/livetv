@@ -8,7 +8,6 @@ import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
-const BATCH_LIMIT = 30;
 const BATCH_CONCURRENCY = 6;
 const PROBE_OPTS = {
   timeoutMs: 8000,
@@ -30,24 +29,26 @@ export async function POST(req: NextRequest) {
     }
 
     const conn = await connectToDatabase();
-    const THREE_DAYS_MS = 72 * 60 * 60 * 1000;
     const now = new Date();
 
     let checkedCount = 0;
     let activeCount = 0;
     let degradedCount = 0;
     let brokenCount = 0;
-    let deletedCount = 0;
+    const deletedCount = 0;
 
     if (conn) {
-      // MongoDB Mode: Batch process least recently checked stream URLs
+      // Check the entire catalogue, oldest checks first.
       const streamsToTest = await StreamLink.find()
-        .sort({ lastCheckedAt: 1 })
-        .limit(BATCH_LIMIT);
+        .sort({ lastCheckedAt: 1 });
 
-      for (const stream of streamsToTest) {
-        checkedCount++;
-        const result = await checkHlsStream(stream.url, { ...PROBE_OPTS });
+      for (let i = 0; i < streamsToTest.length; i += BATCH_CONCURRENCY) {
+        const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
+        await Promise.allSettled(batch.map(async (stream) => {
+        const result = await checkHlsStream(stream.url, {
+          ...PROBE_OPTS,
+          headers: stream.headers,
+        });
         const previous = stream.status as StoredStreamStatus;
         const decision = decideStreamHealth(
           previous,
@@ -56,16 +57,6 @@ export async function POST(req: NextRequest) {
           result,
           now
         );
-
-        if (decision.status !== "active" && decision.firstFailedAt) {
-          const failureDuration = now.getTime() - new Date(decision.firstFailedAt).getTime();
-          if (failureDuration > THREE_DAYS_MS) {
-            await StreamLink.findByIdAndDelete(stream._id);
-            deletedCount++;
-            checkedCount++;
-            continue;
-          }
-        }
 
         stream.status = decision.status;
         stream.latency = decision.latency;
@@ -77,6 +68,7 @@ export async function POST(req: NextRequest) {
         if (decision.status === "active") activeCount++;
         else if (decision.status === "degraded") degradedCount++;
         else brokenCount++;
+        }));
       }
 
       return NextResponse.json({
@@ -100,13 +92,12 @@ export async function POST(req: NextRequest) {
         const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
         return aTime - bTime;
       });
-      const streamsToTest = streams.slice(0, BATCH_LIMIT);
+      const streamsToTest = streams;
 
       for (let i = 0; i < streamsToTest.length; i += BATCH_CONCURRENCY) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
         await Promise.allSettled(
           batch.map(async (stream) => {
-            checkedCount++;
             const result = await checkHlsStream(stream.url, {
               ...PROBE_OPTS,
               headers: stream.headers,

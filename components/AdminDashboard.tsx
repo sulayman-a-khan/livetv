@@ -314,7 +314,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
-  // Trigger Batch Health Check Manual Run
+  // Trigger a full catalogue health check.
   const handleTriggerHealthCheck = async () => {
     setHealthCheckLoading(true);
     setHealthCheckLog(null);
@@ -329,14 +329,14 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       const data = await res.json();
       if (data.success) {
         setHealthCheckLog(
-          `Batch check finished! Tested ${data.summary.checkedCount} links: ${data.summary.activeCount} Active, ${data.summary.degradedCount} Degraded, ${data.summary.brokenCount} Broken, ${data.summary.deletedCount} Auto-Deleted (>72h rule).`
+          `Health check finished! Tested ${data.summary.checkedCount} links: ${data.summary.activeCount} Active, ${data.summary.degradedCount} Degraded, ${data.summary.brokenCount} Broken.`
         );
         fetchStats();
       } else {
         setHealthCheckLog(`Health check failed: ${data.error}`);
       }
     } catch (err: any) {
-      setHealthCheckLog(`Error executing worker batch: ${err.message}`);
+      setHealthCheckLog(`Error running health check: ${err.message}`);
     } finally {
       setHealthCheckLoading(false);
     }
@@ -597,7 +597,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-brand-600/30 disabled:opacity-50"
           >
             <Activity className={`w-4 h-4 ${healthCheckLoading ? "animate-spin" : ""}`} />
-            <span>{healthCheckLoading ? "Probing Batch..." : "Run Health Check (30 Batch)"}</span>
+            <span>{healthCheckLoading ? "Probing All Links..." : "Run Health Check (All Links)"}</span>
           </button>
 
           <button

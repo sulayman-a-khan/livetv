@@ -5,7 +5,7 @@
  *   - Every 5 minutes  : probes only PINNED channels (across every category) —
  *                        these are the channels on the homepage/top of lists,
  *                        so they get checked often and recover fast.
- *   - Every 12 hours   : probes EVERY stream link in the catalogue.
+ *   - Every 10 minutes : probes EVERY stream link in the catalogue.
  *
  * - Marks non-working streams as "degraded" → "broken" (hides channels with 0 active streams)
  * - Automatically re-activates previously broken streams that come back online
@@ -24,7 +24,7 @@ import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
 export type HealthCheckScope = "pinned" | "full";
 
 const PINNED_INTERVAL_MS = 5 * 60 * 1000;         // 5 minutes
-const FULL_INTERVAL_MS = 12 * 60 * 60 * 1000;     // 12 hours
+const FULL_INTERVAL_MS = 10 * 60 * 1000;          // 10 minutes
 const PROBE_TIMEOUT_MS = 5000;                     // 5 seconds per stream probe
 const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parallel for speed
 
@@ -393,7 +393,7 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
     console.log(`  Degraded      : ${result.degraded}`);
     console.log(`  Broken        : ${result.broken}`);
     console.log(`  Recovered     : ${result.recovered}`);
-    console.log(`  Next ${scope} check in : ${scope === "pinned" ? "5 minutes" : "12 hours"}`);
+    console.log(`  Next ${scope} check in : ${scope === "pinned" ? "5 minutes" : "10 minutes"}`);
     console.log("══════════════════════════════════════════════════════\n");
 
     return result;
@@ -421,7 +421,7 @@ export function startAutoHealthChecker() {
   global.__freetv_health_checker_started = true;
 
   console.log(
-    "[AutoHealthChecker] ✦ Activated — pinned channels every 5 minutes, full catalogue every 12 hours"
+    "[AutoHealthChecker] ✦ Activated — pinned channels every 5 minutes, full catalogue every 10 minutes"
   );
 
   // Pinned channels: first run after 30s, then every 5 minutes.
@@ -433,7 +433,7 @@ export function startAutoHealthChecker() {
   }, PINNED_INTERVAL_MS);
 
   // Full catalogue: first run after 2 minutes (let the pinned check settle
-  // in first), then every 12 hours.
+  // in first), then every 10 minutes.
   setTimeout(() => {
     runAutoHealthCheck("full");
   }, 2 * 60_000);

@@ -56,6 +56,8 @@ export default function WatchPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentStreamIndex, setCurrentStreamIndex] = useState(0);
+  const [isTuning, setIsTuning] = useState(false);
+  const [tuningLabel, setTuningLabel] = useState<string | null>(null);
 
   // Sidebar auto-scroll refs (keeps the playing channel visible in the list)
   const listRef = useRef<HTMLDivElement>(null);
@@ -297,6 +299,16 @@ export default function WatchPage() {
   );
 
   /**
+   * Reflects the player's background-tuning state outside the player itself —
+   * used to show "CONNECTING" instead of "PLAYING" on the target channel in
+   * the sidebar, and to square off the player frame while it's connecting.
+   */
+  const handleSwitchingChange = useCallback((switching: boolean, label: string | null) => {
+    setIsTuning(switching);
+    setTuningLabel(label);
+  }, []);
+
+  /**
    * Every server for this channel is dead. The player has already shown the
    * Bangla notice for 5 seconds, so now:
    *   1. hide the channel from the playlist immediately,
@@ -421,13 +433,18 @@ export default function WatchPage() {
                 </div>
 
                 {/* TV Player Box */}
-                <div className="relative rounded-2xl overflow-hidden border border-slate-800/90 bg-black shadow-2xl">
+                <div
+                  className={`relative overflow-hidden border border-slate-800/90 bg-black shadow-2xl ${
+                    isTuning ? "rounded-none" : "rounded-2xl"
+                  }`}
+                >
                   <HlsPlayer
                     channelName={channel.name}
                     streams={channel.streams}
                     currentStreamIndex={currentStreamIndex}
                     onStreamIndexChange={setCurrentStreamIndex}
                     onAllServersFailed={handleAllServersFailed}
+                    onSwitchingChange={handleSwitchingChange}
                   />
                 </div>
               </div>
@@ -601,12 +618,24 @@ export default function WatchPage() {
                             {/* Right Status Tag */}
                             <div className="shrink-0">
                               {isActive ? (
-                                <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  <span className="text-[9px] font-black text-emerald-300">
-                                    PLAYING
-                                  </span>
-                                </div>
+                                isTuning ? (
+                                  <div
+                                    className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40"
+                                    title={tuningLabel ? `Tuning into ${tuningLabel}...` : undefined}
+                                  >
+                                    <RefreshCw className="w-2.5 h-2.5 text-amber-300 animate-spin" />
+                                    <span className="text-[9px] font-black text-amber-300">
+                                      CONNECTING
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-500/40">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    <span className="text-[9px] font-black text-emerald-300">
+                                      PLAYING
+                                    </span>
+                                  </div>
+                                )
                               ) : (
                                 <div className="w-6 h-6 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center group-hover:bg-[#00c978] group-hover:text-slate-950 transition-all">
                                   <Play className="w-3 h-3 fill-current ml-0.5" />

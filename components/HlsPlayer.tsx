@@ -125,6 +125,14 @@ interface HlsPlayerProps {
   onAllServersFailed?: () => void;
   /** Fired the moment a link fails, so the host can report/refresh state early. */
   onStreamFailed?: (streamId: string) => void;
+  /**
+   * Fired whenever the background "tuning into the next channel" state
+   * changes, with the channel label being tuned into (or null once settled).
+   * Lets the host page reflect this outside the player itself — e.g. a
+   * "CONNECTING" badge in a channel list instead of "PLAYING" until the
+   * swap actually completes.
+   */
+  onSwitchingChange?: (switching: boolean, label: string | null) => void;
 }
 
 /* ------------------------------------------------------------------ *
@@ -155,6 +163,7 @@ export default function HlsPlayer({
   onStreamIndexChange,
   onAllServersFailed,
   onStreamFailed,
+  onSwitchingChange,
 }: HlsPlayerProps) {
   /* ------------------------------------------------------------------
    * Dual-buffer playback: two <video>/Hls.js instances are ping-ponged.
@@ -947,6 +956,19 @@ export default function HlsPlayer({
     requestSwitch(target, mirrors, channelName);
   };
 
+  // Let the host page know we're tuning into something (e.g. to show
+  // "CONNECTING" instead of "PLAYING" in a channel list) — and independently,
+  // hide the on-player controls immediately the moment a switch starts rather
+  // than waiting out the normal 3s auto-hide countdown. They still reappear
+  // on hover/touch like normal; they just don't stay pinned open across a switch.
+  useEffect(() => {
+    onSwitchingChange?.(switching, pendingChannelLabel);
+    if (switching) {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      setControlsVisible(false);
+    }
+  }, [switching, pendingChannelLabel, onSwitchingChange]);
+
   /** Starts the 3s countdown after which the overlay controls fade out. */
   const scheduleControlsHide = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -1116,7 +1138,9 @@ export default function HlsPlayer({
         className={`relative bg-black overflow-hidden group ${
           isFullscreen
             ? "fixed inset-0 z-[999] w-screen h-screen max-w-none rounded-none border-0"
-            : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none rounded-2xl border border-slate-800 shadow-2xl"
+            : `aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none border border-slate-800 shadow-2xl ${
+                isLoading || switching ? "rounded-none" : "rounded-2xl"
+              }`
         }`}
         onMouseMove={revealControls}
         onMouseLeave={() => {

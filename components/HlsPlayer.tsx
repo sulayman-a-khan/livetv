@@ -1109,6 +1109,30 @@ export default function HlsPlayer({
     }
   };
 
+  // ------------------------------------------------------------------
+  // The one "status bar" shown for every connecting/reconnecting/tuning
+  // moment — see the JSX below for how it's rendered as a navbar-style
+  // dropdown from the top edge of the player.
+  // ------------------------------------------------------------------
+  let topBarText = "";
+  let topBarTone: "emerald" | "amber" = "emerald";
+  let topBarIcon: "spin" | "shield" = "spin";
+
+  if (switching) {
+    topBarText = `Tuning into ${pendingChannelLabel || "next channel"}…`;
+    topBarTone = "emerald";
+    topBarIcon = "spin";
+  } else if (failoverToast) {
+    topBarText = failoverToast;
+    topBarTone = "amber";
+    topBarIcon = recoveryPhase === "switching" ? "shield" : "spin";
+  } else if (isLoading) {
+    topBarText = "Connecting to live stream…";
+    topBarTone = "emerald";
+    topBarIcon = "spin";
+  }
+  const topBarActive = switching || isLoading || Boolean(failoverToast);
+
   return (
     <div className="w-full space-y-3">
       {/* Video Container Frame */}
@@ -1153,16 +1177,9 @@ export default function HlsPlayer({
           playsInline
         />
 
-        {/* Loading Overlay — only for the very first stream this player ever shows,
-            or if the front channel itself stalls later. Never shown for a background switch. */}
-        {isLoading && (
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-3 z-20">
-            <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin" />
-            <span className="text-xs font-bold text-slate-200 tracking-wide uppercase">
-              Connecting to Live Stream...
-            </span>
-          </div>
-        )}
+        {/* A light dim while connecting/reconnecting keeps focus on the status
+            bar above without fully hiding a still-frozen frame underneath. */}
+        {isLoading && <div className="absolute inset-0 bg-black/25 z-20 pointer-events-none" />}
 
         {/* Error Overlay */}
         {errorMsg && recoveryPhase !== "exhausted" && (
@@ -1217,31 +1234,53 @@ export default function HlsPlayer({
           </div>
         )}
 
-        {/* Auto-Failover Toast Overlay Notification */}
-        {failoverToast && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 border border-emerald-500/40 animate-bounce">
-            {recoveryPhase === "retrying" ? (
-              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+        {/* ===== Unified status bar: connecting, reconnecting/failover, and
+            tuning into the next channel all drop down from here, navbar-style.
+            The channel underneath (if any) stays fully visible the whole time. ===== */}
+        <div
+          className={`absolute top-0 inset-x-0 z-40 transition-all duration-300 ease-out ${
+            topBarActive ? "translate-y-0 opacity-100" : "-translate-y-full opacity-0"
+          }`}
+        >
+          <div
+            className={`relative flex items-center gap-2.5 px-4 sm:px-5 py-2.5 backdrop-blur-md border-b overflow-hidden ${
+              topBarTone === "amber"
+                ? "bg-gradient-to-b from-amber-950/90 via-slate-950/90 to-slate-950/60 border-amber-500/30"
+                : "bg-gradient-to-b from-emerald-950/80 via-slate-950/90 to-slate-950/60 border-emerald-500/30"
+            }`}
+          >
+            {topBarIcon === "shield" ? (
+              <ShieldCheck className={`w-4 h-4 shrink-0 ${topBarTone === "amber" ? "text-amber-400" : "text-emerald-400"}`} />
             ) : (
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <RefreshCw
+                className={`w-4 h-4 shrink-0 animate-spin ${topBarTone === "amber" ? "text-amber-400" : "text-emerald-400"}`}
+              />
             )}
-            <span>{failoverToast}</span>
-          </div>
-        )}
-
-        {/* ===== Tuning overlay: shown WHILE the currently-playing channel stays
-            fully visible underneath, and cleared the instant the new one is
-            actually ready — no black screen, no interruption. ===== */}
-        {switching && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-            <div className="flex items-center gap-2.5 bg-black/85 backdrop-blur-sm px-4 py-2 rounded-xl border border-emerald-500/40 text-xs font-bold text-white shadow-2xl">
-              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
-              <span>Tuning into {pendingChannelLabel || "next channel"}...</span>
+            <span className="text-xs sm:text-[13px] font-semibold text-slate-100 tracking-wide truncate">
+              {topBarText}
+            </span>
+            {/* Indeterminate progress sweep along the bottom edge of the bar */}
+            <div className="absolute bottom-0 inset-x-0 h-[2px] bg-white/5 overflow-hidden">
+              <div
+                className={`h-full w-1/3 rounded-full ${
+                  topBarActive ? "animate-[solu-status-sweep_1.4s_ease-in-out_infinite]" : ""
+                } ${topBarTone === "amber" ? "bg-amber-400" : "bg-emerald-400"}`}
+              />
             </div>
           </div>
-        )}
+        </div>
+        <style>{`
+          @keyframes solu-status-sweep {
+            0% {
+              transform: translateX(-100%);
+            }
+            100% {
+              transform: translateX(400%);
+            }
+          }
+        `}</style>
         {switchFailedMsg && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-red-950/95 text-red-200 text-xs font-bold px-4 py-2 rounded-xl shadow-2xl border border-red-500/40">
+          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-40 bg-red-950/95 text-red-200 text-xs font-bold px-4 py-2 rounded-xl shadow-2xl border border-red-500/40">
             {switchFailedMsg}
           </div>
         )}

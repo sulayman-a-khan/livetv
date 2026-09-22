@@ -208,7 +208,7 @@ export default function HlsPlayer({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   // ---- Auto-hiding overlay controls ----
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [controlsVisible, setControlsVisible] = useState(false);
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ---- Resilience ladder state (front slot only) ----
@@ -957,16 +957,9 @@ export default function HlsPlayer({
   };
 
   // Let the host page know we're tuning into something (e.g. to show
-  // "CONNECTING" instead of "PLAYING" in a channel list) — and independently,
-  // hide the on-player controls immediately the moment a switch starts rather
-  // than waiting out the normal 3s auto-hide countdown. They still reappear
-  // on hover/touch like normal; they just don't stay pinned open across a switch.
+  // "CONNECTING" instead of "PLAYING" in a channel list).
   useEffect(() => {
     onSwitchingChange?.(switching, pendingChannelLabel);
-    if (switching) {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      setControlsVisible(false);
-    }
   }, [switching, pendingChannelLabel, onSwitchingChange]);
 
   /** Starts the 3s countdown after which the overlay controls fade out. */
@@ -975,28 +968,14 @@ export default function HlsPlayer({
     hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
   }, []);
 
-  /** Shows the controls and restarts the auto-hide countdown. */
+  /** Shows the controls and restarts the auto-hide countdown. Controls are
+   *  NEVER shown on their own (not on play/pause, not while loading or
+   *  erroring, not across a channel switch) — this is the only path that
+   *  reveals them, wired to hover (desktop) and touch (mobile) on the player. */
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     scheduleControlsHide();
   }, [scheduleControlsHide]);
-
-  // Controls stay pinned while paused / loading / errored / quality menu open,
-  // and fade away on their own once playback is actually running.
-  useEffect(() => {
-    const shouldPin = !isPlaying || isLoading || Boolean(errorMsg) || showQualityMenu;
-
-    if (shouldPin) {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      setControlsVisible(true);
-      return;
-    }
-
-    scheduleControlsHide();
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, [isPlaying, isLoading, errorMsg, showQualityMenu, scheduleControlsHide]);
 
   const togglePlay = () => {
     const video = getVideoEl(frontSlotRef.current);
@@ -1135,16 +1114,15 @@ export default function HlsPlayer({
       {/* Video Container Frame */}
       <div
         ref={containerRef}
-        className={`relative bg-black overflow-hidden group ${
+        className={`relative bg-black overflow-hidden group rounded-none border-0 ${
           isFullscreen
-            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none rounded-none border-0"
-            : `aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none border border-slate-800 shadow-2xl ${
-                isLoading || switching ? "rounded-none" : "rounded-2xl"
-              }`
+            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none"
+            : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
         }`}
         onMouseMove={revealControls}
         onMouseLeave={() => {
-          if (isPlaying && !isLoading && !errorMsg && !showQualityMenu) setControlsVisible(false);
+          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+          setControlsVisible(false);
         }}
         onTouchStart={revealControls}
       >

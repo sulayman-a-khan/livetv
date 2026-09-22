@@ -433,11 +433,7 @@ export default function WatchPage() {
                 </div>
 
                 {/* TV Player Box */}
-                <div
-                  className={`relative overflow-hidden border border-slate-800/90 bg-black shadow-2xl ${
-                    isTuning ? "rounded-none" : "rounded-2xl"
-                  }`}
-                >
+                <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
                   <HlsPlayer
                     channelName={channel.name}
                     streams={channel.streams}

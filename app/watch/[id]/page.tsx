@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
 import HlsPlayer, { StreamMirror } from "@/components/HlsPlayer";
+import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
+import { isYouTubeUrl } from "@/lib/youtube";
 import Link from "next/link";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { getChannelLogo } from "@/lib/utils";
@@ -325,6 +327,12 @@ export default function WatchPage() {
     return list;
   }, [allChannels, currentCategoryConfig, sidebarGenre, hiddenChannelIds]);
 
+  // The active stream link may point at a YouTube Live broadcast instead of
+  // a direct .m3u8 — those are routed to YouTube's own sanctioned player
+  // instead of Hls.js (see YouTubeLivePlayer for why).
+  const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
+  const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
+
   /**
    * Auto-scroll the sidebar so the channel that is currently playing is
    * centered in the list. Runs on first load (arriving from a category page)
@@ -534,15 +542,23 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  <HlsPlayer
-                    channelName={channel.name}
-                    streams={channel.streams}
-                    currentStreamIndex={currentStreamIndex}
-                    onStreamIndexChange={setCurrentStreamIndex}
-                    onAllServersFailed={handleAllServersFailed}
-                    onSwitchingChange={handleSwitchingChange}
-                    onSwitchFailed={handleSwitchFailed}
-                  />
+                  {isActiveStreamYouTube ? (
+                    <YouTubeLivePlayer
+                      channelName={channel.name}
+                      youtubeUrl={activeStreamUrl}
+                      onUnavailable={handleAllServersFailed}
+                    />
+                  ) : (
+                    <HlsPlayer
+                      channelName={channel.name}
+                      streams={channel.streams}
+                      currentStreamIndex={currentStreamIndex}
+                      onStreamIndexChange={setCurrentStreamIndex}
+                      onAllServersFailed={handleAllServersFailed}
+                      onSwitchingChange={handleSwitchingChange}
+                      onSwitchFailed={handleSwitchFailed}
+                    />
+                  )}
                 </div>
               </div>
 

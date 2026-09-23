@@ -142,6 +142,20 @@ export default function WatchPage() {
   }, [channel, initialLoading]);
 
   /**
+   * Latest activeChannelId/hiddenChannelIds, readable from stable callbacks
+   * without making those callbacks change identity on every state update.
+   * (revertFailedSwitch used to close over the state directly — but since
+   * loadChannelData depends on it, and the "Initial load" effect depends on
+   * loadChannelData, that made a fresh function identity on every channel
+   * switch or sidebar poll re-fire that effect and yank the page back to the
+   * original route param mid-playback.)
+   */
+  const activeChannelIdRef = useRef(activeChannelId);
+  activeChannelIdRef.current = activeChannelId;
+  const hiddenChannelIdsRef = useRef(hiddenChannelIds);
+  hiddenChannelIdsRef.current = hiddenChannelIds;
+
+  /**
    * Undoes an in-flight channel switch that didn't pan out, putting the
    * player, sidebar highlight and URL back exactly where they were before
    * the attempt — so a channel that never actually started playing never
@@ -154,7 +168,7 @@ export default function WatchPage() {
     // If the viewer has already moved on to a different channel (or gone
     // back) since this attempt started, this callback is stale — don't
     // clobber whatever they're looking at now.
-    if (activeChannelId !== pendingSwitchTargetIdRef.current) {
+    if (activeChannelIdRef.current !== pendingSwitchTargetIdRef.current) {
       pendingSwitchTargetIdRef.current = null;
       previousChannelSnapshotRef.current = null;
       return;
@@ -166,7 +180,7 @@ export default function WatchPage() {
     // Don't revert onto a channel already confirmed dead (e.g. this switch
     // was itself an auto-hop away from a channel whose servers all just
     // failed) — that would just trade one broken channel for another.
-    if (hiddenChannelIds.includes(snapshot.id)) {
+    if (hiddenChannelIdsRef.current.includes(snapshot.id)) {
       setError("No other channels are available in this category right now.");
       return;
     }
@@ -176,7 +190,7 @@ export default function WatchPage() {
     setCurrentStreamIndex(snapshot.streamIndex);
     setError(null);
     window.history.replaceState(null, "", snapshot.url);
-  }, [activeChannelId, hiddenChannelIds]);
+  }, []);
 
   // Fetch channel details
   const loadChannelData = useCallback(async (channelId: string, isInitial: boolean = false) => {

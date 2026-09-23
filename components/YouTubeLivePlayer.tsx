@@ -75,6 +75,28 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const [status, setStatus] = useState<"resolving" | "ready" | "error">("resolving");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // ---- Auto-hiding channel-name overlay — same behavior as HlsPlayer: never
+  // shown on its own, only revealed by hover (desktop) or touch (mobile), and
+  // faded back out after a few seconds so it doesn't sit over YouTube's own
+  // controls the rest of the time. ----
+  const [controlsVisible, setControlsVisible] = useState(false);
+  const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const scheduleControlsHide = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 3000);
+  };
+  const revealControls = () => {
+    setControlsVisible(true);
+    scheduleControlsHide();
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setStatus("resolving");
@@ -151,8 +173,28 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
 
   return (
     <div className="w-full space-y-3">
-      <div className="relative bg-black overflow-hidden rounded-none border-0 aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl">
+      <div
+        className="relative bg-black overflow-hidden rounded-none border-0 aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
+        onMouseMove={revealControls}
+        onMouseLeave={() => {
+          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+          setControlsVisible(false);
+        }}
+        onTouchStart={revealControls}
+      >
         <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+
+        {/* Top Channel Title Bar Overlay — hidden until hover/touch, matching HlsPlayer */}
+        <div
+          className={`absolute top-0 inset-x-0 p-2.5 sm:p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 flex items-center justify-between gap-2 z-20 pointer-events-none ${
+            controlsVisible ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">{channelName}</h2>
+          <span className="px-2 py-1 rounded-full text-[9px] sm:text-[10px] font-bold bg-slate-900/80 text-red-400 border border-red-500/30 shrink-0">
+            YouTube Live
+          </span>
+        </div>
 
         {status === "resolving" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 z-10">

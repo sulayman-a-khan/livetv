@@ -126,6 +126,14 @@ interface HlsPlayerProps {
   /** Fired the moment a link fails, so the host can report/refresh state early. */
   onStreamFailed?: (streamId: string) => void;
   /**
+   * Fired when a requested channel switch could not be completed — every
+   * stream link for the target channel failed to preload, so the player is
+   * staying on whatever was already on screen. Lets the host page (sidebar
+   * highlight, URL, channel info panel) roll back in sync with what the
+   * player actually did instead of what it was asked to do.
+   */
+  onSwitchFailed?: (attemptedLabel: string) => void;
+  /**
    * Fired whenever the background "tuning into the next channel" state
    * changes, with the channel label being tuned into (or null once settled).
    * Lets the host page reflect this outside the player itself — e.g. a
@@ -164,6 +172,7 @@ export default function HlsPlayer({
   onAllServersFailed,
   onStreamFailed,
   onSwitchingChange,
+  onSwitchFailed,
 }: HlsPlayerProps) {
   /* ------------------------------------------------------------------
    * Dual-buffer playback: two <video>/Hls.js instances are ping-ponged.
@@ -245,6 +254,10 @@ export default function HlsPlayer({
   const displayedMirrorsRef = useRef<StreamMirror[]>([]);
   const [displayedIndex, setDisplayedIndex] = useState(0);
   const displayedIndexRef = useRef(0);
+  /** Name of the channel actually on screen right now — only updated once a
+   *  switch really commits, so the title overlay never jumps ahead to a
+   *  channel that hasn't (or won't) actually start playing. */
+  const [displayedChannelName, setDisplayedChannelName] = useState(channelName);
   /** The mirror _id currently applied to the front slot — the single source of
    *  truth used to decide whether an incoming `streams`/`currentStreamIndex`
    *  change is a real switch or just a redundant re-render. */
@@ -739,6 +752,10 @@ export default function HlsPlayer({
         );
         if (switchFailTimeoutRef.current) clearTimeout(switchFailTimeoutRef.current);
         switchFailTimeoutRef.current = setTimeout(() => setSwitchFailedMsg(null), 3500);
+        // The player is staying put on whatever is already showing — tell the
+        // host so it can un-do any optimistic UI (sidebar highlight, URL,
+        // channel info) that already jumped ahead to the target channel.
+        onSwitchFailed?.(pendingChannelNameRef.current || "");
         return;
       }
 
@@ -753,7 +770,7 @@ export default function HlsPlayer({
         attemptPreloadRef.current?.(generation);
       }, PRELOAD_MIRROR_TIMEOUT_MS);
     },
-    [loadIntoSlot, cleanupSlot]
+    [loadIntoSlot, cleanupSlot, onSwitchFailed]
   );
   attemptPreloadRef.current = attemptPreload;
 
@@ -817,13 +834,14 @@ export default function HlsPlayer({
       setSwitching(false);
       setPendingChannelLabel(null);
       setSwitchFailedMsg(null);
+      setDisplayedChannelName(pendingChannelNameRef.current || channelName);
 
       setCurrentStreamIndex(appliedIndex);
 
       // The old front is no longer needed — free it up as the next back slot.
       cleanupSlot(oldFront);
     },
-    [getVideoEl, getHlsRefObj, cleanupSlot, applyNetworkCap, setCurrentStreamIndex]
+    [getVideoEl, getHlsRefObj, cleanupSlot, applyNetworkCap, setCurrentStreamIndex, channelName]
   );
   commitSwapRef.current = commitSwap;
 
@@ -841,6 +859,7 @@ export default function HlsPlayer({
       if (!frontEverLoadedRef.current) {
         frontEverLoadedRef.current = true;
         lastAppliedStreamIdRef.current = target._id;
+        setDisplayedChannelName(label);
         displayedMirrorsRef.current = fullMirrors;
         setDisplayedMirrors(fullMirrors);
         const idx = Math.max(
@@ -1293,7 +1312,7 @@ export default function HlsPlayer({
         >
           <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">
-              {channelName}
+              {displayedChannelName}
             </h2>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">

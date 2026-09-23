@@ -70,6 +70,23 @@ export default function WatchPage() {
   // anymore, wiping out the player.
   const latestRequestIdRef = useRef(0);
 
+  /**
+   * Snapshot of the channel that was actually on screen right before a
+   * switch was attempted, plus the URL it lived at. If the channel we're
+   * trying to switch to turns out not to work (bad metadata or every stream
+   * link dead), we roll the whole page — player, sidebar highlight and URL —
+   * back to this instead of leaving the UI pointed at a channel that never
+   * actually started playing.
+   */
+  const previousChannelSnapshotRef = useRef<{
+    id: string;
+    channel: ChannelDetails | null;
+    streamIndex: number;
+    url: string;
+  } | null>(null);
+  /** The channel a switch is currently in flight for; cleared once it either commits or is reverted. */
+  const pendingSwitchTargetIdRef = useRef<string | null>(null);
+
   // Height measurement to equalize left and right columns on desktop
   const leftColRef = useRef<HTMLDivElement>(null);
   const [leftHeight, setLeftHeight] = useState<number | null>(null);
@@ -122,6 +139,43 @@ export default function WatchPage() {
     return () => observer.disconnect();
   }, [channel, initialLoading]);
 
+  /**
+   * Undoes an in-flight channel switch that didn't pan out, putting the
+   * player, sidebar highlight and URL back exactly where they were before
+   * the attempt — so a channel that never actually started playing never
+   * ends up looking "selected" or "active" while something else is on screen.
+   */
+  const revertFailedSwitch = useCallback(() => {
+    const snapshot = previousChannelSnapshotRef.current;
+    if (!snapshot || !pendingSwitchTargetIdRef.current) return;
+
+    // If the viewer has already moved on to a different channel (or gone
+    // back) since this attempt started, this callback is stale — don't
+    // clobber whatever they're looking at now.
+    if (activeChannelId !== pendingSwitchTargetIdRef.current) {
+      pendingSwitchTargetIdRef.current = null;
+      previousChannelSnapshotRef.current = null;
+      return;
+    }
+
+    pendingSwitchTargetIdRef.current = null;
+    previousChannelSnapshotRef.current = null;
+
+    // Don't revert onto a channel already confirmed dead (e.g. this switch
+    // was itself an auto-hop away from a channel whose servers all just
+    // failed) — that would just trade one broken channel for another.
+    if (hiddenChannelIds.includes(snapshot.id)) {
+      setError("No other channels are available in this category right now.");
+      return;
+    }
+
+    setActiveChannelId(snapshot.id);
+    setChannel(snapshot.channel);
+    setCurrentStreamIndex(snapshot.streamIndex);
+    setError(null);
+    window.history.replaceState(null, "", snapshot.url);
+  }, [activeChannelId, hiddenChannelIds]);
+
   // Fetch channel details
   const loadChannelData = useCallback(async (channelId: string, isInitial: boolean = false) => {
     const requestId = ++latestRequestIdRef.current;
@@ -150,18 +204,27 @@ export default function WatchPage() {
             setActiveCategorySlug(matched.slug);
           }
         }
+      } else if (!isInitial) {
+        // Switching to this channel failed at the metadata level (e.g. it
+        // just went offline) — stay on whatever was already playing instead
+        // of blanking the whole page out from under the viewer.
+        revertFailedSwitch();
       } else {
         setError(data.error || "Channel stream not found");
       }
     } catch {
       if (requestId !== latestRequestIdRef.current) return;
-      setError("Network error fetching stream configuration");
+      if (!isInitial) {
+        revertFailedSwitch();
+      } else {
+        setError("Network error fetching stream configuration");
+      }
     } finally {
       if (requestId === latestRequestIdRef.current) {
         setInitialLoading(false);
       }
     }
-  }, [categoryParamSlug]);
+  }, [categoryParamSlug, revertFailedSwitch]);
 
   /**
    * Loads the playlist. The API only returns channels that currently have at
@@ -200,11 +263,16 @@ export default function WatchPage() {
   }, [channelIdParam, loadChannelData, fetchSidebarChannels]);
 
   /**
-   * Channel switches update the URL with a raw `window.history.pushState`
-   * (see `handleSelectChannel`) so the player never remounts — but that means
-   * Next's router doesn't know about them, and a real back/forward press
-   * (hardware button or swipe gesture) wouldn't otherwise do anything. This
-   * listens for that navigation directly and re-syncs the page to it.
+   * Channel switches update the URL with a raw `window.history.replaceState`
+   * (see `handleSelectChannel`) so the player never remounts and flipping
+   * through channels never piles up browser-history entries — a hardware
+   * back press should return to the page the viewer actually came from (e.g.
+   * a category list), not step backward through every channel they tuned
+   * past. Since replaceState doesn't create history entries, Next's router
+   * never sees these URL changes either. This listener only matters for the
+   * rare case of a real back/forward navigation that still lands on a
+   * `/watch/:id` URL (e.g. forward-navigating into one from history built
+   * before this page loaded) and re-syncs the page state to match.
    */
   useEffect(() => {
     const onPopState = () => {
@@ -289,13 +357,28 @@ export default function WatchPage() {
     (newChannelId: string) => {
       if (newChannelId === activeChannelId) return;
 
+      // Remember what's actually on screen right now so we can restore it if
+      // this switch doesn't pan out.
+      previousChannelSnapshotRef.current = {
+        id: activeChannelId,
+        channel,
+        streamIndex: currentStreamIndex,
+        url: window.location.pathname + window.location.search,
+      };
+      pendingSwitchTargetIdRef.current = newChannelId;
+
       setActiveChannelId(newChannelId);
       const catQuery = currentCategoryConfig?.slug ? `?category=${currentCategoryConfig.slug}` : "";
-      window.history.pushState(null, "", `/watch/${newChannelId}${catQuery}`);
+      // replaceState, not pushState: flipping through channels shouldn't pile
+      // up browser-history entries. Otherwise the hardware/gesture back button
+      // steps backward through every channel the viewer has tuned past
+      // instead of returning to the page (e.g. the category list) they
+      // actually came from.
+      window.history.replaceState(null, "", `/watch/${newChannelId}${catQuery}`);
 
       loadChannelData(newChannelId, false);
     },
-    [activeChannelId, currentCategoryConfig, loadChannelData]
+    [activeChannelId, channel, currentStreamIndex, currentCategoryConfig, loadChannelData]
   );
 
   /**
@@ -306,7 +389,24 @@ export default function WatchPage() {
   const handleSwitchingChange = useCallback((switching: boolean, label: string | null) => {
     setIsTuning(switching);
     setTuningLabel(label);
+    if (!switching) {
+      // The attempt settled — either it committed successfully, or it failed
+      // and handleSwitchFailed already reverted the page. Either way there's
+      // nothing left to roll back.
+      pendingSwitchTargetIdRef.current = null;
+      previousChannelSnapshotRef.current = null;
+    }
   }, []);
+
+  /**
+   * The player tried every stream link for the target channel and none of
+   * them would play. The player itself stays on whatever was already on
+   * screen (it never commits a switch that didn't work) — this puts the rest
+   * of the page (sidebar highlight, URL, channel info) back in sync with it.
+   */
+  const handleSwitchFailed = useCallback(() => {
+    revertFailedSwitch();
+  }, [revertFailedSwitch]);
 
   /**
    * Every server for this channel is dead. The player has already shown the
@@ -441,6 +541,7 @@ export default function WatchPage() {
                     onStreamIndexChange={setCurrentStreamIndex}
                     onAllServersFailed={handleAllServersFailed}
                     onSwitchingChange={handleSwitchingChange}
+                    onSwitchFailed={handleSwitchFailed}
                   />
                 </div>
               </div>

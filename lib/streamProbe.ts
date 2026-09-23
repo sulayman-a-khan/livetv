@@ -31,6 +31,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { isYouTubeUrl } from "@/lib/youtube";
 
 const execFileAsync = promisify(execFile);
 
@@ -883,6 +884,29 @@ const RETRYABLE_STATUSES: HlsHealthStatus[] = ["TIMEOUT", "OFFLINE", "UNKNOWN"];
  * between retries) are returned immediately without wasting attempts.
  */
 export async function checkHlsStream(url: string, options: ProbeOptions = {}): Promise<HlsCheckResult> {
+  // YouTube Live links aren't raw HLS manifests — they're played through
+  // YouTube's own IFrame Player API (see YouTubeLivePlayer.tsx), so none of
+  // the m3u8/segment checks below apply to them. Every #EXTM3U/segment check
+  // would fail against a YouTube page (it's HTML, not a playlist), which
+  // would otherwise get a perfectly fine YouTube link marked "broken" and
+  // eventually purged by the health checker. Treat it as healthy here and
+  // let YouTubeLivePlayer itself report a real playback failure if the
+  // broadcast turns out not to be live.
+  if (isYouTubeUrl(url)) {
+    return baseResult({
+      status: "ONLINE",
+      errorCode: "OK",
+      httpStatus: 200,
+      // 1, not 0 — several places in the UI treat a falsy latency as
+      // "unknown" and render a dash instead of a number.
+      responseTime: 1,
+      finalUrl: url,
+      playlistType: null,
+      isLive: true,
+      error: null,
+    });
+  }
+
   const merged = { ...DEFAULTS, ...options, headers: options.headers };
   const maxAttempts = Math.max(1, merged.maxAttempts);
 

@@ -212,6 +212,7 @@ export default function WatchPage() {
       if (data.success && data.channel) {
         setChannel(data.channel);
         setCurrentStreamIndex(0);
+        setYtEmbedFallbackUrl(null);
 
         // Auto-detect category if not already specified in URL
         if (!categoryParamSlug) {
@@ -341,11 +342,11 @@ export default function WatchPage() {
     return list;
   }, [allChannels, currentCategoryConfig, sidebarGenre, hiddenChannelIds]);
 
-  // The active stream link may point at a YouTube Live broadcast instead of
-  // a direct .m3u8 — those are routed to YouTube's own sanctioned player
-  // instead of Hls.js (see YouTubeLivePlayer for why).
-  const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
-  const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
+  // Every stream — .m3u8 or YouTube — plays in the same custom HlsPlayer.
+  // YouTube links are resolved server-side to a proxied HLS manifest
+  // (see /api/youtube/hls). Only when that extraction fails do we fall back
+  // to YouTube's official embed so the viewer still gets the broadcast.
+  const [ytEmbedFallbackUrl, setYtEmbedFallbackUrl] = useState<string | null>(null);
 
   /**
    * Auto-scroll the sidebar so the channel that is currently playing is
@@ -461,6 +462,31 @@ export default function WatchPage() {
     }
   }, [filteredSidebarChannels, activeChannelId, fetchSidebarChannels, handleSelectChannel]);
 
+  /** The channel's first YouTube link, if it has one (embed fallback target). */
+  const channelYouTubeUrl = useMemo(
+    () => channel?.streams?.find((s) => isYouTubeUrl(s.url))?.url || null,
+    [channel]
+  );
+
+  /**
+   * The custom player exhausted every server for the channel. If the channel
+   * broadcasts via YouTube, try the official embed as a last resort before
+   * giving up; otherwise run the normal hide-and-advance behaviour.
+   */
+  const handlePlayerAllServersFailed = useCallback(() => {
+    if (channelYouTubeUrl && !ytEmbedFallbackUrl) {
+      setYtEmbedFallbackUrl(channelYouTubeUrl);
+      return;
+    }
+    handleAllServersFailed();
+  }, [channelYouTubeUrl, ytEmbedFallbackUrl, handleAllServersFailed]);
+
+  /** The official embed also failed — nothing left to try for this channel. */
+  const handleEmbedUnavailable = useCallback(() => {
+    setYtEmbedFallbackUrl(null);
+    handleAllServersFailed();
+  }, [handleAllServersFailed]);
+
   return (
     <div className="h-[100dvh] overflow-hidden lg:h-auto lg:min-h-screen lg:overflow-visible bg-[#060b13] text-slate-100 flex flex-col">
       {/* Navbar hidden on mobile for the player page; visible from sm breakpoint up */}
@@ -556,11 +582,11 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  {isActiveStreamYouTube ? (
+                  {ytEmbedFallbackUrl ? (
                     <YouTubeLivePlayer
                       channelName={channel.name}
-                      youtubeUrl={activeStreamUrl}
-                      onUnavailable={handleAllServersFailed}
+                      youtubeUrl={ytEmbedFallbackUrl}
+                      onUnavailable={handleEmbedUnavailable}
                     />
                   ) : (
                     <HlsPlayer
@@ -568,7 +594,7 @@ export default function WatchPage() {
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
-                      onAllServersFailed={handleAllServersFailed}
+                      onAllServersFailed={handlePlayerAllServersFailed}
                       onSwitchingChange={handleSwitchingChange}
                       onSwitchFailed={handleSwitchFailed}
                     />

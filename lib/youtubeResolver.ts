@@ -117,15 +117,44 @@ const CLIENTS: InnertubeClient[] = [
       },
     },
   },
+  {
+    // The embed client is the most lenient toward datacenter IPs (Vercel etc.)
+    // and usually skips the "sign in to confirm you're not a bot" gate.
+    userAgent:
+      "Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15",
+    clientNameId: "85",
+    context: {
+      client: {
+        clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+        clientVersion: "2.0",
+        hl: "en",
+        gl: "US",
+        thirdParty: { embedUrl: "https://www.google.com" },
+      },
+    },
+  },
 ];
 
-function manifestFromPlayerResponse(pr: any): string | null {
-  // Verdicts differ per client (WEB may say UNPLAYABLE where ANDROID is OK),
-  // so a non-OK status just means "try the next client".
+/**
+ * Extracts the manifest URL from a player response. Verdicts differ per
+ * client (WEB may say UNPLAYABLE where ANDROID is OK), so a non-OK status
+ * just means "try the next client" — but surface the reason in logs/errors,
+ * since on hosted IPs it's usually YouTube's bot gate
+ * ("Sign in to confirm you're not a bot").
+ */
+function manifestFromPlayerResponse(pr: any, clientLabel: string, diag?: string[]): string | null {
+  const status = pr?.playabilityStatus?.status;
+  const reason = pr?.playabilityStatus?.reason;
+  if (status && status !== "OK") {
+    const note = `${clientLabel}: ${status}${reason ? ` — ${reason}` : ""}`;
+    console.warn(`[ytResolver] ${note}`);
+    diag?.push(note);
+  }
   return pr?.streamingData?.hlsManifestUrl || null;
 }
 
-async function tryInnertube(videoId: string, client: InnertubeClient): Promise<string | null> {
+async function tryInnertube(videoId: string, client: InnertubeClient, diag?: string[]): Promise<string | null> {
+  const clientName = (client.context.client as { clientName: string }).clientName;
   const res = await fetch(`${INNERTUBE_ENDPOINT}?key=${INNERTUBE_KEY}&prettyPrint=false`, {
     method: "POST",
     headers: {
@@ -143,13 +172,17 @@ async function tryInnertube(videoId: string, client: InnertubeClient): Promise<s
       // 400 "Precondition check failed".
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.warn(`[ytResolver] ${clientName}: innertube HTTP ${res.status}`);
+    diag?.push(`${clientName}: innertube HTTP ${res.status}`);
+    return null;
+  }
   const pr = await res.json();
-  return manifestFromPlayerResponse(pr);
+  return manifestFromPlayerResponse(pr, clientName, diag);
 }
 
 /** Fallback: scrape ytInitialPlayerResponse out of the public watch page. */
-async function tryWatchPage(videoId: string): Promise<string | null> {
+async function tryWatchPage(videoId: string, diag?: string[]): Promise<string | null> {
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en&bpctr=9999999999&has_verified=1`, {
     headers: {
       "User-Agent":
@@ -158,14 +191,31 @@ async function tryWatchPage(videoId: string): Promise<string | null> {
       Cookie: "CONSENT=YES+cb; SOCS=CAI",
     },
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    diag?.push(`watch-page: HTTP ${res.status}`);
+    return null;
+  }
   const html = await res.text();
   const match = html.match(/ytInitialPlayerResponse\s*=\s*(\{[\s\S]+?\})\s*;\s*(?:var\s|<\/script>)/);
-  if (!match) return null;
+  if (!match) {
+    diag?.push("watch-page: no ytInitialPlayerResponse found (bot wall?)");
+    return null;
+  }
   try {
-    return manifestFromPlayerResponse(JSON.parse(match[1]));
+    return manifestFromPlayerResponse(JSON.parse(match[1]), "watch-page", diag);
   } catch {
     return null;
+  }
+}
+
+/** Error carrying per-client diagnostics so the API can surface WHY
+ *  extraction failed (usually YouTube's bot gate on datacenter IPs). */
+export class YouTubeResolveError extends Error {
+  diagnostics: string[];
+  constructor(message: string, diagnostics: string[]) {
+    super(message);
+    this.name = "YouTubeResolveError";
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -173,8 +223,8 @@ async function tryWatchPage(videoId: string): Promise<string | null> {
  * Resolves a YouTube video ID to its live HLS master-manifest URL.
  * Pass `forceRefresh` to bypass the cache (e.g. the cached URL just failed —
  * YouTube tokens rotate and hls.js retries would replay the dead one).
- * Throws with a human-readable reason when the video isn't a playable live
- * broadcast (offline, private, embed-restricted, or VOD without HLS).
+ * Throws when the video isn't a playable live broadcast (offline, private,
+ * embed-restricted, VOD without HLS, or YouTube refused this server's IP).
  */
 export async function resolveYouTubeHls(videoId: string, forceRefresh = false): Promise<string> {
   if (forceRefresh) {
@@ -186,33 +236,35 @@ export async function resolveYouTubeHls(videoId: string, forceRefresh = false): 
   const cached = getCachedManifest(videoId);
   if (cached) return cached;
 
-  let lastError: string | null = null;
+  const diag: string[] = [];
 
   for (const client of CLIENTS) {
     try {
-      const url = await tryInnertube(videoId, client);
+      const url = await tryInnertube(videoId, client, diag);
       if (url) {
         cachePut(videoId, url);
         return url;
       }
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      break; // playability verdicts are the same across clients — don't retry
+      const clientName = (client.context.client as { clientName: string }).clientName;
+      const msg = err instanceof Error ? err.message : String(err);
+      diag.push(`${clientName}: ${msg}`);
+      console.warn(`[ytResolver] ${clientName} threw: ${msg}`);
     }
   }
 
   try {
-    const url = await tryWatchPage(videoId);
+    const url = await tryWatchPage(videoId, diag);
     if (url) {
       cachePut(videoId, url);
       return url;
     }
   } catch (err) {
-    lastError = err instanceof Error ? err.message : String(err);
+    diag.push(`watch-page: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  throw new Error(
-    lastError ||
-      "No HLS manifest found — this YouTube link may not be a live broadcast right now"
+  throw new YouTubeResolveError(
+    "No HLS manifest found — this YouTube link may not be a live broadcast right now",
+    diag
   );
 }

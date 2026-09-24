@@ -96,6 +96,17 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const containerBoxRef = useRef<HTMLDivElement>(null);
   /** CSS-driven fullscreen for browsers without the Fullscreen API (iOS). */
   const [cssFullscreen, setCssFullscreen] = useState(false);
+  /** Mirrors the real browser fullscreen state (Fullscreen API). */
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  /**
+   * True while a phone-sized viewport is in portrait. When fullscreen is
+   * active in this state we can't rely on the OS rotating the picture, so the
+   * frame is sized to the swapped viewport dims and rotated 90° to present a
+   * landscape widescreen view. As soon as the viewport is actually landscape
+   * (or the OS orientation-lock kicks in) the rotate is dropped.
+   */
+  const [portraitPhone, setPortraitPhone] = useState(false);
+  const fsGuardPushedRef = useRef(false);
 
   // ---- YouTube chrome cover ----
   // YouTube paints its own title / share / logo chrome over the video while
@@ -142,6 +153,22 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
       return;
     }
 
+    // A throwaway history entry means the first back-press just exits the
+    // full-screen view instead of leaving the page, and we ask the OS to lock
+    // the picture to landscape so it fills the screen wide.
+    const afterEnter = () => {
+      if (!fsGuardPushedRef.current) {
+        fsGuardPushedRef.current = true;
+        window.history.pushState({ __fsGuard: true }, "");
+      }
+      const so = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      so?.lock?.("landscape").catch(() => {
+        /* not supported on this device (e.g. iOS Safari) — ignore */
+      });
+    };
+
     // Real Fullscreen API first (with the webkit prefix for older Safari);
     // where it is missing or refused (iOS), pin the frame to the viewport so
     // a full-screen view still works.
@@ -151,9 +178,15 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
         .webkitRequestFullscreen;
 
     if (requestFs) {
-      Promise.resolve(requestFs.call(target)).catch(() => setCssFullscreen(true));
+      Promise.resolve(requestFs.call(target))
+        .then(afterEnter)
+        .catch(() => {
+          setCssFullscreen(true);
+          afterEnter();
+        });
     } else {
       setCssFullscreen(true);
+      afterEnter();
     }
   };
 
@@ -303,13 +336,64 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     };
   }, []);
 
+  // Keep `isFullscreen` in sync with the real browser fullscreen state and
+  // release the orientation lock on exit.
+  useEffect(() => {
+    const onFsChange = () => {
+      const active = Boolean(document.fullscreenElement);
+      setIsFullscreen(active);
+      if (!active) {
+        fsGuardPushedRef.current = false;
+        const so = screen.orientation as ScreenOrientation & { unlock?: () => void };
+        so?.unlock?.();
+      }
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange);
+    };
+  }, []);
+
+  // A hardware/gesture back press should close fullscreen first.
+  useEffect(() => {
+    const onPopState = () => {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Track whether we're on a phone-sized viewport in portrait, so the
+  // fullscreen frame can be rotated into a landscape widescreen view.
+  useEffect(() => {
+    const update = () => {
+      setPortraitPhone(
+        window.innerWidth < 1024 &&
+          window.matchMedia("(orientation: portrait)").matches
+      );
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
   return (
     <div className="w-full space-y-3">
       <div
         ref={containerBoxRef}
         className={`relative bg-black overflow-hidden rounded-none border-0 ${
-          cssFullscreen
-            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none"
+          isFullscreen || cssFullscreen
+            ? portraitPhone
+              ? "fixed top-1/2 left-1/2 z-[999] w-[100dvh] h-[100dvw] -translate-x-1/2 -translate-y-1/2 rotate-90 max-w-none"
+              : "fixed inset-0 z-[999] w-screen h-screen max-w-none"
             : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
         }`}
         onMouseLeave={() => {

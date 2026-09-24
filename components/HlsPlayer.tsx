@@ -286,6 +286,17 @@ export default function HlsPlayer({
    * so a full-screen view still works everywhere.
    */
   const [cssFullscreen, setCssFullscreen] = useState(false);
+  const cssFullscreenRef = useRef(false);
+  cssFullscreenRef.current = cssFullscreen;
+  /**
+   * True while a mobile viewport is in portrait. Combined with fullscreen this
+   * drives the "force landscape" frame: the fullscreen box is rotated 90° and
+   * sized to the swapped viewport dims so the picture fills the screen WIDE
+   * (landscape) instead of as a tall portrait letterbox. Once the device is
+   * actually landscape (or the OS orientation-lock kicks in) the rotate is
+   * dropped and the box fills normally.
+   */
+  const [portraitPhone, setPortraitPhone] = useState(false);
   const fsGuardPushedRef = useRef(false);
 
   /** Late-bound refs so functions declared earlier can call ones declared
@@ -1083,7 +1094,9 @@ export default function HlsPlayer({
     const handleOrientation = () => {
       if (window.innerWidth >= 1024) return; // desktop already shows the full player
       const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-      if (isLandscape && !document.fullscreenElement) {
+      // Don't re-toggle when we're already in the CSS fullscreen frame — the
+      // rotate trick already presents it as landscape.
+      if (isLandscape && !document.fullscreenElement && !cssFullscreenRef.current) {
         toggleFullscreen();
       } else if (!isLandscape && document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
@@ -1092,6 +1105,21 @@ export default function HlsPlayer({
     window.addEventListener("orientationchange", handleOrientation);
     return () => window.removeEventListener("orientationchange", handleOrientation);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Track portrait-vs-landscape on small screens so the fullscreen frame can
+  // force a wide (landscape) presentation even when the OS refuses to rotate.
+  useEffect(() => {
+    const update = () => {
+      setPortraitPhone(window.innerWidth < 1024 && window.matchMedia("(orientation: portrait)").matches);
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
   }, []);
 
   const toggleFullscreen = () => {
@@ -1185,7 +1213,11 @@ export default function HlsPlayer({
         ref={containerRef}
         className={`relative bg-black overflow-hidden group rounded-none border-0 ${
           isFullscreen || cssFullscreen
-            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none"
+            ? portraitPhone
+              ? // Force a WIDE (landscape) fullscreen frame on a portrait phone:
+                // size the box to the swapped viewport dims and rotate it 90°.
+                "fixed top-1/2 left-1/2 z-[999] w-[100dvh] h-[100dvw] -translate-x-1/2 -translate-y-1/2 rotate-90 max-w-none"
+              : "fixed inset-0 z-[999] w-screen h-screen max-w-none"
             : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
         }`}
         onMouseMove={revealControls}

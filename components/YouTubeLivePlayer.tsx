@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RefreshCw, AlertCircle } from "lucide-react";
+import { RefreshCw, AlertCircle, Play, Pause, Volume2, VolumeX, Maximize } from "lucide-react";
 import { extractYouTubeVideoId } from "@/lib/youtube";
 
 /**
@@ -39,6 +39,12 @@ declare global {
 
 interface YTPlayerInstance {
   loadVideoById: (videoId: string) => void;
+  playVideo: () => void;
+  pauseVideo: () => void;
+  mute: () => void;
+  unMute: () => void;
+  isMuted: () => boolean;
+  getPlayerState: () => number;
   destroy: () => void;
 }
 
@@ -77,10 +83,46 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
 
   // ---- Auto-hiding channel-name overlay — same behavior as HlsPlayer: never
   // shown on its own, only revealed by hover (desktop) or touch (mobile), and
-  // faded back out after a few seconds so it doesn't sit over YouTube's own
-  // controls the rest of the time. ----
+  // faded back out after a few seconds so it doesn't sit over the video the
+  // rest of the time. ----
   const [controlsVisible, setControlsVisible] = useState(false);
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ---- Playback state for the custom hover-only control bar. YouTube's own
+  // bar is disabled (controls: 0), so these drive play/pause, mute and
+  // fullscreen through the IFrame API instead. ----
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const containerBoxRef = useRef<HTMLDivElement>(null);
+
+  const togglePlay = () => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (isPlaying) p.pauseVideo();
+    else p.playVideo();
+  };
+
+  const toggleMute = () => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (isMuted) {
+      p.unMute();
+      setIsMuted(false);
+    } else {
+      p.mute();
+      setIsMuted(true);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    const target = containerBoxRef.current;
+    if (!target) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      target.requestFullscreen?.().catch(() => {});
+    }
+  };
 
   const scheduleControlsHide = () => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -89,6 +131,17 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const revealControls = () => {
     setControlsVisible(true);
     scheduleControlsHide();
+  };
+
+  /** First tap just brings the controls back; a tap while they're visible
+   *  plays/pauses — same convention as HlsPlayer. */
+  const handleVideoClick = () => {
+    if (!controlsVisible) {
+      revealControls();
+      return;
+    }
+    togglePlay();
+    revealControls();
   };
 
   useEffect(() => {
@@ -140,10 +193,20 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
 
       playerRef.current = new window.YT.Player(containerRef.current, {
         videoId,
-        playerVars: { autoplay: 1, playsinline: 1, rel: 0 },
+        // controls: 0 keeps YouTube's own control bar off entirely — the
+        // hover-only custom bar below replaces it, matching HlsPlayer's
+        // auto-hiding chrome.
+        playerVars: { autoplay: 1, playsinline: 1, rel: 0, controls: 0, iv_load_policy: 3, modestbranding: 1 },
         events: {
-          onReady: () => {
-            if (!cancelled) setStatus("ready");
+          onReady: (e) => {
+            if (!cancelled) {
+              setStatus("ready");
+              setIsMuted(e.target.isMuted());
+              setIsPlaying(e.target.getPlayerState() === 1);
+            }
+          },
+          onStateChange: (e) => {
+            if (!cancelled) setIsPlaying(e.data === 1);
           },
           onError: () => {
             if (cancelled) return;
@@ -174,15 +237,25 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   return (
     <div className="w-full space-y-3">
       <div
+        ref={containerBoxRef}
         className="relative bg-black overflow-hidden rounded-none border-0 aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
-        onMouseMove={revealControls}
         onMouseLeave={() => {
           if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
           setControlsVisible(false);
         }}
-        onTouchStart={revealControls}
       >
         <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+
+        {/* The YouTube iframe swallows every mouse event, so hover/tap for the
+            custom chrome has to be caught on a transparent layer above it. */}
+        {status === "ready" && (
+          <div
+            className="absolute inset-0 z-10 cursor-pointer"
+            onMouseMove={revealControls}
+            onTouchStart={revealControls}
+            onClick={handleVideoClick}
+          />
+        )}
 
         {/* Top Channel Title Bar Overlay — hidden until hover/touch, matching HlsPlayer */}
         <div
@@ -194,6 +267,28 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
           <span className="px-2 py-1 rounded-full text-[9px] sm:text-[10px] font-bold bg-slate-900/80 text-red-400 border border-red-500/30 shrink-0">
             YouTube Live
           </span>
+        </div>
+
+        {/* Bottom custom control bar — hover/touch only, same chrome as HlsPlayer */}
+        <div
+          className={`absolute bottom-0 inset-x-0 p-2.5 sm:p-4 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300 flex items-center justify-between gap-3 z-20 ${
+            controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <button
+              onClick={togglePlay}
+              className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors backdrop-blur-sm"
+            >
+              {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+            </button>
+            <button onClick={toggleMute} className="text-slate-300 hover:text-white transition-colors">
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+          </div>
+          <button onClick={toggleFullscreen} className="text-slate-300 hover:text-white transition-colors">
+            <Maximize className="w-4 h-4" />
+          </button>
         </div>
 
         {status === "resolving" && (

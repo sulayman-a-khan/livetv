@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import Hls from "hls.js";
-import { isYouTubeUrl } from "@/lib/youtube";
 import {
   Play,
   Pause,
@@ -340,13 +339,10 @@ export default function HlsPlayer({
     [getHlsRefObj, getVideoEl]
   );
 
-  /** Tells the backend a link is down so it can be hidden from the catalogue.
-   *  YouTube links are skipped: their playback URL is resolved on the fly and
-   *  can fail for transient YouTube-side reasons — the link itself is fine. */
+  /** Tells the backend a link is down so it can be hidden from the catalogue. */
   const reportBrokenStream = useCallback(
-    (streamId?: string, url?: string) => {
+    (streamId?: string) => {
       if (!streamId) return;
-      if (url && isYouTubeUrl(url)) return;
       onStreamFailed?.(streamId);
       fetch("/api/streams/report-broken", {
         method: "POST",
@@ -432,7 +428,7 @@ export default function HlsPlayer({
 
       // ---- The retry failed too: this server is dead ----
       deadServersRef.current.add(index);
-      reportBrokenStream(mirrors[index]?._id, mirrors[index]?.url);
+      reportBrokenStream(mirrors[index]?._id);
 
       const hasUntriedServer = mirrors.some((_, i) => !deadServersRef.current.has(i));
 
@@ -547,16 +543,12 @@ export default function HlsPlayer({
   };
 
   /**
-   * Loads an already-resolved playback URL into a slot. YouTube URLs never
-   * reach this — `loadIntoSlot` below resolves them to a proxied HLS URL
-   * first, so everything here is a plain HLS manifest.
-   *
-   * `opts.front` decides how events are handled: the front slot drives all
-   * the visible player chrome and the full resilience ladder; the back slot
-   * is a silent, muted, low-quality pre-buffer whose only job is to prove a
-   * mirror works before it's shown.
+   * Unified loader for EITHER slot. `opts.front` decides how events are
+   * handled: the front slot drives all the visible player chrome and the
+   * full resilience ladder; the back slot is a silent, muted, low-quality
+   * pre-buffer whose only job is to prove a mirror works before it's shown.
    */
-  const loadResolvedIntoSlot = useCallback(
+  const loadIntoSlot = useCallback(
     (slot: Slot, url: string, opts: { front: boolean; generation?: number }) => {
       const video = getVideoEl(slot);
       if (!video) return;
@@ -724,79 +716,6 @@ export default function HlsPlayer({
       }
     },
     [applyNetworkCap, handleStreamFailure, getVideoEl, getHlsRefObj]
-  );
-
-  /** Last playback URL each slot resolved a YouTube link to — used to detect
-   *  a retry of the same link so we can force a fresh manifest extraction
-   *  instead of replaying the URL that just expired/failed. */
-  const ytResolvedRef = useRef<{ A: string | null; B: string | null }>({ A: null, B: null });
-  /** Bumped every time a slot is (re)loaded — lets a slow YouTube resolution
-   *  notice the slot has already moved on and abandon itself. */
-  const slotEpochRef = useRef<{ A: number; B: number }>({ A: 0, B: 0 });
-
-  /**
-   * Unified loader for EITHER slot. Accepts both plain .m3u8 URLs and
-   * YouTube watch/live/channel URLs: YouTube links are first resolved
-   * server-side (/api/youtube/hls) to a same-origin proxied HLS manifest so
-   * they play in this exact same player, controls and resilience ladder
-   * included. A resolution failure enters the normal failure ladder (front
-   * slot) or skips to the next mirror (back/preload slot).
-   */
-  const loadIntoSlot = useCallback(
-    (slot: Slot, url: string, opts: { front: boolean; generation?: number }) => {
-      const epoch = ++slotEpochRef.current[slot];
-
-      if (!isYouTubeUrl(url)) {
-        loadResolvedIntoSlot(slot, url, opts);
-        return;
-      }
-
-      if (opts.front) {
-        setIsLoading(true);
-        setErrorMsg(null);
-      }
-
-      const hlsRefObj = getHlsRefObj(slot);
-      if (hlsRefObj.current) {
-        hlsRefObj.current.destroy();
-        hlsRefObj.current = null;
-      }
-
-      const previousResolved = ytResolvedRef.current[slot];
-      // Retry of the same YouTube link → bypass the server-side manifest
-      // cache; the URL we just tried has likely expired or been rejected.
-      const needsRefresh = previousResolved !== null;
-      ytResolvedRef.current[slot] = null;
-
-      (async () => {
-        try {
-          const res = await fetch("/api/youtube/hls", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url, refresh: needsRefresh }),
-          });
-          const data = await res.json();
-          if (!data.success || !data.playbackUrl) {
-            throw new Error(data.error || "Couldn't resolve the YouTube stream");
-          }
-
-          // The slot was repurposed while we were resolving — abandon.
-          if (slotEpochRef.current[slot] !== epoch) return;
-
-          ytResolvedRef.current[slot] = data.playbackUrl;
-          loadResolvedIntoSlot(slot, data.playbackUrl, opts);
-        } catch (err) {
-          if (slotEpochRef.current[slot] !== epoch) return;
-          if (opts.front) {
-            console.warn("[YouTube HLS]", err);
-            handleStreamFailure("YouTube stream couldn't be resolved");
-          } else {
-            failPreloadAttemptRef.current?.(slot);
-          }
-        }
-      })();
-    },
-    [loadResolvedIntoSlot, getHlsRefObj, handleStreamFailure]
   );
   loadIntoSlotRef.current = loadIntoSlot;
 

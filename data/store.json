@@ -11,7 +11,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.527Z"
+      "updatedAt": "2026-09-24T22:32:11.009Z"
     },
     {
       "_id": "ch_gtv",
@@ -24,7 +24,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.527Z"
+      "updatedAt": "2026-09-24T22:32:11.011Z"
     },
     {
       "_id": "ch_starsports1",
@@ -37,7 +37,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.527Z"
+      "updatedAt": "2026-09-24T22:32:11.012Z"
     },
     {
       "_id": "ch_sonyten1",
@@ -50,7 +50,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.528Z"
+      "updatedAt": "2026-09-24T22:32:11.012Z"
     },
     {
       "_id": "ch_ptvsports",
@@ -63,7 +63,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.528Z"
+      "updatedAt": "2026-09-24T22:32:11.012Z"
     },
     {
       "_id": "ch_asports",
@@ -76,7 +76,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.316Z",
-      "updatedAt": "2026-09-24T22:10:47.528Z"
+      "updatedAt": "2026-09-24T22:32:11.013Z"
     },
     {
       "_id": "ch_somoynews",
@@ -89,7 +89,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.317Z",
-      "updatedAt": "2026-09-24T22:10:47.528Z"
+      "updatedAt": "2026-09-24T22:32:11.013Z"
     },
     {
       "_id": "ch_aajtak",
@@ -102,7 +102,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.317Z",
-      "updatedAt": "2026-09-24T22:10:47.529Z"
+      "updatedAt": "2026-09-24T22:32:11.013Z"
     },
     {
       "_id": "ch_geonews",
@@ -115,7 +115,7 @@
       "isPinned": false,
       "priorityOrder": 99,
       "createdAt": "2026-09-24T20:20:06.317Z",
-      "updatedAt": "2026-09-24T22:10:47.529Z"
+      "updatedAt": "2026-09-24T22:32:11.014Z"
     }
   ],
   "streams": []

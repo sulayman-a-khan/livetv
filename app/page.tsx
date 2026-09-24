@@ -1,40 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
-import { CATEGORIES } from "@/lib/categories";
-import { ArrowRight } from "lucide-react";
+import ChannelRail, { RailChannel } from "@/components/ChannelRail";
+import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
+import { RefreshCw, Tv } from "lucide-react";
 
-/**
- * Mobile category buttons. `flagCode` is an ISO-3166 alpha-2 code rendered as a
- * real country flag image; categories that aren't a country fall back to an icon.
- */
-const MOBILE_CATEGORY_BUTTONS: {
-  label: string;
-  href: string;
-  flagCode?: string;
-  icon?: string;
-}[] = [
-  { label: "Bangladesh", href: "/category/bangladeshi-tv", flagCode: "bd", icon: "\ud83c\udde7\ud83c\udde9" },
-  { label: "India", href: "/category/indian-tv", flagCode: "in", icon: "\ud83c\uddee\ud83c\uddf3" },
-  { label: "Pakistan", href: "/category/pakistani-tv", flagCode: "pk", icon: "\ud83c\uddf5\ud83c\uddf0" },
-  { label: "Sports", href: "/category/sports-tv", icon: "\u26bd" },
-  { label: "News", href: "/category/news-tv", icon: "\ud83d\udcf0" },
-  { label: "Global", href: "/category/global-tv", icon: "\ud83c\udf0d" },
-];
+/** Friendly row headings for each category rail (overrides the raw category title). */
+const RAIL_TITLES: Record<string, string> = {
+  "sports-tv": "Sports Channels",
+  "bangladeshi-tv": "Bangladeshi Channels",
+  "indian-tv": "Indian Channels",
+  "pakistani-tv": "Pakistani Channels",
+  "news-tv": "News Channels",
+  "global-tv": "Global Channels",
+};
+
+interface ApiChannel extends RailChannel {
+  category?: string;
+  subCategory?: string;
+  country?: string;
+}
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [channels, setChannels] = useState<ApiChannel[]>([]);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      try {
+        const res = await fetch("/api/channels", { cache: "no-store" });
+        const data = await res.json();
+        if (active && data.success && Array.isArray(data.channels)) {
+          setChannels(data.channels);
+        }
+      } catch (err) {
+        console.error("Failed to load home channels", err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
-    // Route to sports or default category with search query or search first category
     router.push(`/category/sports-tv?search=${encodeURIComponent(searchQuery)}`);
   };
+
+  /** One rail per category, in the CATEGORIES order (Sports → Bangla → India → Pakistan → News → Global). */
+  const rails = useMemo(
+    () =>
+      CATEGORIES.map((category) => ({
+        category,
+        title: RAIL_TITLES[category.slug] || category.title,
+        channels: channels.filter((ch) => isChannelInCategory(ch, category)),
+      })).filter((rail) => rail.channels.length > 0),
+    [channels]
+  );
 
   return (
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
@@ -44,15 +76,13 @@ export default function HomePage() {
         onSearchSubmit={handleSearchSubmit}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 sm:space-y-8">
-        {/* Top Hero Banner Section */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
+        {/* Top Hero Banner */}
         <section className="relative rounded-3xl overflow-hidden border border-slate-800/80 bg-gradient-to-r from-[#0a1222] via-[#0d172c] to-[#0f1d38] shadow-2xl">
-          {/* Subtle ambient light glow */}
           <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[220px] sm:min-h-[300px]">
-            {/* Left Hero Content - hidden on mobile, only the hero banner image shows */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[200px] sm:min-h-[280px]">
             <div className="hidden sm:flex lg:col-span-6 p-6 sm:p-10 flex-col justify-center z-10">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold mb-4 w-fit">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -67,20 +97,17 @@ export default function HomePage() {
               </h1>
 
               <p className="mt-3 text-slate-300 text-sm sm:text-base font-medium max-w-md">
-                Choose Your Category to Start Watching
+                Tap any channel to start watching live, instantly.
               </p>
 
-              {/* Green accent line */}
-              <div className="w-16 h-1 bg-emerald-400 rounded-full mt-3 shadow-md shadow-emerald-500/50" />
+              <div className="w-16 h-1 bg-emerald-400 rounded-full mt-4 shadow-md shadow-emerald-500/50" />
             </div>
 
-            {/* Right Hero Graphic Montage */}
-            <div className="lg:col-span-6 relative overflow-hidden flex items-center justify-center min-h-[220px] lg:min-h-full">
-              {/* Montage Background Image with soft gradient blending on left */}
+            <div className="lg:col-span-6 relative overflow-hidden flex items-center justify-center min-h-[200px] lg:min-h-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/images/hero_banner.png"
-                alt="Live TV Portal Category Montage"
+                alt="Live TV montage"
                 className="absolute inset-0 w-full h-full object-cover object-center opacity-90 filter saturate-[1.1]"
               />
               <div className="absolute inset-0 bg-gradient-to-r from-[#0a1222] via-[#0a1222]/40 to-transparent lg:block hidden" />
@@ -89,94 +116,52 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* ===== Mobile Only: 3-per-row Flag Category Buttons (replaces the cards) ===== */}
-        <section className="sm:hidden">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">
-            Browse Categories
-          </h2>
-          <div className="grid grid-cols-3 gap-3">
-            {MOBILE_CATEGORY_BUTTONS.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="group flex flex-col items-center justify-center gap-2 rounded-2xl border border-slate-800 bg-[#0d1628] px-2 py-4 shadow-md active:scale-[0.97] hover:border-emerald-500/60 transition-all"
-              >
-                {/* Country flag (or icon fallback for non-country categories) */}
-                <span className="relative w-12 h-12 rounded-full overflow-hidden bg-[#070d18] border border-slate-700 flex items-center justify-center shadow-inner group-hover:border-emerald-500/60 transition-colors">
-                  {/* Emoji sits underneath and shows through if the flag image fails */}
-                  <span className="text-2xl leading-none">{item.icon}</span>
-                  {item.flagCode && (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={`https://flagcdn.com/w80/${item.flagCode}.png`}
-                      srcSet={`https://flagcdn.com/w160/${item.flagCode}.png 2x`}
-                      alt={`${item.label} flag`}
-                      loading="lazy"
-                      className="absolute inset-0 w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  )}
-                </span>
-                <span className="text-[11px] font-bold text-slate-200 text-center leading-tight">
-                  {item.label}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-
-        {/* Category Cards Section - hidden on mobile (flag buttons are used there instead) */}
-        <section className="hidden sm:block space-y-4">
-          <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">
-            Browse Categories
-          </h2>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
-            {CATEGORIES.map((category) => (
-              <Link
-                key={category.slug}
-                href={`/category/${category.slug}`}
-                className="group relative rounded-2xl p-[1.5px] bg-gradient-to-br from-slate-800 via-slate-800 to-slate-800 hover:from-blue-500 hover:via-cyan-400 hover:to-emerald-400 transition-colors duration-300"
-              >
-                <div className="relative rounded-[15px] bg-[#0b1220] overflow-hidden flex items-center gap-4 p-3.5 lg:p-4 h-full">
-                  {/* Thumbnail tile */}
-                  <div className="relative w-20 h-20 lg:w-24 lg:h-24 rounded-xl overflow-hidden shrink-0 border border-slate-800">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={category.image}
-                      alt={category.name}
-                      className="w-full h-full object-cover object-center group-hover:scale-110 transition-transform duration-500 filter saturate-[1.15]"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                    <span className="absolute bottom-1 left-1 w-6 h-6 rounded-full bg-slate-950/90 backdrop-blur-sm border border-slate-700/80 flex items-center justify-center text-xs shadow-md">
-                      {category.badge}
-                    </span>
-                  </div>
-
-                  {/* Text content */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm lg:text-base font-black text-white tracking-tight truncate group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-blue-400 group-hover:via-cyan-300 group-hover:to-emerald-400 transition-colors">
-                      {category.title}
-                    </h3>
-                    <p className="text-[11px] lg:text-xs text-slate-400 font-medium line-clamp-1 mt-0.5">
-                      {category.subtitle}
-                    </p>
-                  </div>
-
-                  {/* Gradient arrow chip */}
-                  <div className="w-8 h-8 lg:w-9 lg:h-9 rounded-full bg-slate-900 border border-slate-700/80 group-hover:border-transparent group-hover:bg-gradient-to-tr group-hover:from-blue-500 group-hover:via-cyan-400 group-hover:to-emerald-400 text-slate-400 group-hover:text-slate-950 flex items-center justify-center shrink-0 transition-all group-hover:scale-105">
-                    <ArrowRight className="w-4 h-4 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-                  </div>
+        {/* Channel rails */}
+        {loading ? (
+          <div className="space-y-8" aria-busy="true">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="space-y-3">
+                <div className="h-5 w-40 rounded bg-[#0d1628] animate-pulse" />
+                <div className="flex gap-3 sm:gap-4 overflow-hidden">
+                  {Array.from({ length: 8 }).map((_, j) => (
+                    <div key={j} className="shrink-0 w-[78px] sm:w-[104px] flex flex-col items-center gap-2">
+                      <div className="w-[62px] h-[62px] sm:w-[84px] sm:h-[84px] rounded-full bg-[#0d1628] animate-pulse" />
+                      <div className="h-2.5 w-14 rounded bg-[#0d1628] animate-pulse" />
+                    </div>
+                  ))}
                 </div>
-              </Link>
+              </div>
+            ))}
+            <p className="flex items-center justify-center gap-2 text-xs font-bold text-slate-400 pt-2">
+              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+              Loading live channels...
+            </p>
+          </div>
+        ) : rails.length === 0 ? (
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
+            <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
+            <p className="text-xs text-slate-400">
+              There are no active streams right now. Please check back shortly.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-7 sm:space-y-10 animate-fade-in">
+            {rails.map((rail) => (
+              <ChannelRail
+                key={rail.category.slug}
+                title={rail.title}
+                accent={rail.category.badge}
+                categorySlug={rail.category.slug}
+                channels={rail.channels}
+              />
             ))}
           </div>
-        </section>
+        )}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400">
+      <footer className="border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400 mt-4">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>SoluPlay • 24/7 Automated Live HD Streams</span>
           <div className="flex items-center gap-4 text-slate-400">

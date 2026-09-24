@@ -1094,12 +1094,13 @@ export default function HlsPlayer({
     const handleOrientation = () => {
       if (window.innerWidth >= 1024) return; // desktop already shows the full player
       const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-      // Don't re-toggle when we're already in the CSS fullscreen frame — the
-      // rotate trick already presents it as landscape.
+      // Rotating a phone to landscape is the universal "go widescreen" gesture
+      // — enter fullscreen if we're not already there. We deliberately never
+      // auto-EXIT here: the forced-landscape rotate frame keeps fullscreen
+      // usable while the phone is still held in portrait, so bailing out on
+      // portrait would immediately undo the fullscreen button tap.
       if (isLandscape && !document.fullscreenElement && !cssFullscreenRef.current) {
         toggleFullscreen();
-      } else if (!isLandscape && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
       }
     };
     window.addEventListener("orientationchange", handleOrientation);

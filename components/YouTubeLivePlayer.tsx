@@ -95,6 +95,18 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const [isMuted, setIsMuted] = useState(false);
   const containerBoxRef = useRef<HTMLDivElement>(null);
 
+  // ---- YouTube chrome masking ----
+  // Even with controls: 0, YouTube paints its own title / share / logo chrome
+  // over the video while the embed boots and whenever it is paused. An opaque
+  // layer of our own is the only reliable way to keep that off screen, so the
+  // mask below stays up until playback has been running for a couple of
+  // seconds, and comes back whenever the player leaves the playing state.
+  /** Raw YT.PlayerState number (-1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued). */
+  const [ytState, setYtState] = useState(-1);
+  const [bootDone, setBootDone] = useState(false);
+  const bootDoneRef = useRef(false);
+  const bootTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const togglePlay = () => {
     const p = playerRef.current;
     if (!p) return;
@@ -144,9 +156,16 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     revealControls();
   };
 
+  /** Click/tap on the masking overlay: start (or resume) playback. */
+  const resumePlayback = () => {
+    playerRef.current?.playVideo();
+    revealControls();
+  };
+
   useEffect(() => {
     return () => {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
     };
   }, []);
 
@@ -154,6 +173,10 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     let cancelled = false;
     setStatus("resolving");
     setErrorMsg(null);
+    setYtState(-1);
+    setBootDone(false);
+    bootDoneRef.current = false;
+    if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
 
     async function resolveAndPlay() {
       // Fast path: the URL already names a video — skip the network round trip.
@@ -202,11 +225,21 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             if (!cancelled) {
               setStatus("ready");
               setIsMuted(e.target.isMuted());
-              setIsPlaying(e.target.getPlayerState() === 1);
+              const st = e.target.getPlayerState();
+              setIsPlaying(st === 1);
+              setYtState(st);
             }
           },
           onStateChange: (e) => {
-            if (!cancelled) setIsPlaying(e.data === 1);
+            if (cancelled) return;
+            setIsPlaying(e.data === 1);
+            setYtState(e.data);
+            if (e.data === 1 && !bootDoneRef.current) {
+              bootDoneRef.current = true;
+              // Hold the mask a moment past first frame so YouTube's start-of
+              // playback chrome reveal happens behind it, not on screen.
+              bootTimerRef.current = setTimeout(() => setBootDone(true), 2500);
+            }
           },
           onError: () => {
             if (cancelled) return;
@@ -255,6 +288,28 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             onTouchStart={revealControls}
             onClick={handleVideoClick}
           />
+        )}
+
+        {/* Opaque mask over the embed while it boots and whenever it isn't
+            playing — those are exactly the moments YouTube draws its own
+            title / share / logo chrome on top of the video. Fully opaque so
+            none of it shows through; carries our own spinner / play button so
+            the surface still behaves like a player. */}
+        {status === "ready" && (!bootDone || ytState === 2 || ytState === 0) && (
+          <div
+            className="absolute inset-0 z-[15] bg-black flex items-center justify-center cursor-pointer"
+            onMouseMove={revealControls}
+            onTouchStart={revealControls}
+            onClick={resumePlayback}
+          >
+            {ytState === 1 || ytState === 3 ? (
+              <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+                <Play className="w-6 h-6 fill-current text-white ml-1" />
+              </div>
+            )}
+          </div>
         )}
 
         {/* Top Channel Title Bar Overlay — hidden until hover/touch, matching HlsPlayer */}

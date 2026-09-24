@@ -94,6 +94,8 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const containerBoxRef = useRef<HTMLDivElement>(null);
+  /** CSS-driven fullscreen for browsers without the Fullscreen API (iOS). */
+  const [cssFullscreen, setCssFullscreen] = useState(false);
 
   // ---- YouTube chrome cover ----
   // YouTube paints its own title / share / logo chrome over the video while
@@ -130,10 +132,28 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const toggleFullscreen = () => {
     const target = containerBoxRef.current;
     if (!target) return;
+
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
+      return;
+    }
+    if (cssFullscreen) {
+      setCssFullscreen(false);
+      return;
+    }
+
+    // Real Fullscreen API first (with the webkit prefix for older Safari);
+    // where it is missing or refused (iOS), pin the frame to the viewport so
+    // a full-screen view still works.
+    const requestFs =
+      target.requestFullscreen ||
+      (target as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
+        .webkitRequestFullscreen;
+
+    if (requestFs) {
+      Promise.resolve(requestFs.call(target)).catch(() => setCssFullscreen(true));
     } else {
-      target.requestFullscreen?.().catch(() => {});
+      setCssFullscreen(true);
     }
   };
 
@@ -146,14 +166,9 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     scheduleControlsHide();
   };
 
-  /** First tap just brings the controls back; a tap while they're visible
-   *  plays/pauses — same convention as HlsPlayer. */
+  /** Tapping the video only brings the controls back; play/pause is triggered
+   *  exclusively by the dedicated play/pause button. */
   const handleVideoClick = () => {
-    if (!controlsVisible) {
-      revealControls();
-      return;
-    }
-    togglePlay();
     revealControls();
   };
 
@@ -292,7 +307,11 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     <div className="w-full space-y-3">
       <div
         ref={containerBoxRef}
-        className="relative bg-black overflow-hidden rounded-none border-0 aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
+        className={`relative bg-black overflow-hidden rounded-none border-0 ${
+          cssFullscreen
+            ? "fixed inset-0 z-[999] w-screen h-screen max-w-none"
+            : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
+        }`}
         onMouseLeave={() => {
           if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
           setControlsVisible(false);

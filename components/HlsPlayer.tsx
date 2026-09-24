@@ -279,6 +279,13 @@ export default function HlsPlayer({
 
   // ---- Fullscreen state ----
   const [isFullscreen, setIsFullscreen] = useState(false);
+  /**
+   * CSS-driven fullscreen used when the browser Fullscreen API is unavailable
+   * or refuses (notably iOS Safari, which only allows the raw <video> to go
+   * fullscreen). The container is pinned to the viewport with fixed positioning
+   * so a full-screen view still works everywhere.
+   */
+  const [cssFullscreen, setCssFullscreen] = useState(false);
   const fsGuardPushedRef = useRef(false);
 
   /** Late-bound refs so functions declared earlier can call ones declared
@@ -1007,15 +1014,11 @@ export default function HlsPlayer({
   };
 
   /**
-   * First tap on a playing video just brings the controls back (standard
-   * mobile player behaviour); a tap while they are already visible plays/pauses.
+   * Tapping the video only brings the controls back. Play/pause is triggered
+   * exclusively by the dedicated play/pause button — never by tapping the
+   * picture (on mobile an accidental tap used to pause the stream).
    */
   const handleVideoClick = () => {
-    if (!controlsVisible) {
-      revealControls();
-      return;
-    }
-    togglePlay();
     revealControls();
   };
 
@@ -1096,12 +1099,19 @@ export default function HlsPlayer({
     // controls and quality picker stay usable on mobile.
     const target = containerRef.current;
     const video = getVideoEl(frontSlotRef.current) as
-      | (HTMLVideoElement & { webkitEnterFullscreen?: () => void })
+      | (HTMLVideoElement & {
+          webkitEnterFullscreen?: () => void;
+          webkitSupportsFullscreen?: boolean;
+        })
       | null;
     if (!target) return;
 
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(console.error);
+      return;
+    }
+    if (cssFullscreen) {
+      setCssFullscreen(false);
       return;
     }
 
@@ -1118,13 +1128,29 @@ export default function HlsPlayer({
       });
     };
 
-    if (target.requestFullscreen) {
-      target.requestFullscreen().then(afterEnter).catch(() => {
-        // iOS Safari only allows fullscreen on the video element itself
-        video?.webkitEnterFullscreen?.();
-      });
+    // Prefer the real Fullscreen API (with the webkit prefix for older
+    // Safari), then iOS's video-only fullscreen, then the CSS fallback.
+    const requestFs =
+      target.requestFullscreen ||
+      (target as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
+        .webkitRequestFullscreen;
+
+    if (requestFs) {
+      Promise.resolve(requestFs.call(target))
+        .then(afterEnter)
+        .catch(() => {
+          if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+          } else {
+            setCssFullscreen(true);
+            afterEnter();
+          }
+        });
+    } else if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
     } else {
-      video?.webkitEnterFullscreen?.();
+      setCssFullscreen(true);
+      afterEnter();
     }
   };
 
@@ -1158,7 +1184,7 @@ export default function HlsPlayer({
       <div
         ref={containerRef}
         className={`relative bg-black overflow-hidden group rounded-none border-0 ${
-          isFullscreen
+          isFullscreen || cssFullscreen
             ? "fixed inset-0 z-[999] w-screen h-screen max-w-none"
             : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
         }`}

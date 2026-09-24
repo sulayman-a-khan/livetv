@@ -1082,6 +1082,10 @@ export default function HlsPlayer({
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
+    // Clear both flags synchronously so the rotate-90 frame is torn down on
+    // this very render — don't wait for the async fullscreenchange event,
+    // which can leave the player visibly rotated after a hardware-back exit.
+    setIsFullscreen(false);
     if (cssFullscreenRef.current) {
       setCssFullscreen(false);
     }
@@ -1103,33 +1107,14 @@ export default function HlsPlayer({
     // browser already consumed that entry by the time popstate fires, so we
     // must NOT pop another one here.
     const onPopState = () => {
-      if (document.fullscreenElement || cssFullscreenRef.current) {
-        exitFullscreenMode(false);
-      }
+      // Always fully tear down on a back press: exit real fullscreen, clear
+      // the CSS rotate frame, and release the orientation lock. The browser
+      // already consumed the guard entry, so don't pop another one.
+      exitFullscreenMode(false);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [exitFullscreenMode]);
-
-  // On phones/tablets, rotating to landscape is the universal "go widescreen"
-  // gesture for a video app — mirror that instead of requiring a button tap.
-  useEffect(() => {
-    const handleOrientation = () => {
-      if (window.innerWidth >= 1024) return; // desktop already shows the full player
-      const isLandscape = window.matchMedia("(orientation: landscape)").matches;
-      // Rotating a phone to landscape is the universal "go widescreen" gesture
-      // — enter fullscreen if we're not already there. We deliberately never
-      // auto-EXIT here: the forced-landscape rotate frame keeps fullscreen
-      // usable while the phone is still held in portrait, so bailing out on
-      // portrait would immediately undo the fullscreen button tap.
-      if (isLandscape && !document.fullscreenElement && !cssFullscreenRef.current) {
-        toggleFullscreen();
-      }
-    };
-    window.addEventListener("orientationchange", handleOrientation);
-    return () => window.removeEventListener("orientationchange", handleOrientation);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Track portrait-vs-landscape on small screens so the fullscreen frame can
   // force a wide (landscape) presentation even when the OS refuses to rotate.

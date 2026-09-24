@@ -150,6 +150,10 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
+    // Clear both flags synchronously so the rotate-90 frame is torn down on
+    // this very render — don't wait for the async fullscreenchange event,
+    // which can leave the player visibly rotated after a hardware-back exit.
+    setIsFullscreen(false);
     if (cssFullscreenRef.current) {
       setCssFullscreen(false);
     }
@@ -380,9 +384,10 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   // NOT pop another one here.
   useEffect(() => {
     const onPopState = () => {
-      if (document.fullscreenElement || cssFullscreenRef.current) {
-        exitFullscreenMode(false);
-      }
+      // Always fully tear down on a back press: exit real fullscreen, clear
+      // the CSS rotate frame, and release the orientation lock. The browser
+      // already consumed the guard entry, so don't pop another one.
+      exitFullscreenMode(false);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);

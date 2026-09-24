@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { RefreshCw, AlertCircle, Play, Pause, Volume2, VolumeX, Maximize, SatelliteDish, Signal } from "lucide-react";
 import { extractYouTubeVideoId } from "@/lib/youtube";
 
@@ -96,6 +96,8 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   const containerBoxRef = useRef<HTMLDivElement>(null);
   /** CSS-driven fullscreen for browsers without the Fullscreen API (iOS). */
   const [cssFullscreen, setCssFullscreen] = useState(false);
+  const cssFullscreenRef = useRef(false);
+  cssFullscreenRef.current = cssFullscreen;
   /** Mirrors the real browser fullscreen state (Fullscreen API). */
   const [isFullscreen, setIsFullscreen] = useState(false);
   /**
@@ -140,16 +142,33 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     }
   };
 
+  // Leaves whichever fullscreen mode is active (real Fullscreen API and/or the
+  // CSS rotate frame), releases the orientation lock, and — when `consumeGuard`
+  // is true — pops the throwaway history entry pushed on enter so it can't
+  // swallow the user's next back press.
+  const exitFullscreenMode = useCallback((consumeGuard: boolean) => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    if (cssFullscreenRef.current) {
+      setCssFullscreen(false);
+    }
+    const so = screen.orientation as ScreenOrientation & { unlock?: () => void };
+    so?.unlock?.();
+    if (consumeGuard && fsGuardPushedRef.current) {
+      fsGuardPushedRef.current = false;
+      window.history.back();
+    } else {
+      fsGuardPushedRef.current = false;
+    }
+  }, []);
+
   const toggleFullscreen = () => {
     const target = containerBoxRef.current;
     if (!target) return;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-      return;
-    }
-    if (cssFullscreen) {
-      setCssFullscreen(false);
+    if (document.fullscreenElement || cssFullscreen) {
+      exitFullscreenMode(true);
       return;
     }
 
@@ -356,16 +375,18 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     };
   }, []);
 
-  // A hardware/gesture back press should close fullscreen first.
+  // A hardware/gesture back press should close fullscreen first. The browser
+  // already consumed the guard entry by the time popstate fires, so we must
+  // NOT pop another one here.
   useEffect(() => {
     const onPopState = () => {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      if (document.fullscreenElement || cssFullscreenRef.current) {
+        exitFullscreenMode(false);
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [exitFullscreenMode]);
 
   // Track whether we're on a phone-sized viewport in portrait, so the
   // fullscreen frame can be rotated into a landscape widescreen view.

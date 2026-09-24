@@ -1074,19 +1074,42 @@ export default function HlsPlayer({
     };
   }, []);
 
+  // Leaves whichever fullscreen mode is active (real Fullscreen API and/or the
+  // CSS rotate frame), releases the orientation lock, and — when `consumeGuard`
+  // is true — pops the throwaway history entry that was pushed on enter so it
+  // can't swallow the user's next back press.
+  const exitFullscreenMode = useCallback((consumeGuard: boolean) => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    if (cssFullscreenRef.current) {
+      setCssFullscreen(false);
+    }
+    const so = screen.orientation as ScreenOrientation & { unlock?: () => void };
+    so?.unlock?.();
+    if (consumeGuard && fsGuardPushedRef.current) {
+      fsGuardPushedRef.current = false;
+      window.history.back();
+    } else {
+      fsGuardPushedRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     // A throwaway history entry is pushed the moment fullscreen opens (see
     // toggleFullscreen). This means the first back-press just exits
     // fullscreen — the same "back closes the overlay first" behaviour users
-    // expect from every native video app — instead of navigating away.
+    // expect from every native video app — instead of navigating away. The
+    // browser already consumed that entry by the time popstate fires, so we
+    // must NOT pop another one here.
     const onPopState = () => {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      if (document.fullscreenElement || cssFullscreenRef.current) {
+        exitFullscreenMode(false);
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [exitFullscreenMode]);
 
   // On phones/tablets, rotating to landscape is the universal "go widescreen"
   // gesture for a video app — mirror that instead of requiring a button tap.
@@ -1135,12 +1158,8 @@ export default function HlsPlayer({
       | null;
     if (!target) return;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(console.error);
-      return;
-    }
-    if (cssFullscreen) {
-      setCssFullscreen(false);
+    if (document.fullscreenElement || cssFullscreen) {
+      exitFullscreenMode(true);
       return;
     }
 

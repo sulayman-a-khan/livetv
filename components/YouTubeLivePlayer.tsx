@@ -103,8 +103,8 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   // seconds, and comes back whenever the player leaves the playing state.
   /** Raw YT.PlayerState number (-1 unstarted, 0 ended, 1 playing, 2 paused, 3 buffering, 5 cued). */
   const [ytState, setYtState] = useState(-1);
+  const ytStateRef = useRef(-1);
   const [bootDone, setBootDone] = useState(false);
-  const bootDoneRef = useRef(false);
   const bootTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const togglePlay = () => {
@@ -174,8 +174,8 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     setStatus("resolving");
     setErrorMsg(null);
     setYtState(-1);
+    ytStateRef.current = -1;
     setBootDone(false);
-    bootDoneRef.current = false;
     if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
 
     async function resolveAndPlay() {
@@ -208,13 +208,27 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
       await loadYouTubeIframeApi();
       if (cancelled || !containerRef.current || !window.YT) return;
 
+      // A channel switch gets a brand-new iframe. Loading a new video into an
+      // existing player via loadVideoById leaves it paused — the play() that
+      // fires inside the already-loaded iframe has no user activation behind
+      // it — whereas a fresh embed carrying autoplay=1 starts exactly like
+      // the first one on the page did.
       if (playerRef.current) {
-        playerRef.current.loadVideoById(videoId);
-        setStatus("ready");
-        return;
+        try {
+          playerRef.current.destroy();
+        } catch {
+          /* already gone */
+        }
+        playerRef.current = null;
+        // destroy() leaves its placeholder div behind; without clearing it the
+        // new iframe lands below the fold of this overflow-hidden box.
+        containerRef.current.replaceChildren();
       }
+      const mount = document.createElement("div");
+      mount.className = "w-full h-full";
+      containerRef.current.appendChild(mount);
 
-      playerRef.current = new window.YT.Player(containerRef.current, {
+      playerRef.current = new window.YT.Player(mount, {
         videoId,
         // controls: 0 keeps YouTube's own control bar off entirely — the
         // hover-only custom bar below replaces it, matching HlsPlayer's
@@ -228,16 +242,21 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
               const st = e.target.getPlayerState();
               setIsPlaying(st === 1);
               setYtState(st);
+              ytStateRef.current = st;
             }
           },
           onStateChange: (e) => {
             if (cancelled) return;
             setIsPlaying(e.data === 1);
+            const prev = ytStateRef.current;
             setYtState(e.data);
-            if (e.data === 1 && !bootDoneRef.current) {
-              bootDoneRef.current = true;
-              // Hold the mask a moment past first frame so YouTube's start-of
-              // playback chrome reveal happens behind it, not on screen.
+            ytStateRef.current = e.data;
+            // Every entry into PLAYING (first frame after a tune-in, or a
+            // resume from pause) is a moment YouTube repaints its title /
+            // share chrome for a couple of seconds — hold the mask across it.
+            if (e.data === 1 && prev !== 1) {
+              setBootDone(false);
+              if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
               bootTimerRef.current = setTimeout(() => setBootDone(true), 2500);
             }
           },
@@ -305,9 +324,17 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             {ytState === 1 || ytState === 3 ? (
               <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
             ) : (
-              <div className="w-14 h-14 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors">
+              <button
+                type="button"
+                aria-label={`Play ${channelName}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resumePlayback();
+                }}
+                className="w-14 h-14 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+              >
                 <Play className="w-6 h-6 fill-current text-white ml-1" />
-              </div>
+              </button>
             )}
           </div>
         )}

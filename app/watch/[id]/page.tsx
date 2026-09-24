@@ -685,7 +685,7 @@ export default function WatchPage() {
                       </button>
                     </div>
                   ) : (
-                    <div className="divide-y divide-slate-800/60 p-2 space-y-1">
+                    <div className="grid grid-cols-5 gap-1.5 p-2 lg:flex lg:flex-col lg:gap-1 lg:divide-y lg:divide-slate-800/60">
                       {filteredSidebarChannels.map((ch) => {
                         const isActive = ch._id === activeChannelId;
                         const chLogo = getChannelLogo(ch.name, ch.logo);
@@ -695,40 +695,52 @@ export default function WatchPage() {
                             key={ch._id}
                             ref={isActive ? activeItemRef : undefined}
                             onClick={() => handleSelectChannel(ch._id)}
-                            className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left group border ${
+                            className={`group w-full min-w-0 flex flex-col items-center gap-1 p-1.5 rounded-xl transition-all text-center border ${
                               isActive
                                 ? "bg-[#0d1f33] border-emerald-500 shadow-md shadow-emerald-500/10"
                                 : "border-transparent bg-transparent hover:bg-slate-800/50"
-                            }`}
+                            } lg:flex-row lg:gap-3 lg:p-2.5 lg:text-left`}
                           >
-                            {/* Logo Box */}
-                            <div
-                              className={`w-11 h-11 shrink-0 rounded-lg p-1.5 flex items-center justify-center transition-colors overflow-hidden ${
-                                isActive
-                                  ? "bg-white border border-emerald-400 ring-2 ring-emerald-500/30"
-                                  : "bg-white/95 border border-slate-700 group-hover:border-slate-500"
-                              }`}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={chLogo}
-                                alt={ch.name}
-                                className="max-w-full max-h-full object-contain"
-                                onError={(e) => {
-                                  const target = e.target as HTMLImageElement;
-                                  if (!target.dataset.fallback) {
-                                    target.dataset.fallback = "true";
-                                    const initials = ch.name.substring(0, 2).toUpperCase();
-                                    target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
-                                  }
-                                }}
+                            {/* Logo (circular tile on mobile, square row-thumb on desktop) */}
+                            <div className="relative shrink-0">
+                              <div
+                                className={`w-11 h-11 rounded-full lg:rounded-lg p-1.5 flex items-center justify-center transition-colors overflow-hidden ${
+                                  isActive
+                                    ? "bg-white border border-emerald-400 ring-2 ring-emerald-500/30"
+                                    : "bg-white/95 border border-slate-700 group-hover:border-slate-500"
+                                }`}
+                              >
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={chLogo}
+                                  alt={ch.name}
+                                  className="max-w-full max-h-full object-contain"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    if (!target.dataset.fallback) {
+                                      target.dataset.fallback = "true";
+                                      const initials = ch.name.substring(0, 2).toUpperCase();
+                                      target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
+                                    }
+                                  }}
+                                />
+                              </div>
+                              {/* Mobile status dot (desktop uses the text tag below) */}
+                              <span
+                                className={`lg:hidden absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0a1222] ${
+                                  isActive
+                                    ? isTuning
+                                      ? "bg-amber-400 animate-pulse"
+                                      : "bg-emerald-400"
+                                    : "bg-red-500"
+                                }`}
                               />
                             </div>
 
-                            {/* Channel Info */}
-                            <div className="flex-1 min-w-0">
+                            {/* Channel name (centered under logo on mobile, inline on desktop) */}
+                            <div className="w-full min-w-0 lg:w-auto lg:flex-1">
                               <h3
-                                className={`text-xs truncate ${
+                                className={`text-[9px] lg:text-xs leading-tight truncate ${
                                   isActive
                                     ? "font-black text-emerald-300"
                                     : "font-bold text-slate-200 group-hover:text-white"
@@ -736,7 +748,7 @@ export default function WatchPage() {
                               >
                                 {ch.name}
                               </h3>
-                              <div className="flex items-center gap-1.5 mt-0.5">
+                              <div className="hidden lg:flex items-center gap-1.5 mt-0.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                                 <span className="text-[10px] font-semibold text-slate-400">
                                   LIVE
@@ -744,8 +756,8 @@ export default function WatchPage() {
                               </div>
                             </div>
 
-                            {/* Right Status Tag */}
-                            <div className="shrink-0">
+                            {/* Right Status Tag - desktop only */}
+                            <div className="hidden lg:block shrink-0">
                               {isActive ? (
                                 isTuning ? (
                                   <div

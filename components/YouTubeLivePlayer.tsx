@@ -257,7 +257,7 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             if (e.data === 1 && prev !== 1) {
               setBootDone(false);
               if (bootTimerRef.current) clearTimeout(bootTimerRef.current);
-              bootTimerRef.current = setTimeout(() => setBootDone(true), 2500);
+              bootTimerRef.current = setTimeout(() => setBootDone(true), 4000);
             }
           },
           onError: () => {
@@ -339,17 +339,23 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
           </div>
         )}
 
-        {/* Top Channel Title Bar Overlay — hidden until hover/touch, matching HlsPlayer */}
-        <div
-          className={`absolute top-0 inset-x-0 p-2.5 sm:p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 flex items-center justify-between gap-2 z-20 pointer-events-none ${
-            controlsVisible ? "opacity-100" : "opacity-0"
-          }`}
-        >
+        {/* Permanent opaque top bar. YouTube paints its video title (left) and
+            share / overflow buttons (right) inside roughly this band whenever
+            its chrome shows — on some devices even mid-playback, because the
+            controls:0 flag is not honoured everywhere. The iframe is cross-
+            origin so none of that can be styled away; an opaque strip of our
+            own, drawn like a broadcast channel bug, is the only cover that
+            works on every client. */}
+        <div className="absolute top-0 inset-x-0 h-10 sm:h-11 bg-black flex items-center justify-between gap-2 px-2.5 sm:px-4 z-20 pointer-events-none">
           <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">{channelName}</h2>
           <span className="px-2 py-1 rounded-full text-[9px] sm:text-[10px] font-bold bg-slate-900/80 text-red-400 border border-red-500/30 shrink-0">
-            YouTube Live
+            LIVE
           </span>
         </div>
+
+        {/* Same idea for the bottom-right corner: the one spot YouTube keeps
+            its logo / "watch on YouTube" link in. */}
+        <div className="absolute bottom-0 right-0 w-16 h-7 sm:w-20 sm:h-8 bg-black z-20 pointer-events-none" />
 
         {/* Bottom custom control bar — hover/touch only, same chrome as HlsPlayer */}
         <div

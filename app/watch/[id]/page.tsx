@@ -704,7 +704,7 @@ export default function WatchPage() {
                             {/* Logo (circular tile on mobile, square row-thumb on desktop) */}
                             <div className="relative shrink-0">
                               <div
-                                className={`w-11 h-11 rounded-full lg:rounded-lg p-1.5 flex items-center justify-center transition-colors overflow-hidden ${
+                                className={`w-14 h-14 lg:w-11 lg:h-11 rounded-full lg:rounded-lg p-1.5 flex items-center justify-center transition-colors overflow-hidden ${
                                   isActive
                                     ? "bg-white border border-emerald-400 ring-2 ring-emerald-500/30"
                                     : "bg-white/95 border border-slate-700 group-hover:border-slate-500"

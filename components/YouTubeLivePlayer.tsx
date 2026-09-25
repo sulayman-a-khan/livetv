@@ -470,7 +470,7 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             and every resume — then fade out with it. Also revealed by hover
             / touch like the rest of the player chrome. */}
         <div
-          className={`absolute top-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-md backdrop-saturate-150 border-b border-white/10 flex items-center justify-between gap-2 px-2.5 sm:px-4 z-20 pointer-events-none transition-opacity duration-500 ${
+          className={`absolute top-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-sm backdrop-saturate-125 border-b border-white/10 flex items-center justify-between gap-2 px-2.5 sm:px-4 z-20 pointer-events-none transition-opacity duration-500 ${
             coverVisible || controlsVisible ? "opacity-100" : "opacity-0"
           }`}
         >
@@ -508,7 +508,7 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
         </div>
 
         <div
-          className={`absolute bottom-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-md backdrop-saturate-150 border-t border-white/10 flex items-center justify-between gap-3 px-2.5 sm:px-4 z-20 transition-opacity duration-500 ${
+          className={`absolute bottom-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-sm backdrop-saturate-125 border-t border-white/10 flex items-center justify-between gap-3 px-2.5 sm:px-4 z-20 transition-opacity duration-500 ${
             coverVisible || controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
         >

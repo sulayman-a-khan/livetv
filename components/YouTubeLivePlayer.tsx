@@ -176,14 +176,13 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
       return;
     }
 
-    // A throwaway history entry means the first back-press just exits the
-    // full-screen view instead of leaving the page, and we ask the OS to lock
-    // the picture to landscape so it fills the screen wide.
-    const afterEnter = () => {
+    const pushGuard = () => {
       if (!fsGuardPushedRef.current) {
         fsGuardPushedRef.current = true;
         window.history.pushState({ __fsGuard: true }, "");
       }
+    };
+    const lockLandscape = () => {
       const so = screen.orientation as ScreenOrientation & {
         lock?: (o: string) => Promise<void>;
       };
@@ -191,6 +190,14 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
         /* not supported on this device (e.g. iOS Safari) — ignore */
       });
     };
+
+    // On phones/tablets use our OWN CSS fullscreen frame instead of the native
+    // Fullscreen API. Native fullscreen makes the browser paint its own
+    // "how to exit fullscreen — drag from the top…" toast, whose duration we
+    // can't control. The CSS frame skips that toast entirely and still shows a
+    // WIDE picture via the rotated portraitPhone frame, with our own custom
+    // controls on top.
+    const useCssFrame = window.innerWidth < 1024;
 
     // Real Fullscreen API first (with the webkit prefix for older Safari);
     // where it is missing or refused (iOS), pin the frame to the viewport so
@@ -200,17 +207,21 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
       (target as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
         .webkitRequestFullscreen;
 
-    if (requestFs) {
-      Promise.resolve(requestFs.call(target))
-        .then(afterEnter)
-        .catch(() => {
-          setCssFullscreen(true);
-          afterEnter();
-        });
-    } else {
+    if (useCssFrame || !requestFs) {
       setCssFullscreen(true);
-      afterEnter();
+      pushGuard();
+      return;
     }
+
+    Promise.resolve(requestFs.call(target))
+      .then(() => {
+        pushGuard();
+        lockLandscape();
+      })
+      .catch(() => {
+        setCssFullscreen(true);
+        pushGuard();
+      });
   };
 
   const scheduleControlsHide = () => {

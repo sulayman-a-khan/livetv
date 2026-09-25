@@ -480,12 +480,27 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
               LIVE
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[9px] sm:text-[10px] font-bold text-slate-400 shrink-0">
-            <span className="hidden sm:inline flex items-center gap-1">
-              <SatelliteDish className="w-3 h-3" />
+          <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold text-slate-300 shrink-0 min-w-0">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              <SatelliteDish className="w-3 h-3 text-slate-400" />
               PAKSAT 1R • 38.8°E
             </span>
-            <span className="flex items-center gap-1 text-emerald-400">
+            <span className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              TP 3880
+            </span>
+            <span className="hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              FREQ 4052 MHz
+            </span>
+            <span className="hidden lg:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              POL H
+            </span>
+            <span className="hidden lg:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              SR 5600
+            </span>
+            <span className="hidden xl:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
+              FEC 3/4
+            </span>
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 whitespace-nowrap">
               <Signal className="w-3 h-3" />
               98%
             </span>

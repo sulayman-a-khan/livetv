@@ -1148,13 +1148,11 @@ export default function HlsPlayer({
       return;
     }
 
-    const pushGuard = () => {
+    const afterEnter = () => {
       if (!fsGuardPushedRef.current) {
         fsGuardPushedRef.current = true;
         window.history.pushState({ __fsGuard: true }, "");
       }
-    };
-    const lockLandscape = () => {
       const so = screen.orientation as ScreenOrientation & {
         lock?: (o: string) => Promise<void>;
       };
@@ -1163,14 +1161,6 @@ export default function HlsPlayer({
       });
     };
 
-    // On phones/tablets use our OWN CSS fullscreen frame instead of the native
-    // Fullscreen API. Native fullscreen makes the browser paint its own
-    // "how to exit fullscreen — drag from the top…" toast, whose duration we
-    // can't control. The CSS frame skips that toast entirely and still shows a
-    // WIDE picture via the rotated portraitPhone frame, with our own custom
-    // controls on top.
-    const useCssFrame = window.innerWidth < 1024;
-
     // Prefer the real Fullscreen API (with the webkit prefix for older
     // Safari), then iOS's video-only fullscreen, then the CSS fallback.
     const requestFs =
@@ -1178,26 +1168,23 @@ export default function HlsPlayer({
       (target as HTMLDivElement & { webkitRequestFullscreen?: () => Promise<void> })
         .webkitRequestFullscreen;
 
-    if (useCssFrame || !requestFs) {
+    if (requestFs) {
+      Promise.resolve(requestFs.call(target))
+        .then(afterEnter)
+        .catch(() => {
+          if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+          } else {
+            setCssFullscreen(true);
+            afterEnter();
+          }
+        });
+    } else if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    } else {
       setCssFullscreen(true);
-      pushGuard();
-      return;
+      afterEnter();
     }
-
-    Promise.resolve(requestFs.call(target))
-      .then(() => {
-        pushGuard();
-        lockLandscape();
-      })
-      .catch(() => {
-        if (video?.webkitSupportsFullscreen && video.webkitEnterFullscreen) {
-          video.webkitEnterFullscreen();
-          pushGuard();
-        } else {
-          setCssFullscreen(true);
-          pushGuard();
-        }
-      });
   };
 
   // ------------------------------------------------------------------

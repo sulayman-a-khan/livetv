@@ -34,6 +34,9 @@ import {
   Image as ImageIcon,
   Edit2,
   Wrench,
+  Clock,
+  ChevronDown,
+  Loader2,
 } from "lucide-react";
 
 interface AdminDashboardProps {
@@ -70,6 +73,24 @@ interface ChannelWithStreams {
   }>;
 }
 
+interface IngestProgress {
+  phase: string;
+  message: string;
+  lines: string[];
+  current: number;
+  total: number;
+  percent: number;
+  done: boolean;
+}
+
+interface HealthSchedule {
+  running: boolean;
+  pinnedIntervalMinutes: number;
+  fullIntervalMinutes: number;
+  lastCheckAt: string;
+  lastFullCheckAt: string;
+}
+
 export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [channels, setChannels] = useState<ChannelWithStreams[]>([]);
@@ -92,15 +113,21 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [m3uUrl, setM3uUrl] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestLog, setIngestLog] = useState<string | null>(null);
+  const [ingestProgress, setIngestProgress] = useState<IngestProgress | null>(null);
 
   // Health check button loading state
   const [healthCheckLoading, setHealthCheckLoading] = useState(false);
   const [healthCheckLog, setHealthCheckLog] = useState<string | null>(null);
 
+  // Auto health-checker schedule (for the next-probe countdown timer)
+  const [schedule, setSchedule] = useState<HealthSchedule | null>(null);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+
   // Pinning & Reordering states
   const [pinningId, setPinningId] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
   const [reorderSaved, setReorderSaved] = useState(false);
+  const [pinnedExpanded, setPinnedExpanded] = useState(false);
   const [pinnedOrder, setPinnedOrder] = useState<ChannelWithStreams[]>([]);
   const [pinCategoryTab, setPinCategoryTab] = useState<string>("all");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -146,6 +173,58 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
+
+  // Fetch the auto health-checker schedule, then keep a local 1s clock ticking
+  // so the "next probe" countdown updates every second without re-fetching.
+  const fetchSchedule = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/health-status", { cache: "no-store" });
+      const data = await res.json();
+      if (data.success && data.autoHealthChecker) {
+        setSchedule(data.autoHealthChecker as HealthSchedule);
+      }
+    } catch (err) {
+      console.error("Failed to load health schedule:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSchedule();
+  }, [fetchSchedule]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Countdown to the next pinned probe (5 min) and next full scan (10 min),
+  // derived from the server's last-run timestamps.
+  const nextProbe = useMemo(() => {
+    const fmt = (ms: number) => {
+      const clamped = Math.max(0, ms);
+      const totalSec = Math.floor(clamped / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    };
+    const nextFrom = (lastAt: string, intervalMin: number): number | null => {
+      const t = Date.parse(lastAt);
+      return Number.isNaN(t) ? null : t + intervalMin * 60 * 1000;
+    };
+    if (!schedule) {
+      return { pinned: null as string | null, full: null as string | null, soonest: null as string | null, running: false };
+    }
+    const pinnedNext = schedule.lastCheckAt ? nextFrom(schedule.lastCheckAt, schedule.pinnedIntervalMinutes) : null;
+    const fullNext = schedule.lastFullCheckAt ? nextFrom(schedule.lastFullCheckAt, schedule.fullIntervalMinutes) : null;
+    const candidates = [pinnedNext, fullNext].filter((x): x is number => x !== null);
+    const soonest = candidates.length ? Math.min(...candidates) : null;
+    return {
+      pinned: pinnedNext !== null ? fmt(pinnedNext - nowTick) : null,
+      full: fullNext !== null ? fmt(fullNext - nowTick) : null,
+      soonest: soonest !== null ? fmt(soonest - nowTick) : null,
+      running: schedule.running,
+    };
+  }, [schedule, nowTick]);
 
   // Extract unique categories & countries for dynamic dropdown filters
   const categories = useMemo(() => {
@@ -285,6 +364,18 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
     setIngestLoading(true);
     setIngestLog(null);
+    setIngestProgress({
+      phase: "Connecting",
+      message: "Contacting server...",
+      lines: [],
+      current: 0,
+      total: 0,
+      percent: 0,
+      done: false,
+    });
+
+    const pushLine = (line: string) =>
+      setIngestProgress((p) => (p ? { ...p, lines: [...p.lines.slice(-80), line] } : p));
 
     try {
       const res = await fetch("/api/admin/ingest-m3u", {
@@ -296,19 +387,110 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         body: JSON.stringify({ m3uText, m3uUrl }),
       });
 
-      const data = await res.json();
-      if (data.success) {
+      // Auth / validation failures come back as plain JSON, not a stream.
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalSummary: any = null;
+      let streamError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() || "";
+
+        for (const frame of frames) {
+          const line = frame.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          let evt: any;
+          try {
+            evt = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+
+          switch (evt.phase) {
+            case "fetch":
+              setIngestProgress((p) => (p ? { ...p, phase: "Downloading", message: evt.message } : p));
+              pushLine(evt.message);
+              break;
+            case "parse":
+              setIngestProgress((p) =>
+                p ? { ...p, phase: "Parsing", message: evt.message, total: evt.total ?? p.total } : p
+              );
+              pushLine(evt.message);
+              break;
+            case "mode":
+              setIngestProgress((p) => (p ? { ...p, phase: "Probing", message: evt.message } : p));
+              pushLine(evt.message);
+              break;
+            case "probe": {
+              const label =
+                evt.status === "active"
+                  ? "ACTIVE"
+                  : evt.status === "broken"
+                  ? "broken"
+                  : evt.status === "skipped"
+                  ? "duplicate (skipped)"
+                  : evt.status;
+              setIngestProgress((p) =>
+                p
+                  ? {
+                      ...p,
+                      phase: "Probing streams",
+                      current: evt.index,
+                      total: evt.total,
+                      percent: evt.percent ?? p.percent,
+                      message: `Probing ${evt.index}/${evt.total} — ${evt.name}`,
+                    }
+                  : p
+              );
+              pushLine(`[${evt.index}/${evt.total}] ${evt.name} → ${label}`);
+              break;
+            }
+            case "maintenance":
+              setIngestProgress((p) => (p ? { ...p, phase: "Cleaning up", message: evt.message, percent: 100 } : p));
+              pushLine(evt.message);
+              break;
+            case "done":
+              finalSummary = evt.summary;
+              setIngestProgress((p) =>
+                p ? { ...p, phase: "Complete", message: "Ingestion finished.", percent: 100, done: true } : p
+              );
+              break;
+            case "error":
+              streamError = evt.error || "Unknown ingestion error";
+              break;
+          }
+        }
+      }
+
+      if (streamError) {
+        throw new Error(streamError);
+      }
+
+      if (finalSummary) {
         setIngestLog(
-          `Success! Processed ${data.summary.totalParsed} streams -> Created ${data.summary.channelsCreated} new channels, Added ${data.summary.activeLinksAdded} working backup links.`
+          `Success! Processed ${finalSummary.totalParsed} streams → Created ${finalSummary.channelsCreated} new channels, Added ${finalSummary.activeLinksAdded} working backup links (${finalSummary.brokenLinksAdded} broken, ${finalSummary.linksSkipped} duplicates skipped).`
         );
         setM3uText("");
         setM3uUrl("");
-        fetchStats();
-      } else {
-        setIngestLog(`Error: ${data.error}`);
+        await fetchStats();
+        fetchSchedule();
       }
     } catch (err: any) {
       setIngestLog(`Ingestion failed: ${err.message}`);
+      setIngestProgress((p) => (p ? { ...p, phase: "Failed", message: err.message, done: true } : p));
     } finally {
       setIngestLoading(false);
     }
@@ -359,6 +541,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         `Health check finished! Tested ${checked} links: ${active} Active, ${degraded} Degraded, ${broken} Broken.`
       );
       fetchStats();
+      fetchSchedule();
     } catch (err: any) {
       setHealthCheckLog(`Error running health check: ${err.message}`);
     } finally {
@@ -644,6 +827,56 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         </div>
       </div>
 
+      {/* Next auto-probe countdown timer */}
+      <div className="glass-panel px-5 py-3.5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
+              healthCheckLoading
+                ? "bg-brand-500/15 border-brand-500/40 text-brand-400"
+                : "bg-slate-900 border-slate-800 text-emerald-400"
+            }`}
+          >
+            {healthCheckLoading ? (
+              <Activity className="w-5 h-5 animate-spin" />
+            ) : (
+              <Clock className="w-5 h-5" />
+            )}
+          </div>
+          <div>
+            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              {healthCheckLoading ? "Health Check Running" : "Next Auto-Probe"}
+            </p>
+            <p className="text-xs text-slate-500">
+              {nextProbe.running
+                ? "Auto health checker is active on the server."
+                : "Auto health checker not detected on this instance."}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Pinned (5m)</p>
+            <p className="text-lg font-black tabular-nums text-emerald-400 leading-tight">
+              {healthCheckLoading ? "--:--" : nextProbe.pinned ?? "--:--"}
+            </p>
+          </div>
+          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Full Scan (10m)</p>
+            <p className="text-lg font-black tabular-nums text-brand-400 leading-tight">
+              {healthCheckLoading ? "--:--" : nextProbe.full ?? "--:--"}
+            </p>
+          </div>
+          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Next Probe</p>
+            <p className="text-lg font-black tabular-nums text-white leading-tight">
+              {healthCheckLoading ? "--:--" : nextProbe.soonest ?? "--:--"}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {maintenanceLog && (
         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
           {maintenanceLog}
@@ -750,10 +983,77 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             disabled={ingestLoading || (!m3uText.trim() && !m3uUrl.trim())}
             className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 shadow-lg shadow-brand-600/25"
           >
-            <PlusCircle className="w-4 h-4" />
-            <span>{ingestLoading ? "Parsing & Deduplicating..." : "Ingest M3U Stream Links"}</span>
+            {ingestLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <PlusCircle className="w-4 h-4" />
+            )}
+            <span>
+              {ingestLoading
+                ? ingestProgress
+                  ? `${ingestProgress.phase}...`
+                  : "Working..."
+                : "Ingest M3U Stream Links"}
+            </span>
           </button>
         </form>
+
+        {/* Live ingestion progress console */}
+        {ingestProgress && (
+          <div className="mt-4 rounded-xl bg-slate-950 border border-slate-800 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-slate-800 bg-slate-900/60">
+              <div className="flex items-center gap-2 min-w-0">
+                {ingestProgress.done ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                ) : (
+                  <Loader2 className="w-4 h-4 text-brand-400 animate-spin shrink-0" />
+                )}
+                <span className="text-xs font-bold text-white truncate">{ingestProgress.phase}</span>
+              </div>
+              <span className="text-[11px] font-mono font-bold text-slate-400 shrink-0">
+                {ingestProgress.total > 0
+                  ? `${ingestProgress.current}/${ingestProgress.total} • ${ingestProgress.percent}%`
+                  : `${ingestProgress.percent}%`}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="h-1.5 w-full bg-slate-900">
+              <div
+                className={`h-full transition-all duration-300 ${
+                  ingestProgress.done ? "bg-emerald-500" : "bg-brand-500"
+                }`}
+                style={{ width: `${Math.min(100, Math.max(2, ingestProgress.percent))}%` }}
+              />
+            </div>
+
+            <div className="px-4 py-2 text-[11px] font-mono text-slate-400 border-b border-slate-800/60 truncate">
+              {ingestProgress.message}
+            </div>
+
+            {/* Scrolling live log (newest at the bottom) */}
+            <div className="max-h-48 overflow-y-auto px-4 py-2 space-y-0.5 text-[11px] font-mono">
+              {ingestProgress.lines.map((line, i) => {
+                const isActive = line.includes("→ ACTIVE");
+                const isBroken = line.includes("→ broken");
+                return (
+                  <div
+                    key={i}
+                    className={
+                      isActive
+                        ? "text-emerald-400"
+                        : isBroken
+                        ? "text-red-400/80"
+                        : "text-slate-400"
+                    }
+                  >
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {ingestLog && (
           <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300">
@@ -768,40 +1068,60 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       {/* 📌 MANAGE & REORDER PINNED CHANNELS SECTION */}
       {/* ========================================================= */}
       <div className="glass-panel p-6 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/5 via-slate-900/40 to-slate-950 space-y-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+        {/* Collapsible header — click to expand/collapse the pinned board */}
+        <button
+          type="button"
+          onClick={() => setPinnedExpanded((v) => !v)}
+          aria-expanded={pinnedExpanded}
+          className="w-full flex items-center justify-between gap-4 text-left group"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
               <Pin className="w-5 h-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white">Manage & Reorder Pinned Channels</h2>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {pinnedOrder.length} Pinned Total
+                <h2 className="text-base font-bold text-white truncate">Manage & Reorder Pinned Channels</h2>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                  {pinnedOrder.length} Pinned
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Pinned channels appear at the top of the Home & Category pages in this exact custom order. Drag or click arrows to reorder.
+              <p className="text-xs text-slate-400 mt-0.5 hidden sm:block truncate">
+                {pinnedExpanded
+                  ? "Drag or click arrows to reorder. Pinned channels lead the Home & Category pages."
+                  : "Click to expand and manage the pinned channel order."}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {reorderSaved && (
-              <span className="flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl animate-fade-in">
+              <span className="hidden sm:flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl animate-fade-in">
                 <Check className="w-3.5 h-3.5" /> Saved!
               </span>
             )}
-            <button
-              onClick={handleSavePinnedOrder}
-              disabled={reordering || pinnedOrder.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
+            <span
+              className={`w-8 h-8 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 group-hover:text-white transition-transform ${
+                pinnedExpanded ? "rotate-180" : ""
+              }`}
             >
-              <Save className="w-4 h-4" />
-              <span>{reordering ? "Saving Order..." : "Save Custom Order"}</span>
-            </button>
+              <ChevronDown className="w-4 h-4" />
+            </span>
           </div>
-        </div>
+        </button>
+
+        {pinnedExpanded && (
+          <>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={handleSavePinnedOrder}
+                disabled={reordering || pinnedOrder.length === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>{reordering ? "Saving Order..." : "Save Custom Order"}</span>
+              </button>
+            </div>
 
         {/* Category Tabs for Pinned Channels */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -942,6 +1262,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                 </div>
               ))}
           </div>
+        )}
+          </>
         )}
       </div>
 

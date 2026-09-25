@@ -148,7 +148,7 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
   // swallow the user's next back press.
   const exitFullscreenMode = useCallback((consumeGuard: boolean) => {
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => { });
+      document.exitFullscreen().catch(() => {});
     }
     // Clear both flags synchronously so the rotate-90 frame is torn down on
     // this very render — don't wait for the async fullscreenchange event,
@@ -399,7 +399,7 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     const update = () => {
       setPortraitPhone(
         window.innerWidth < 1024 &&
-        window.matchMedia("(orientation: portrait)").matches
+          window.matchMedia("(orientation: portrait)").matches
       );
     };
     update();
@@ -415,12 +415,13 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
     <div className="w-full space-y-3">
       <div
         ref={containerBoxRef}
-        className={`relative bg-black overflow-hidden rounded-none border-0 ${isFullscreen || cssFullscreen
-          ? portraitPhone
-            ? "fixed top-1/2 left-1/2 z-[999] w-[100dvh] h-[100dvw] -translate-x-1/2 -translate-y-1/2 rotate-90 max-w-none"
-            : "fixed inset-0 z-[999] w-screen h-screen max-w-none"
-          : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
-          }`}
+        className={`relative bg-black overflow-hidden rounded-none border-0 ${
+          isFullscreen || cssFullscreen
+            ? portraitPhone
+              ? "fixed top-1/2 left-1/2 z-[999] w-[100dvh] h-[100dvw] -translate-x-1/2 -translate-y-1/2 rotate-90 max-w-none"
+              : "fixed inset-0 z-[999] w-screen h-screen max-w-none"
+            : "aspect-video w-full mx-auto max-w-[calc(52dvh*16/9)] lg:max-w-none shadow-2xl"
+        }`}
         onMouseLeave={() => {
           if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
           setControlsVisible(false);
@@ -469,8 +470,9 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             and every resume — then fade out with it. Also revealed by hover
             / touch like the rest of the player chrome. */}
         <div
-          className={`absolute top-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-sm backdrop-saturate-150 border-b border-white/10 flex items-center justify-between gap-2 px-2.5 sm:px-4 z-20 pointer-events-none transition-opacity duration-500 ${coverVisible || controlsVisible ? "opacity-100" : "opacity-0"
-            }`}
+          className={`absolute top-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-sm backdrop-saturate-125 border-b border-white/10 flex items-center justify-between gap-2 px-2.5 sm:px-4 z-20 pointer-events-none transition-opacity duration-500 ${
+            coverVisible || controlsVisible ? "opacity-100" : "opacity-0"
+          }`}
         >
           <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate">{channelName}</h2>
@@ -506,8 +508,9 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
         </div>
 
         <div
-          className={`absolute bottom-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-md backdrop-saturate-125 border-t border-white/10 flex items-center justify-between gap-3 px-2.5 sm:px-4 z-20 transition-opacity duration-500 ${coverVisible || controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-            }`}
+          className={`absolute bottom-0 inset-x-0 h-11 sm:h-12 bg-black/35 backdrop-blur-sm backdrop-saturate-125 border-t border-white/10 flex items-center justify-between gap-3 px-2.5 sm:px-4 z-20 transition-opacity duration-500 ${
+            coverVisible || controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
         >
           <div className="flex items-center gap-3">
             <button

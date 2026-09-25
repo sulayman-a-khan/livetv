@@ -77,45 +77,6 @@ export default function HomePage() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
-        {/* Top Hero Banner */}
-        <section className="relative rounded-3xl overflow-hidden border border-slate-800/80 bg-gradient-to-r from-[#0a1222] via-[#0d172c] to-[#0f1d38] shadow-2xl">
-          <div className="absolute top-0 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-10 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[200px] sm:min-h-[280px]">
-            <div className="hidden sm:flex lg:col-span-6 p-6 sm:p-10 flex-col justify-center z-10">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold mb-4 w-fit">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Next-Gen Live TV Network</span>
-              </div>
-
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight">
-                Welcome to <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-300 to-emerald-400">
-                  SoluPlay
-                </span>
-              </h1>
-
-              <p className="mt-3 text-slate-300 text-sm sm:text-base font-medium max-w-md">
-                Tap any channel to start watching live, instantly.
-              </p>
-
-              <div className="w-16 h-1 bg-emerald-400 rounded-full mt-4 shadow-md shadow-emerald-500/50" />
-            </div>
-
-            <div className="lg:col-span-6 relative overflow-hidden flex items-center justify-center min-h-[200px] lg:min-h-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/images/hero_banner.png"
-                alt="Live TV montage"
-                className="absolute inset-0 w-full h-full object-cover object-center opacity-90 filter saturate-[1.1]"
-              />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#0a1222] via-[#0a1222]/40 to-transparent lg:block hidden" />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#0a1222] via-transparent to-transparent lg:hidden" />
-            </div>
-          </div>
-        </section>
-
         {/* Channel rails */}
         {loading ? (
           <div className="space-y-8" aria-busy="true">

@@ -6,16 +6,13 @@ import HlsPlayer, { StreamMirror } from "@/components/HlsPlayer";
 import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
 import { isYouTubeUrl } from "@/lib/youtube";
 import Link from "next/link";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { getChannelLogo } from "@/lib/utils";
 import {
   getCategoryBySlug,
   isChannelInCategory,
   CATEGORIES,
   CategoryConfig,
-  GENRE_FILTERS,
-  GenreFilter,
-  matchesGenreFilter,
 } from "@/lib/categories";
 import {
   ArrowLeft,
@@ -47,10 +44,19 @@ interface SidebarChannel {
   activeStreamCount: number;
 }
 
+/** Short filter labels for the six fixed categories. */
+const CATEGORY_LABELS: Record<string, string> = {
+  "sports-tv": "Sports",
+  "bangladeshi-tv": "Bangla",
+  "indian-tv": "Indian",
+  "pakistani-tv": "Pakistani",
+  "news-tv": "News",
+  "global-tv": "Global",
+};
+
 export default function WatchPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const router = useRouter();
 
   const channelIdParam = (params?.id as string) || "";
   const [activeChannelId, setActiveChannelId] = useState<string>(channelIdParam);
@@ -97,7 +103,6 @@ export default function WatchPage() {
   // All loaded channels for sidebar
   const [allChannels, setAllChannels] = useState<SidebarChannel[]>([]);
   const [sidebarLoading, setSidebarLoading] = useState(true);
-  const [sidebarGenre, setSidebarGenre] = useState<GenreFilter>("all");
 
   /**
    * Channels hidden client-side the instant their last server failed, so the
@@ -325,7 +330,7 @@ export default function WatchPage() {
     return CATEGORIES[1]; // Default to Bangladeshi TV
   }, [activeCategorySlug, channel]);
 
-  // Filter sidebar channels strictly to active category & active genre
+  // Filter sidebar channels strictly to the active category
   const filteredSidebarChannels = useMemo(() => {
     if (!currentCategoryConfig || allChannels.length === 0) return allChannels;
     // Drop channels whose servers just died — they disappear from the playlist
@@ -335,11 +340,8 @@ export default function WatchPage() {
     let list = visible.filter((c) => isChannelInCategory(c, currentCategoryConfig));
     if (list.length === 0) list = visible;
 
-    if (sidebarGenre !== "all") {
-      list = list.filter((c) => matchesGenreFilter(c, sidebarGenre));
-    }
     return list;
-  }, [allChannels, currentCategoryConfig, sidebarGenre, hiddenChannelIds]);
+  }, [allChannels, currentCategoryConfig, hiddenChannelIds]);
 
   // The active stream link may point at a YouTube Live broadcast instead of
   // a direct .m3u8 — those are routed to YouTube's own player instead of
@@ -475,13 +477,13 @@ export default function WatchPage() {
         {(initialLoading || (!initialLoading && error)) && (
           <div>
             <Link
-              href={`/category/${currentCategoryConfig.slug}`}
+              href={`/`}
               className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors group"
             >
               <div className="w-7 h-7 rounded-lg bg-[#0d1628] border border-slate-800 flex items-center justify-center group-hover:border-emerald-500 transition-colors">
                 <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-emerald-400" />
               </div>
-              <span>Back to {currentCategoryConfig.title}</span>
+              <span>Back to Home</span>
             </Link>
           </div>
         )}
@@ -499,10 +501,10 @@ export default function WatchPage() {
             <h2 className="text-base font-bold text-white mb-1">Stream Signal Error</h2>
             <p className="text-xs text-slate-400 mb-5">{error}</p>
             <Link
-              href={`/category/${currentCategoryConfig.slug}`}
+              href={`/`}
               className="inline-block px-5 py-2.5 bg-[#00c978] hover:bg-[#00e589] text-slate-950 font-bold rounded-xl text-xs transition-colors shadow-lg"
             >
-              Return to {currentCategoryConfig.title}
+              Return to Home
             </Link>
           </div>
         )}
@@ -518,37 +520,37 @@ export default function WatchPage() {
                 {/* Back Navigation + Mobile Server Switch (same line, space-between) */}
                 <div className="flex items-center justify-between gap-2">
                   <Link
-                    href={`/category/${currentCategoryConfig.slug}`}
+                    href={`/`}
                     className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-white transition-colors group shrink-0"
                   >
                     <div className="w-7 h-7 rounded-lg bg-[#0d1628] border border-slate-800 flex items-center justify-center group-hover:border-emerald-500 transition-colors">
                       <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-emerald-400" />
                     </div>
-                    <span className="hidden sm:inline">Back to {currentCategoryConfig.title}</span>
-                    <span className="sm:hidden">Back</span>
+                    <span className="hidden sm:inline">Back to Home</span>
+                    <span className="sm:hidden">Home</span>
                   </Link>
 
                   {/* Compact server switcher - mobile only */}
                   {channel.streams.length > 0 && (
-                    <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto scrollbar-none min-w-0">
+                    <div className="flex lg:hidden items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
                       {channel.streams.map((st, idx) => {
                         const isSelected = idx === currentStreamIndex;
                         return (
                           <button
                             key={st._id}
                             onClick={() => setCurrentStreamIndex(idx)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 cursor-pointer ${
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-all shrink-0 cursor-pointer ${
                               isSelected
                                 ? "bg-[#00c978] text-slate-950 shadow-sm"
                                 : "bg-[#0d1628] text-slate-300 border border-slate-800"
                             }`}
                           >
                             <span
-                              className={`w-1.5 h-1.5 rounded-full ${
+                              className={`w-1 h-1 rounded-full ${
                                 isSelected ? "bg-slate-950" : "bg-emerald-400"
                               }`}
                             />
-                            <span>Server {idx + 1}</span>
+                            <span>S{idx + 1}</span>
                           </button>
                         );
                       })}
@@ -643,21 +645,22 @@ export default function WatchPage() {
                   </span>
                 </div>
 
-                {/* Mini Genre Filter Pills in Sidebar */}
+                {/* Category Filter Pills in Sidebar */}
                 <div className="p-2 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
-                  {GENRE_FILTERS.map((f) => {
-                    const isActive = sidebarGenre === f.id;
+                  {CATEGORIES.map((cat) => {
+                    const isActive = currentCategoryConfig.slug === cat.slug;
                     return (
                       <button
-                        key={f.id}
-                        onClick={() => setSidebarGenre(f.id)}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 cursor-pointer ${
+                        key={cat.slug}
+                        onClick={() => setActiveCategorySlug(cat.slug)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 cursor-pointer ${
                           isActive
                             ? "bg-[#00c978] text-slate-950 shadow-sm"
                             : "bg-[#0d1628] text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
                         }`}
                       >
-                        {f.label === "All Channels" ? "All" : f.label}
+                        <span>{cat.badge}</span>
+                        <span>{CATEGORY_LABELS[cat.slug] || cat.name}</span>
                       </button>
                     );
                   })}
@@ -676,16 +679,12 @@ export default function WatchPage() {
                   ) : filteredSidebarChannels.length === 0 ? (
                     <div className="p-8 text-center">
                       <Tv className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                      <p className="text-xs text-slate-400">No channels under &quot;{sidebarGenre}&quot;</p>
-                      <button
-                        onClick={() => setSidebarGenre("all")}
-                        className="mt-2 text-[10px] text-emerald-400 hover:underline"
-                      >
-                        Show All Channels
-                      </button>
+                      <p className="text-xs text-slate-400">
+                        No channels under &quot;{CATEGORY_LABELS[currentCategoryConfig.slug] || currentCategoryConfig.title}&quot;
+                      </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-5 gap-1.5 p-2 lg:flex lg:flex-col lg:gap-1 lg:divide-y lg:divide-slate-800/60">
+                    <div className="grid grid-cols-4 gap-1.5 p-2 lg:flex lg:flex-col lg:gap-1 lg:divide-y lg:divide-slate-800/60">
                       {filteredSidebarChannels.map((ch) => {
                         const isActive = ch._id === activeChannelId;
                         const chLogo = getChannelLogo(ch.name, ch.logo);
@@ -800,14 +799,16 @@ export default function WatchPage() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>SoluPlay • {currentCategoryConfig.title} Stream</span>
           <div className="flex items-center gap-4 text-slate-400">
+            <Link href="/" className="hover:text-white">Home</Link>
             {CATEGORIES.map((c) => (
-              <Link
+              <button
                 key={c.slug}
-                href={`/category/${c.slug}`}
+                type="button"
+                onClick={() => setActiveCategorySlug(c.slug)}
                 className={c.slug === currentCategoryConfig.slug ? "text-emerald-400 font-bold" : "hover:text-white"}
               >
-                {c.name}
-              </Link>
+                {CATEGORY_LABELS[c.slug] || c.name}
+              </button>
             ))}
           </div>
         </div>

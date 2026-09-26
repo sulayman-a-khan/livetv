@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { getChannelLogo } from "@/lib/utils";
 
 export interface RailChannel {
@@ -97,14 +97,6 @@ export default function ChannelRail({ title, accent, categorySlug, channels }: C
           >
             <ChevronRight className="w-4 h-4" />
           </button>
-
-          <Link
-            href={`/category/${categorySlug}`}
-            className="group inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-emerald-400 hover:text-emerald-300 pl-1 sm:pl-2 transition-colors"
-          >
-            <span className="hidden sm:inline">See all</span>
-            <ArrowRight className="w-3.5 h-3.5 stroke-[2.5] group-hover:translate-x-0.5 transition-transform" />
-          </Link>
         </div>
       </div>
 

@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
-import { RefreshCw, Tv } from "lucide-react";
+import { RefreshCw, Tv, SearchX } from "lucide-react";
 
 /** Friendly row headings for each category rail (overrides the raw category title). */
 const RAIL_TITLES: Record<string, string> = {
@@ -28,7 +27,6 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   useEffect(() => {
     let active = true;
@@ -52,21 +50,23 @@ export default function HomePage() {
   }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
+    // Search filters the rails live as you type — no navigation needed.
     e.preventDefault();
-    if (!searchQuery.trim()) return;
-    router.push(`/category/sports-tv?search=${encodeURIComponent(searchQuery)}`);
   };
 
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+
   /** One rail per category, in the CATEGORIES order (Sports → Bangla → India → Pakistan → News → Global). */
-  const rails = useMemo(
-    () =>
-      CATEGORIES.map((category) => ({
-        category,
-        title: RAIL_TITLES[category.slug] || category.title,
-        channels: channels.filter((ch) => isChannelInCategory(ch, category)),
-      })).filter((rail) => rail.channels.length > 0),
-    [channels]
-  );
+  const rails = useMemo(() => {
+    const pool = trimmedQuery
+      ? channels.filter((ch) => ch.name.toLowerCase().includes(trimmedQuery))
+      : channels;
+    return CATEGORIES.map((category) => ({
+      category,
+      title: RAIL_TITLES[category.slug] || category.title,
+      channels: pool.filter((ch) => isChannelInCategory(ch, category)),
+    })).filter((rail) => rail.channels.length > 0);
+  }, [channels, trimmedQuery]);
 
   return (
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
@@ -100,11 +100,23 @@ export default function HomePage() {
           </div>
         ) : rails.length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
-            <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
-            <p className="text-xs text-slate-400">
-              There are no active streams right now. Please check back shortly.
-            </p>
+            {trimmedQuery ? (
+              <>
+                <SearchX className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-white mb-1">No Channels Found</h3>
+                <p className="text-xs text-slate-400">
+                  Nothing matches &ldquo;{searchQuery.trim()}&rdquo;. Try a different name.
+                </p>
+              </>
+            ) : (
+              <>
+                <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
+                <p className="text-xs text-slate-400">
+                  There are no active streams right now. Please check back shortly.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-7 sm:space-y-10 animate-fade-in">
@@ -126,10 +138,6 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>SoluPlay • 24/7 Automated Live HD Streams</span>
           <div className="flex items-center gap-4 text-slate-400">
-            <Link href="/category/sports-tv" className="hover:text-white">Sports</Link>
-            <Link href="/category/bangladeshi-tv" className="hover:text-white">Bangladesh</Link>
-            <Link href="/category/indian-tv" className="hover:text-white">India</Link>
-            <Link href="/category/pakistani-tv" className="hover:text-white">Pakistan</Link>
             <Link href="/admin-secret-gate" className="hover:text-emerald-400">Admin</Link>
           </div>
         </div>

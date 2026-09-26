@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { getChannelLogo, getCountryFlag } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
+import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
 import {
   ShieldAlert,
   Database,
@@ -91,6 +92,26 @@ interface HealthSchedule {
   lastFullCheckAt: string;
 }
 
+/** Short labels for the six fixed categories, matching the player filters. */
+const ADMIN_CATEGORY_LABELS: Record<string, string> = {
+  "sports-tv": "Sports",
+  "bangladeshi-tv": "Bangla",
+  "indian-tv": "Indian",
+  "pakistani-tv": "Pakistani",
+  "news-tv": "News",
+  "global-tv": "Global",
+};
+
+/** True when a channel belongs to the given pinned-board tab ("all" or a category slug). */
+function channelInPinnedTab(
+  ch: { category?: string; country?: string; name?: string },
+  tabId: string
+): boolean {
+  if (tabId === "all") return true;
+  const cfg = getCategoryBySlug(tabId);
+  return cfg ? isChannelInCategory(ch, cfg) : true;
+}
+
 export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [channels, setChannels] = useState<ChannelWithStreams[]>([]);
@@ -105,7 +126,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "hidden" | "degraded">("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [countryFilter, setCountryFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"name-asc" | "name-desc" | "streams-desc" | "active-desc">("name-asc");
 
   // M3U Ingestion Form State
@@ -226,22 +246,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     };
   }, [schedule, nowTick]);
 
-  // Extract unique categories & countries for dynamic dropdown filters
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    channels.forEach((c) => {
-      if (c.category) set.add(c.category);
-    });
-    return Array.from(set).sort();
-  }, [channels]);
-
-  const countries = useMemo(() => {
-    const set = new Set<string>();
-    channels.forEach((c) => {
-      if (c.country) set.add(c.country);
-    });
-    return Array.from(set).sort();
-  }, [channels]);
+  // The six fixed display categories (Sports, Bangla, Indian, Pakistani, News,
+  // Global). The admin filter offers exactly these and matches channels with the
+  // same logic the player uses — no ad-hoc categories from raw data.
+  const categories = CATEGORIES;
 
   // Compute filtered and sorted channel list
   const filteredChannels = useMemo(() => {
@@ -264,11 +272,11 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         if (statusFilter === "hidden" && activeCount > 0) return false;
         if (statusFilter === "degraded" && degradedCount === 0) return false;
 
-        // Category filter
-        if (categoryFilter !== "all" && ch.category !== categoryFilter) return false;
-
-        // Country / Region filter
-        if (countryFilter !== "all" && ch.country !== countryFilter) return false;
+        // Category filter (one of the six fixed categories)
+        if (categoryFilter !== "all") {
+          const cfg = getCategoryBySlug(categoryFilter);
+          if (cfg && !isChannelInCategory(ch, cfg)) return false;
+        }
 
         return true;
       })
@@ -283,20 +291,18 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         }
         return 0;
       });
-  }, [channels, searchTerm, statusFilter, categoryFilter, countryFilter, sortBy]);
+  }, [channels, searchTerm, statusFilter, categoryFilter, sortBy]);
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
     statusFilter !== "all" ||
     categoryFilter !== "all" ||
-    countryFilter !== "all" ||
     sortBy !== "name-asc";
 
   const clearAllFilters = () => {
     setSearchTerm("");
     setStatusFilter("all");
     setCategoryFilter("all");
-    setCountryFilter("all");
     setSortBy("name-asc");
   };
 
@@ -1126,21 +1132,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         {/* Category Tabs for Pinned Channels */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {[
-            { id: "all", label: "All Categories", badge: "🌟" },
-            { id: "bangladeshi-tv", label: "Bangladeshi TV", badge: "🇧🇩" },
-            { id: "indian-tv", label: "Indian TV", badge: "🇮🇳" },
-            { id: "pakistani-tv", label: "Pakistani TV", badge: "🇵🇰" },
-            { id: "sports-tv", label: "Sports TV", badge: "⚽" },
+            { id: "all", label: "All", badge: "🌟" },
+            ...CATEGORIES.map((c) => ({
+              id: c.slug,
+              label: ADMIN_CATEGORY_LABELS[c.slug] || c.name,
+              badge: c.badge,
+            })),
           ].map((tab) => {
             const isActive = pinCategoryTab === tab.id;
-            const count = pinnedOrder.filter((ch) => {
-              if (tab.id === "all") return true;
-              if (tab.id === "bangladeshi-tv") return (ch.country || "").toLowerCase().includes("bangladesh");
-              if (tab.id === "indian-tv") return (ch.country || "").toLowerCase().includes("india");
-              if (tab.id === "pakistani-tv") return (ch.country || "").toLowerCase().includes("pakistan");
-              if (tab.id === "sports-tv") return (ch.category || "").toLowerCase().includes("sports");
-              return true;
-            }).length;
+            const count = pinnedOrder.filter((ch) => channelInPinnedTab(ch, tab.id)).length;
 
             return (
               <button
@@ -1178,14 +1178,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           <div className="space-y-2">
             {pinnedOrder
               .map((ch, originalIdx) => ({ ch, originalIdx }))
-              .filter(({ ch }) => {
-                if (pinCategoryTab === "all") return true;
-                if (pinCategoryTab === "bangladeshi-tv") return (ch.country || "").toLowerCase().includes("bangladesh");
-                if (pinCategoryTab === "indian-tv") return (ch.country || "").toLowerCase().includes("india");
-                if (pinCategoryTab === "pakistani-tv") return (ch.country || "").toLowerCase().includes("pakistan");
-                if (pinCategoryTab === "sports-tv") return (ch.category || "").toLowerCase().includes("sports");
-                return true;
-              })
+              .filter(({ ch }) => channelInPinnedTab(ch, pinCategoryTab))
               .map(({ ch, originalIdx }, categoryIdx) => (
                 <div
                   key={ch._id}
@@ -1337,7 +1330,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               </select>
             </div>
 
-            {/* Category Filter (2 cols) */}
+            {/* Category Filter (2 cols) — the six fixed categories only */}
             <div className="lg:col-span-2">
               <select
                 value={categoryFilter}
@@ -1346,24 +1339,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               >
                 <option value="all">All Categories</option>
                 {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Region / Country Filter (2 cols) */}
-            <div className="lg:col-span-2">
-              <select
-                value={countryFilter}
-                onChange={(e) => setCountryFilter(e.target.value)}
-                className="w-full py-2 px-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-brand-500 transition-colors cursor-pointer"
-              >
-                <option value="all">All Regions</option>
-                {countries.map((c) => (
-                  <option key={c} value={c}>
-                    {getCountryFlag(c)} {c}
+                  <option key={cat.slug} value={cat.slug}>
+                    {cat.badge} {ADMIN_CATEGORY_LABELS[cat.slug] || cat.name}
                   </option>
                 ))}
               </select>
@@ -1403,12 +1380,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                 )}
                 {categoryFilter !== "all" && (
                   <span className="px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/30 text-brand-300 text-[10px] font-medium">
-                    Category: {categoryFilter}
-                  </span>
-                )}
-                {countryFilter !== "all" && (
-                  <span className="px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/30 text-brand-300 text-[10px] font-medium">
-                    Region: {getCountryFlag(countryFilter)} {countryFilter}
+                    Category: {ADMIN_CATEGORY_LABELS[categoryFilter] || categoryFilter}
                   </span>
                 )}
                 {sortBy !== "name-asc" && (

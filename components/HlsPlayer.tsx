@@ -161,8 +161,7 @@ const STALL_TIMEOUT_MS = 5000;
 const PRELOAD_MIRROR_TIMEOUT_MS = 8000;
 
 /** Overlay text shown when every server for a channel is down. */
-const ALL_SERVERS_DOWN_BN =
-  "দুঃখিত! এই মুহূর্তে চ্যানেলটির সম্প্রচার সম্ভব হচ্ছে না। আমরা দ্রুত সমস্যাটি সমাধানের চেষ্টা করছি। ততক্ষণ অনুগ্রহ করে অন্য যেকোনো চ্যানেল উপভোগ করুন।";
+const ALL_SERVERS_DOWN_BN = "চ্যানেল সচল নয়";
 
 export default function HlsPlayer({
   channelName,
@@ -1295,15 +1294,18 @@ export default function HlsPlayer({
           </div>
         )}
 
-        {/* ===== All servers down: Bangla notice, then auto-advance ===== */}
+        {/* ===== All servers down: simple warning, then auto-advance ===== */}
         {recoveryPhase === "exhausted" && (
           <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-5 sm:p-8 text-center z-40">
             <AlertTriangle className="w-9 h-9 sm:w-11 sm:h-11 text-amber-400 mb-3" />
             <p
               lang="bn"
-              className="text-[13px] sm:text-base font-bold text-white leading-relaxed max-w-lg"
+              className="text-base sm:text-xl font-black text-white leading-relaxed"
             >
               {ALL_SERVERS_DOWN_BN}
+            </p>
+            <p className="mt-1 text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-400/80">
+              Weak signal
             </p>
             <div className="mt-4 flex items-center gap-2 text-[11px] sm:text-xs font-bold text-emerald-400">
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />

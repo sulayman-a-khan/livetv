@@ -17,8 +17,8 @@ export async function GET() {
     success: true,
     autoHealthChecker: {
       running: isRunning,
-      pinnedIntervalMinutes: 5,
-      fullIntervalMinutes: 10,
+      pinnedIntervalMinutes: 60,
+      fullIntervalMinutes: 1440,
       lastCheckAt: lastCheck || "Not yet run",
       lastFullCheckAt: lastFullCheck || "Not yet run",
     },

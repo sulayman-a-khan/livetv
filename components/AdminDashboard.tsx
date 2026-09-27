@@ -31,8 +31,6 @@ import {
   MoveDown,
   Save,
   Check,
-  Upload,
-  Image as ImageIcon,
   Edit2,
   Wrench,
   Clock,
@@ -152,11 +150,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [pinCategoryTab, setPinCategoryTab] = useState<string>("all");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Manual Logo Edit & File Upload states
-  const [editingChannel, setEditingChannel] = useState<{ id: string; name: string; logo: string } | null>(null);
-  const [logoInput, setLogoInput] = useState("");
-  const [savingLogo, setSavingLogo] = useState(false);
-
   // Full channel editor (metadata + manual server links)
   const [editorChannelId, setEditorChannelId] = useState<string | null>(null);
 
@@ -217,15 +210,18 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Countdown to the next pinned probe (5 min) and next full scan (10 min),
+  // Countdown to the next pinned probe (1 hour) and next full scan (24 hours),
   // derived from the server's last-run timestamps.
   const nextProbe = useMemo(() => {
     const fmt = (ms: number) => {
       const clamped = Math.max(0, ms);
       const totalSec = Math.floor(clamped / 1000);
-      const m = Math.floor(totalSec / 60);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
       const s = totalSec % 60;
-      return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      const mm = String(m).padStart(2, "0");
+      const ss = String(s).padStart(2, "0");
+      return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
     };
     const nextFrom = (lastAt: string, intervalMin: number): number | null => {
       const t = Date.parse(lastAt);
@@ -281,6 +277,13 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         return true;
       })
       .sort((a, b) => {
+        // Pinned channels always float to the top, ordered by priorityOrder.
+        const aPinned = a.isPinned === true ? 1 : 0;
+        const bPinned = b.isPinned === true ? 1 : 0;
+        if (bPinned !== aPinned) return bPinned - aPinned;
+        if (aPinned && bPinned) {
+          return (a.priorityOrder ?? 99) - (b.priorityOrder ?? 99);
+        }
         if (sortBy === "name-asc") return a.name.localeCompare(b.name);
         if (sortBy === "name-desc") return b.name.localeCompare(a.name);
         if (sortBy === "streams-desc") return b.streams.length - a.streams.length;
@@ -736,59 +739,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
-  const handleOpenLogoEdit = (id: string, name: string, logo: string) => {
-    setEditingChannel({ id, name, logo });
-    setLogoInput(logo || "");
-  };
-
-  // Save updated logo (via URL or uploaded File)
-  const handleSaveChannelLogo = async (newLogoUrl: string) => {
-    if (!editingChannel || !newLogoUrl.trim()) return;
-    setSavingLogo(true);
-    try {
-      const res = await fetch(`/api/admin/channels/${editingChannel.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "x-admin-secret": secretKey.trim(),
-        },
-        body: JSON.stringify({ logo: newLogoUrl.trim() }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setEditingChannel(null);
-        setLogoInput("");
-        await fetchStats();
-      } else {
-        alert(`Failed to update logo: ${data.error}`);
-      }
-    } catch (err: any) {
-      alert(`Error saving logo: ${err.message}`);
-    } finally {
-      setSavingLogo(false);
-    }
-  };
-
-  // Local Image File to Base64 Data URL converter
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 2 * 1024 * 1024) {
-      alert("Please select an image file under 2MB.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64Url = event.target?.result as string;
-      if (base64Url) {
-        setLogoInput(base64Url);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   return (
     <div className="space-y-8">
       {/* Top Header */}
@@ -863,13 +813,13 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
         <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Pinned (5m)</p>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Pinned (1h)</p>
             <p className="text-lg font-black tabular-nums text-emerald-400 leading-tight">
               {healthCheckLoading ? "--:--" : nextProbe.pinned ?? "--:--"}
             </p>
           </div>
           <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Full Scan (10m)</p>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Full (24h)</p>
             <p className="text-lg font-black tabular-nums text-brand-400 leading-tight">
               {healthCheckLoading ? "--:--" : nextProbe.full ?? "--:--"}
             </p>
@@ -1583,14 +1533,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                           </button>
 
                           <button
-                            onClick={() => handleOpenLogoEdit(ch._id, ch.name, ch.logo)}
-                            className="p-1.5 rounded-lg bg-brand-500/10 text-brand-400 border border-brand-500/20 hover:bg-brand-500 hover:text-white transition-all shrink-0"
-                            title="Edit channel logo"
-                          >
-                            <ImageIcon className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
                             onClick={() => handleDeleteChannel(ch._id, ch.name)}
                             disabled={deletingId === ch._id}
                             className="p-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all disabled:opacity-50 shrink-0"
@@ -1624,103 +1566,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           />
         );
       })()}
-
-      {/* ========================================================= */}
-      {/* 🖼️ MANUAL CHANNEL LOGO EDIT & UPLOAD MODAL */}
-      {/* ========================================================= */}
-      {editingChannel && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-5 shadow-2xl animate-fade-in relative">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center gap-2">
-                <ImageIcon className="w-5 h-5 text-brand-400" />
-                <h3 className="text-base font-bold text-white">Manual Channel Logo Editor</h3>
-              </div>
-              <button
-                onClick={() => setEditingChannel(null)}
-                className="text-slate-400 hover:text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div>
-              <p className="text-xs text-slate-400 mb-1 font-semibold">Editing channel:</p>
-              <p className="text-sm font-bold text-white">{editingChannel.name}</p>
-            </div>
-
-            {/* Logo Preview */}
-            <div className="flex items-center gap-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
-              <div className="w-16 h-16 rounded-xl bg-white p-2 flex items-center justify-center shrink-0 overflow-hidden shadow-inner">
-                {logoInput ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logoInput} alt="Preview" className="max-w-full max-h-full object-contain" />
-                ) : (
-                  <Radio className="w-6 h-6 text-slate-400" />
-                )}
-              </div>
-              <div className="text-xs text-slate-400">
-                <p className="font-semibold text-slate-300">Live Logo Preview</p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Paste an image URL below or upload a PNG/JPG/SVG file from your device.
-                </p>
-              </div>
-            </div>
-
-            {/* Option 1: Image URL */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300">
-                Option 1: Image URL
-              </label>
-              <input
-                type="url"
-                placeholder="https://example.com/logo.png"
-                value={logoInput}
-                onChange={(e) => setLogoInput(e.target.value)}
-                className="w-full bg-slate-950 text-xs text-white placeholder-slate-600 px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 font-mono"
-              />
-            </div>
-
-            {/* Option 2: Upload Image File */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-300">
-                Option 2: Upload File (PNG/JPG/SVG max 2MB)
-              </label>
-              <label className="flex items-center justify-center gap-2 w-full bg-slate-950 hover:bg-slate-800 text-slate-300 px-4 py-3 rounded-xl border border-dashed border-slate-700 hover:border-brand-500 cursor-pointer transition-colors text-xs font-semibold">
-                <Upload className="w-4 h-4 text-brand-400" />
-                <span>Browse & Upload Device Image</span>
-                <input
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp, image/svg+xml"
-                  onChange={handleImageFileUpload}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setEditingChannel(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSaveChannelLogo(logoInput)}
-                disabled={savingLogo || !logoInput.trim()}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white transition-all shadow-lg shadow-brand-600/25 disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                <span>{savingLogo ? "Saving Logo..." : "Save Logo"}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

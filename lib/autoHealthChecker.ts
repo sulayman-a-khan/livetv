@@ -2,10 +2,10 @@
  * SoluPlay Automatic Server-Side Health Checker
  *
  * Two-tier schedule:
- *   - Every 5 minutes  : probes only PINNED channels (across every category) —
+ *   - Every 1 hour  : probes only PINNED channels (across every category) —
  *                        these are the channels on the homepage/top of lists,
  *                        so they get checked often and recover fast.
- *   - Every 10 minutes : probes EVERY stream link in the catalogue.
+ *   - Every 24 hours : probes EVERY stream link in the catalogue.
  *
  * - Marks non-working streams as "degraded" → "broken" (hides channels with 0 active streams)
  * - Automatically re-activates previously broken streams that come back online
@@ -19,12 +19,12 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
 import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
-import { runMaintenance, refreshChannelLinks } from "@/lib/maintenanceRunner";
+import { runMaintenance } from "@/lib/maintenanceRunner";
 
 export type HealthCheckScope = "pinned" | "full";
 
-const PINNED_INTERVAL_MS = 5 * 60 * 1000;         // 5 minutes
-const FULL_INTERVAL_MS = 10 * 60 * 1000;          // 10 minutes
+const PINNED_INTERVAL_MS = 60 * 60 * 1000;         // 1 hour
+const FULL_INTERVAL_MS = 24 * 60 * 60 * 1000;      // 24 hours
 const PROBE_TIMEOUT_MS = 5000;                     // 5 seconds per stream probe
 const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parallel for speed
 
@@ -111,7 +111,7 @@ function toLastCheckDetail(result: HlsCheckResult) {
 /**
  * Run health check on streams (In-Memory mode).
  * `channelIds`: when set, only streams belonging to these channels are probed
- * (used for the 5-minute pinned-only pass); `null` probes everything.
+ * (used for the hourly pinned-only pass); `null` probes everything.
  */
 async function runInMemoryHealthCheck(
   scope: HealthCheckScope,
@@ -186,7 +186,7 @@ async function runInMemoryHealthCheck(
 /**
  * Run health check on streams (MongoDB mode).
  * `channelIds`: when set, only streams belonging to these channels are probed
- * (used for the 5-minute pinned-only pass); `null` probes everything.
+ * (used for the hourly pinned-only pass); `null` probes everything.
  */
 async function runMongoHealthCheck(
   scope: HealthCheckScope,
@@ -268,10 +268,10 @@ async function runMongoHealthCheck(
  * that held it crashed or was recycled mid-run) and can be re-acquired.
  *
  * The pinned and full passes share ONE lock: they both mutate StreamLink
- * documents, so letting them overlap (e.g. a full 12-hour pass and a 5-minute
+ * documents, so letting them overlap (e.g. a full 24-hour pass and an hourly
  * pinned tick landing at the same moment) risks the same write race we're
  * trying to avoid. If the lock is held, the pinned tick simply skips and
- * tries again in 5 minutes — cheap enough that this is a non-issue in practice.
+ * tries again in an hour — cheap enough that this is a non-issue in practice.
  */
 const STALE_LOCK_MS = 30 * 60 * 1000;
 
@@ -368,6 +368,10 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
     }
 
     // Fresh latencies just landed — keep the fastest-first ordering correct.
+    // Server order is only re-computed after a FULL catalogue pass, never
+    // mid-way through (or during) the lighter pinned pass. Reordering while a
+    // probe is still running would reshuffle servers under active viewers, so
+    // the pinned pass only flips stream health and leaves ordering untouched.
     try {
       if (scope === "full") {
         // Full catalogue pass: normalize, merge duplicates, purge test links,
@@ -378,10 +382,6 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
             `purged ${maintenance.placeholderLinksPurged} test links, ` +
             `reordered ${maintenance.channelsReordered} channels`
         );
-      } else if (pinnedChannelIds) {
-        // Pinned pass: cheap targeted re-sort for just the channels we touched,
-        // instead of the full catalogue sweep every 5 minutes.
-        await Promise.all(pinnedChannelIds.map((id) => refreshChannelLinks(id)));
       }
     } catch (err: any) {
       console.error("[AutoHealthChecker] Maintenance pass failed:", err?.message || err);
@@ -393,7 +393,7 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
     console.log(`  Degraded      : ${result.degraded}`);
     console.log(`  Broken        : ${result.broken}`);
     console.log(`  Recovered     : ${result.recovered}`);
-    console.log(`  Next ${scope} check in : ${scope === "pinned" ? "5 minutes" : "10 minutes"}`);
+    console.log(`  Next ${scope} check in : ${scope === "pinned" ? "1 hour" : "24 hours"}`);
     console.log("══════════════════════════════════════════════════════\n");
 
     return result;
@@ -409,8 +409,8 @@ async function runAutoHealthCheck(scope: HealthCheckScope = "full"): Promise<Hea
 }
 
 /**
- * Start the automatic health checker: pinned channels every 5 minutes, the
- * full catalogue every 12 hours. Safe to call multiple times — only starts
+ * Start the automatic health checker: pinned channels every 1 hour, the
+ * full catalogue every 24 hours. Safe to call multiple times — only starts
  * once per process via a global flag.
  */
 export function startAutoHealthChecker() {
@@ -421,10 +421,10 @@ export function startAutoHealthChecker() {
   global.__freetv_health_checker_started = true;
 
   console.log(
-    "[AutoHealthChecker] ✦ Activated — pinned channels every 5 minutes, full catalogue every 10 minutes"
+    "[AutoHealthChecker] ✦ Activated — pinned channels every 1 hour, full catalogue every 24 hours"
   );
 
-  // Pinned channels: first run after 30s, then every 5 minutes.
+  // Pinned channels: first run after 30s, then every 1 hour.
   setTimeout(() => {
     runAutoHealthCheck("pinned");
   }, 30_000);
@@ -433,7 +433,7 @@ export function startAutoHealthChecker() {
   }, PINNED_INTERVAL_MS);
 
   // Full catalogue: first run after 2 minutes (let the pinned check settle
-  // in first), then every 10 minutes.
+  // in first), then every 24 hours.
   setTimeout(() => {
     runAutoHealthCheck("full");
   }, 2 * 60_000);

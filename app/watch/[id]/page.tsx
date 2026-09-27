@@ -42,6 +42,8 @@ interface SidebarChannel {
   subCategory?: string;
   country: string;
   activeStreamCount: number;
+  isPinned?: boolean;
+  priorityOrder?: number;
 }
 
 /** Short filter labels for the six fixed categories. */
@@ -114,7 +116,9 @@ export default function WatchPage() {
 
   // Category resolution
   const categoryParamSlug = searchParams.get("category") || "";
-  const [activeCategorySlug, setActiveCategorySlug] = useState<string>(categoryParamSlug);
+  const [activeCategorySlug, setActiveCategorySlug] = useState<string>(
+    categoryParamSlug || "all"
+  );
 
   // Window resize observer
   useEffect(() => {
@@ -217,14 +221,6 @@ export default function WatchPage() {
       if (data.success && data.channel) {
         setChannel(data.channel);
         setCurrentStreamIndex(0);
-
-        // Auto-detect category if not already specified in URL
-        if (!categoryParamSlug) {
-          const matched = CATEGORIES.find((cat) => isChannelInCategory(data.channel, cat));
-          if (matched) {
-            setActiveCategorySlug(matched.slug);
-          }
-        }
       } else if (!isInitial) {
         // Switching to this channel failed at the metadata level (e.g. it
         // just went offline) — stay on whatever was already playing instead
@@ -245,7 +241,7 @@ export default function WatchPage() {
         setInitialLoading(false);
       }
     }
-  }, [categoryParamSlug, revertFailedSwitch]);
+  }, [revertFailedSwitch]);
 
   /**
    * Loads the playlist. The API only returns channels that currently have at
@@ -318,8 +314,9 @@ export default function WatchPage() {
   }, [fetchSidebarChannels]);
 
   // Active Category Object
+  const isAllView = activeCategorySlug === "all";
   const currentCategoryConfig: CategoryConfig = useMemo(() => {
-    if (activeCategorySlug) {
+    if (activeCategorySlug && activeCategorySlug !== "all") {
       const found = getCategoryBySlug(activeCategorySlug);
       if (found) return found;
     }
@@ -330,18 +327,34 @@ export default function WatchPage() {
     return CATEGORIES[1]; // Default to Bangladeshi TV
   }, [activeCategorySlug, channel]);
 
-  // Filter sidebar channels strictly to the active category
+  // Filter sidebar channels to the active view.
+  // "All" → every visible channel, pinned first (then priorityOrder, then name).
+  // A specific slug → only channels in that category (pinned first as well).
   const filteredSidebarChannels = useMemo(() => {
-    if (!currentCategoryConfig || allChannels.length === 0) return allChannels;
+    if (allChannels.length === 0) return allChannels;
     // Drop channels whose servers just died — they disappear from the playlist
     // instantly and return only when the backend reports them healthy again.
     const visible = allChannels.filter((c) => !hiddenChannelIds.includes(c._id));
 
-    let list = visible.filter((c) => isChannelInCategory(c, currentCategoryConfig));
-    if (list.length === 0) list = visible;
+    let list: SidebarChannel[];
+    if (isAllView) {
+      list = visible;
+    } else {
+      list = visible.filter((c) => isChannelInCategory(c, currentCategoryConfig));
+      if (list.length === 0) list = visible;
+    }
 
-    return list;
-  }, [allChannels, currentCategoryConfig, hiddenChannelIds]);
+    // Pinned channels always surface first, ordered by priorityOrder.
+    return [...list].sort((a, b) => {
+      const aPinned = a.isPinned ? 1 : 0;
+      const bPinned = b.isPinned ? 1 : 0;
+      if (bPinned !== aPinned) return bPinned - aPinned;
+      if (aPinned && bPinned) {
+        return (a.priorityOrder ?? 99) - (b.priorityOrder ?? 99);
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [allChannels, currentCategoryConfig, isAllView, hiddenChannelIds]);
 
   // The active stream link may point at a YouTube Live broadcast instead of
   // a direct .m3u8 — those are routed to YouTube's own player instead of
@@ -394,7 +407,7 @@ export default function WatchPage() {
       pendingSwitchTargetIdRef.current = newChannelId;
 
       setActiveChannelId(newChannelId);
-      const catQuery = currentCategoryConfig?.slug ? `?category=${currentCategoryConfig.slug}` : "";
+      const catQuery = activeCategorySlug ? `?category=${activeCategorySlug}` : "";
       // replaceState, not pushState: flipping through channels shouldn't pile
       // up browser-history entries. Otherwise the hardware/gesture back button
       // steps backward through every channel the viewer has tuned past
@@ -404,7 +417,7 @@ export default function WatchPage() {
 
       loadChannelData(newChannelId, false);
     },
-    [activeChannelId, channel, currentStreamIndex, currentCategoryConfig, loadChannelData]
+    [activeChannelId, channel, currentStreamIndex, activeCategorySlug, loadChannelData]
   );
 
   /**
@@ -638,7 +651,7 @@ export default function WatchPage() {
                 {/* Sidebar Header */}
                 <div className="p-3.5 border-b border-slate-800/80 flex items-center justify-between shrink-0 bg-[#0d1628]">
                   <h2 className="text-sm font-black text-white tracking-tight flex items-center gap-2">
-                    <span>{currentCategoryConfig.title} Channels</span>
+                    <span>{isAllView ? "All Channels" : `${currentCategoryConfig.title} Channels`}</span>
                   </h2>
                   <span className="text-[10px] font-bold text-emerald-400 bg-[#070d18] border border-emerald-500/30 px-2.5 py-0.5 rounded-full">
                     {filteredSidebarChannels.length} Live
@@ -646,21 +659,22 @@ export default function WatchPage() {
                 </div>
 
                 {/* Category Filter Pills in Sidebar */}
-                <div className="p-2 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
-                  {CATEGORIES.map((cat) => {
-                    const isActive = currentCategoryConfig.slug === cat.slug;
+                <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-1 overflow-x-auto scrollbar-none shrink-0">
+                  {["all", ...CATEGORIES.map((c) => c.slug)].map((slug) => {
+                    const isActive = activeCategorySlug === slug;
+                    const label =
+                      slug === "all" ? "All" : CATEGORY_LABELS[slug] || slug;
                     return (
                       <button
-                        key={cat.slug}
-                        onClick={() => setActiveCategorySlug(cat.slug)}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all shrink-0 cursor-pointer ${
+                        key={slug}
+                        onClick={() => setActiveCategorySlug(slug)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
                           isActive
                             ? "bg-[#00c978] text-slate-950 shadow-sm"
                             : "bg-[#0d1628] text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
                         }`}
                       >
-                        <span>{cat.badge}</span>
-                        <span>{CATEGORY_LABELS[cat.slug] || cat.name}</span>
+                        {label}
                       </button>
                     );
                   })}
@@ -680,7 +694,9 @@ export default function WatchPage() {
                     <div className="p-8 text-center">
                       <Tv className="w-8 h-8 text-slate-600 mx-auto mb-2" />
                       <p className="text-xs text-slate-400">
-                        No channels under &quot;{CATEGORY_LABELS[currentCategoryConfig.slug] || currentCategoryConfig.title}&quot;
+                        {isAllView
+                          ? "No channels online right now"
+                          : `No channels under "${CATEGORY_LABELS[activeCategorySlug] || currentCategoryConfig.title}"`}
                       </p>
                     </div>
                   ) : (
@@ -797,15 +813,22 @@ export default function WatchPage() {
       {/* Footer */}
       <footer className="hidden lg:block border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400 mt-8">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>SoluPlay • {currentCategoryConfig.title} Stream</span>
+          <span>SoluPlay • {isAllView ? "All Channels" : currentCategoryConfig.title} Stream</span>
           <div className="flex items-center gap-4 text-slate-400">
             <Link href="/" className="hover:text-white">Home</Link>
+            <button
+              type="button"
+              onClick={() => setActiveCategorySlug("all")}
+              className={activeCategorySlug === "all" ? "text-emerald-400 font-bold" : "hover:text-white"}
+            >
+              All
+            </button>
             {CATEGORIES.map((c) => (
               <button
                 key={c.slug}
                 type="button"
                 onClick={() => setActiveCategorySlug(c.slug)}
-                className={c.slug === currentCategoryConfig.slug ? "text-emerald-400 font-bold" : "hover:text-white"}
+                className={activeCategorySlug === c.slug ? "text-emerald-400 font-bold" : "hover:text-white"}
               >
                 {CATEGORY_LABELS[c.slug] || c.name}
               </button>

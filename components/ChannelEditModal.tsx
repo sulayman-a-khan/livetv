@@ -41,8 +41,20 @@ interface Props {
   onSaved: () => void | Promise<void>;
 }
 
-const CATEGORY_OPTIONS = ["Live Sports", "News", "Entertainment", "Movies", "Kids", "Music", "Religious", "General"];
+const CATEGORY_OPTIONS = ["General", "News", "Sports"];
 const COUNTRY_OPTIONS = ["Bangladesh", "India", "Pakistan", "Global"];
+
+/**
+ * Fold any legacy/auto-detected category into the three supported buckets so
+ * the dropdown always has a valid selection (e.g. "Live Sports" → "Sports",
+ * "Entertainment"/"Movies"/... → "General").
+ */
+function normalizeCategory(raw?: string): string {
+  const c = (raw || "").toLowerCase();
+  if (c.includes("sport")) return "Sports";
+  if (c.includes("news")) return "News";
+  return "General";
+}
 
 /**
  * Manual override panel for a single channel.
@@ -55,8 +67,7 @@ const COUNTRY_OPTIONS = ["Bangladesh", "India", "Pakistan", "Global"];
 export default function ChannelEditModal({ channel, secretKey, onClose, onSaved }: Props) {
   const [name, setName] = useState(channel.name);
   const [logo, setLogo] = useState(channel.logo || "");
-  const [category, setCategory] = useState(channel.category || "General");
-  const [subCategory, setSubCategory] = useState(channel.subCategory || "");
+  const [category, setCategory] = useState(normalizeCategory(channel.category));
   const [country, setCountry] = useState(channel.country || "Global");
   const [tagsInput, setTagsInput] = useState((channel.tags || []).join(", "));
 
@@ -87,7 +98,6 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
           name: name.trim(),
           logo: logo.trim(),
           category,
-          subCategory: subCategory.trim(),
           country,
           tags: tagsInput
             .split(",")
@@ -259,16 +269,6 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                 </option>
               ))}
             </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Sub-category</span>
-            <input
-              value={subCategory}
-              onChange={(e) => setSubCategory(e.target.value)}
-              placeholder="Cricket, Drama..."
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-brand-500 outline-none"
-            />
           </label>
 
           <label className="space-y-1">

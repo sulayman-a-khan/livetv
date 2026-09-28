@@ -44,6 +44,12 @@ export default function ChannelRail({ title, accent, categorySlug, channels }: C
     updateArrows();
     const el = scrollerRef.current;
     if (!el) return;
+    if (typeof ResizeObserver === "undefined") {
+      // Old TV engines without ResizeObserver: arrows still update on scroll
+      // (the onScroll handler) and on window resize.
+      window.addEventListener("resize", updateArrows);
+      return () => window.removeEventListener("resize", updateArrows);
+    }
     const ro = new ResizeObserver(updateArrows);
     ro.observe(el);
     return () => ro.disconnect();

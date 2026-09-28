@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/tvPolyfills";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
 import HlsPlayer, { StreamMirror } from "@/components/HlsPlayer";
@@ -142,6 +143,12 @@ export default function WatchPage() {
     };
 
     updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      // Old TV engines without ResizeObserver (and no shim): fall back to a
+      // coarse window-resize listener so the layout still adapts.
+      window.addEventListener("resize", updateHeight);
+      return () => window.removeEventListener("resize", updateHeight);
+    }
     const observer = new ResizeObserver(() => {
       updateHeight();
     });
@@ -659,7 +666,7 @@ export default function WatchPage() {
                 </div>
 
                 {/* Category Filter Pills in Sidebar */}
-                <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-1 overflow-x-auto scrollbar-none shrink-0">
+                <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-2.5 overflow-x-auto scrollbar-none shrink-0">
                   {["all", ...CATEGORIES.map((c) => c.slug)].map((slug) => {
                     const isActive = activeCategorySlug === slug;
                     const label =

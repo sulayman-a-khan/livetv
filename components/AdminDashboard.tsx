@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/tvPolyfills";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { getChannelLogo, getCountryFlag } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";

@@ -121,3 +121,21 @@
     width: 0%;
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Old smart-TV compatibility (Tizen / webOS ≈ Chrome 38–63, Safari 9)
+ * ------------------------------------------------------------------ */
+
+/* These engines predate CSS `aspect-ratio`. The player frame relies on
+   `.aspect-video` for its height while its <video>/overlay children are
+   absolutely positioned, so without aspect-ratio support the box collapses to
+   0px and nothing is visible. Recreate the 16:9 box with the classic
+   padding-top hack — but ONLY where aspect-ratio is unsupported, so modern
+   browsers keep the native behaviour. */
+@supports not (aspect-ratio: 1 / 1) {
+  .aspect-video {
+    position: relative;
+    height: 0;
+    padding-top: 56.25%;
+  }
+}

@@ -2,6 +2,16 @@
   "name": "freetv",
   "version": "1.0.0",
   "private": true,
+  "browserslist": [
+    "chrome >= 38",
+    "samsung >= 4",
+    "safari >= 9",
+    "edge >= 13",
+    "ios >= 9",
+    "firefox >= 40",
+    "opera >= 25",
+    "android >= 5"
+  ],
   "scripts": {
     "dev": "next dev",
     "build": "next build",

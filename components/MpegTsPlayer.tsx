@@ -13,11 +13,14 @@
  *   - mpegts.js (dynamically imported, so it never runs during SSR) demuxes the
  *     TS into fMP4 and feeds it to MediaSource.
  *
- * This player mirrors the raw stream 1-to-1: buffering, stalls, drops and a
- * black picture are all left to mpegts.js and the <video> element to render
- * natively. There is no custom reconnect loop, no frozen-frame overlay, and no
- * artificial "Reconnecting…" masking. The only error we surface ourselves is a
- * genuinely unsupported browser (no MediaSource), which can never play TS.
+ * This player mirrors the raw stream 1-to-1 for normal playback: buffering,
+ * stalls and a black picture are left to mpegts.js and the <video> element to
+ * render natively — there is no frozen-frame overlay and no artificial
+ * "Reconnecting…" masking. The one thing it DOES handle is the provider's
+ * ~25s session expiry: when the feed ends/errors, it rebuilds the player
+ * against a fresh cache-busted URL (`_t=<nonce>`) so it always re-fetches the
+ * LIVE edge instead of replaying the first buffered clip. `liveSync` keeps
+ * playback pinned to the edge and `autoCleanupSourceBuffer` wipes old chunks.
  *
  * The .m3u8 (HlsPlayer) and YouTube (YouTubeLivePlayer) paths are untouched —
  * the watch page picks this component only for `.ts` / proxied sources.
@@ -57,6 +60,9 @@ interface MpegTsPlayerProps {
   onSwitchFailed?: (attemptedLabel: string) => void;
   onSwitchingChange?: (switching: boolean, label: string | null) => void;
 }
+
+/** Minimum gap between automatic live-edge reloads (drop recovery). */
+const MIN_RELOAD_MS = 1500;
 
 export default function MpegTsPlayer({
   channelName,
@@ -168,8 +174,25 @@ export default function MpegTsPlayer({
     }
   }, []);
 
-  /** Late-bound so the switch effect can call it. */
+  /** Late-bound so the switch effect (and reload) can call it. */
   const createAndLoadRef = useRef<((rawUrl: string) => void) | null>(null);
+  /** Late-bound so mpegts event handlers can trigger a live reload. */
+  const reloadLiveRef = useRef<(() => void) | null>(null);
+  /** Timestamp of the last auto-reload, to avoid a tight reload loop if the
+   *  feed errors again the instant it reconnects. */
+  const lastReloadRef = useRef(0);
+
+  /**
+   * Appends a per-load nonce to the proxied URL so every (re)connect is a
+   * brand-new request that hits the live edge — never a browser/edge-cached
+   * copy of the first ~25s. buildStreamProxyUrl already yields `?url=…`, so we
+   * add `&_t=…`; for a bare proxy path we add `?_t=…`.
+   */
+  const buildLiveUrl = useCallback((rawUrl: string) => {
+    const base = buildStreamProxyUrl(rawUrl);
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}_t=${Date.now()}`;
+  }, []);
 
   /** Build the mpegts.js player for a raw feed URL and start playback. */
   const createAndLoad = useCallback(
@@ -179,6 +202,14 @@ export default function MpegTsPlayer({
       if (!video) return;
 
       destroyPlayer();
+      // Flush any stale MediaSource/blob so a reload can't resume old buffered
+      // bytes — the next attach creates a fresh, empty source buffer.
+      try {
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        /* ignore */
+      }
       setIsLoading(true);
       setErrorMsg(null);
 
@@ -196,16 +227,19 @@ export default function MpegTsPlayer({
           return;
         }
 
-        const proxied = buildStreamProxyUrl(rawUrl);
+        const proxied = buildLiveUrl(rawUrl);
         let player: MpegtsPlayer;
         try {
           player = mpegts.createPlayer(
+            // Pure, non-seekable live source.
             { type: "mpegts", isLive: true, cors: true, url: proxied },
             {
-              // Standard, minimal live config — no latency chasing, no custom
-              // buffer gymnastics. mpegts.js handles buffering/stalls natively.
+              // No latency chasing, but DO sync to the live edge by nudging
+              // playbackRate so we never drift into stale buffer.
               liveBufferLatencyChasing: false,
-              // Keep the SourceBuffer from growing without bound (memory health).
+              liveSync: true,
+              // Immediately wipe old chunks from the SourceBuffer (memory +
+              // guarantees a "Play" can't replay cached bytes).
               autoCleanupSourceBuffer: true,
             }
           );
@@ -218,10 +252,16 @@ export default function MpegTsPlayer({
 
         playerRef.current = player;
 
-        // Surface nothing custom on runtime stream errors — let the <video>
-        // element show the native buffering/black state exactly as the feed is.
+        // The provider's session drops (~25s): the proxied response ends, so
+        // mpegts fires LOADING_COMPLETE / a NETWORK ERROR. Rebuild against a
+        // fresh-nonce URL to fetch the live edge instead of replaying cache.
         player.on(mpegts.Events.ERROR, (type: string, detail: string) => {
-          console.warn("[MpegTsPlayer] stream error (native handling)", type, detail);
+          console.warn("[MpegTsPlayer] stream error — reloading live edge", type, detail);
+          reloadLiveRef.current?.();
+        });
+        player.on(mpegts.Events.LOADING_COMPLETE, () => {
+          console.warn("[MpegTsPlayer] feed ended — reloading live edge");
+          reloadLiveRef.current?.();
         });
 
         try {
@@ -255,9 +295,26 @@ export default function MpegTsPlayer({
         }
       })();
     },
-    [destroyPlayer, ensureModule]
+    [destroyPlayer, ensureModule, buildLiveUrl]
   );
   createAndLoadRef.current = createAndLoad;
+
+  /**
+   * Reload the CURRENT feed from the live edge: tears down the player (which
+   * purges the internal SourceBuffer) and rebuilds against a fresh-nonce URL.
+   * Throttled so a feed that errors the instant it reconnects can't spin a
+   * tight reload loop — one reload per MIN_RELOAD_MS window at most.
+   */
+  const reloadLive = useCallback(() => {
+    if (!mountedRef.current) return;
+    const now = Date.now();
+    if (now - lastReloadRef.current < MIN_RELOAD_MS) return;
+    lastReloadRef.current = now;
+    const url = streamsRef.current[indexRef.current]?.url;
+    if (!url) return;
+    createAndLoadRef.current?.(url);
+  }, []);
+  reloadLiveRef.current = reloadLive;
 
   // ---- Initial load + channel/mirror switches driven by props ----
   useEffect(() => {
@@ -303,6 +360,9 @@ export default function MpegTsPlayer({
     setIsLoading(false);
     setSwitching(false);
     setPendingChannelLabel(null);
+    // Playback reached the live edge — clear the reload throttle so a later
+    // genuine drop recovers immediately instead of being suppressed.
+    lastReloadRef.current = 0;
   }, []);
 
   const handlePause = useCallback(() => setIsPlaying(false), []);
@@ -321,8 +381,18 @@ export default function MpegTsPlayer({
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
-    if (isPlaying) video.pause();
-    else video.play().catch(console.error);
+    if (isPlaying) {
+      video.pause();
+      return;
+    }
+    // If the live feed ended (session dropped), "Play" must fetch the LIVE
+    // edge again — not resume the stale buffered clip from ~25s ago.
+    if (video.ended || !playerRef.current) {
+      lastReloadRef.current = 0; // bypass the throttle for an explicit user action
+      reloadLive();
+      return;
+    }
+    video.play().catch(console.error);
   };
 
   const toggleMute = () => {

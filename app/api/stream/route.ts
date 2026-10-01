@@ -45,6 +45,21 @@ function corsHeaders(extra?: Record<string, string>): Record<string, string> {
   };
 }
 
+/**
+ * Aggressive anti-cache headers. A live TS feed must NEVER be cached by the
+ * browser, Vercel's edge, or any intermediary — otherwise, once the upstream
+ * session drops (~25s), the player re-reads the same stale bytes from cache and
+ * "replays" the first chunk instead of fetching the live edge.
+ */
+const NO_STORE_HEADERS: Record<string, string> = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  Pragma: "no-cache",
+  Expires: "0",
+  "Surrogate-Control": "no-store",
+  // Disable any intermediary (nginx/CDN) response buffering.
+  "X-Accel-Buffering": "no",
+};
+
 /** Builds the canonical Xtream live transport-stream URL for a stream id. */
 function buildXtreamTsUrl(streamId: string): string {
   return `${XTREAM_HOST}/live/${XTREAM_USER}/${XTREAM_PASS}/${streamId}.ts`;
@@ -102,7 +117,10 @@ export async function OPTIONS() {
 export async function HEAD(req: NextRequest) {
   const target = resolveTarget(req);
   if (!target) return badRequest("A valid `id` (Xtream stream id) or `url` query parameter is required");
-  return new Response(null, { status: 200, headers: corsHeaders({ "Content-Type": "video/mp2t" }) });
+  return new Response(null, {
+    status: 200,
+    headers: corsHeaders({ "Content-Type": "video/mp2t", ...NO_STORE_HEADERS }),
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -111,17 +129,22 @@ export async function GET(req: NextRequest) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(target, { headers: UPSTREAM_HEADERS, signal: req.signal });
+    upstream = await fetch(target, {
+      headers: UPSTREAM_HEADERS,
+      signal: req.signal,
+      // Never let the Next.js/Vercel fetch cache retain a chunk of a live feed.
+      cache: "no-store",
+    });
   } catch (err) {
     // The client left (abort) or the provider is unreachable — pass it through
     // as a gateway error rather than retrying.
     if (req.signal.aborted) {
-      return new Response(null, { status: 499, headers: corsHeaders() });
+      return new Response(null, { status: 499, headers: corsHeaders(NO_STORE_HEADERS) });
     }
     console.error("[/api/stream] upstream fetch failed", err);
     return new Response(JSON.stringify({ error: "Upstream connection failed" }), {
       status: 502,
-      headers: corsHeaders({ "Content-Type": "application/json" }),
+      headers: corsHeaders({ "Content-Type": "application/json", ...NO_STORE_HEADERS }),
     });
   }
 
@@ -134,18 +157,17 @@ export async function GET(req: NextRequest) {
     }
     return new Response(JSON.stringify({ error: `Upstream returned ${upstream.status}` }), {
       status: upstream.status || 502,
-      headers: corsHeaders({ "Content-Type": "application/json" }),
+      headers: corsHeaders({ "Content-Type": "application/json", ...NO_STORE_HEADERS }),
     });
   }
 
-  // Pipe the transport stream straight to the client. When the provider ends
-  // or drops the feed, this response ends too — exactly like a normal stream.
+  // Pipe the transport stream straight to the client. The upstream body is a
+  // ReadableStream that CLOSES the moment the provider ends/drops the feed
+  // (session expiry at ~25s), which in turn ends this response cleanly — so
+  // mpegts.js sees end-of-feed and re-requests the live edge rather than
+  // replaying buffered bytes. No-store headers keep every layer from caching.
   return new Response(upstream.body, {
     status: 200,
-    headers: corsHeaders({
-      "Content-Type": "video/mp2t",
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      "X-Accel-Buffering": "no",
-    }),
+    headers: corsHeaders({ "Content-Type": "video/mp2t", ...NO_STORE_HEADERS }),
   });
 }

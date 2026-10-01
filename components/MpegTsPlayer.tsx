@@ -63,13 +63,20 @@ interface MpegTsPlayerProps {
 
 /* ---- Resilience timings ---- */
 /** Delay before the first silent reconnect after a drop. */
-const RECONNECT_BASE_MS = 400;
+const RECONNECT_BASE_MS = 300;
 /** Ceiling for the reconnect backoff while we keep retrying the same feed. */
 const RECONNECT_MAX_MS = 3000;
 /** Attempts on a link that NEVER reaches playback before we call it dead. */
 const MAX_START_ATTEMPTS = 4;
-/** Buffering longer than this forces a reconnect. */
-const STALL_TIMEOUT_MS = 6000;
+/**
+ * The stream must be frozen (video clock not advancing) for this long before we
+ * surface ANY buffering UI or force a rebuild. Brief packet stutters and the
+ * proxy's ~sub-second reconnect gaps are absorbed by the buffer and never
+ * flash an overlay.
+ */
+const FROZEN_THRESHOLD_MS = 3500;
+/** How often the frozen-progress watchdog samples the video clock. */
+const PROGRESS_POLL_MS = 700;
 /** How long the "all servers down" banner shows before auto-advancing. */
 const EXHAUSTED_HOLD_MS = 5000;
 
@@ -138,6 +145,20 @@ export default function MpegTsPlayer({
   const hasLoadedOnceRef = useRef(false);
   const mountedRef = useRef(true);
 
+  // ---- Freeze-frame + frozen-progress watchdog ----
+  // A canvas snapshot of the last decoded frame is layered over the <video>
+  // during any teardown/reconnect gap, so the picture never flickers to black.
+  const frozenCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [showFrozenFrame, setShowFrozenFrame] = useState(false);
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastClockRef = useRef(0); // last observed video.currentTime
+  const lastAdvanceStampRef = useRef(0); // Date.now() when the clock last moved
+  const frozenShownRef = useRef(false); // overlay currently surfaced
+  const recoveryPhaseRef = useRef<"idle" | "retrying" | "exhausted">("idle");
+  recoveryPhaseRef.current = recoveryPhase;
+  const isLoadingRef = useRef(isLoading);
+  isLoadingRef.current = isLoading;
+
   // ---- Fullscreen state (parity with HlsPlayer) ----
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [cssFullscreen, setCssFullscreen] = useState(false);
@@ -162,6 +183,32 @@ export default function MpegTsPlayer({
     setStatusToast(msg);
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     statusTimerRef.current = setTimeout(() => setStatusToast(null), 3500);
+  }, []);
+
+  /** Snapshots the current video frame onto the overlay canvas so the picture
+   *  stays frozen (never black) across a player teardown/reconnect. Returns
+   *  false when there's no frame to capture yet. */
+  const captureFreezeFrame = useCallback((): boolean => {
+    const video = videoRef.current;
+    const canvas = frozenCanvasRef.current;
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) return false;
+    try {
+      if (canvas.width !== video.videoWidth) canvas.width = video.videoWidth;
+      if (canvas.height !== video.videoHeight) canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return false;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setShowFrozenFrame(true);
+      return true;
+    } catch {
+      // A cross-origin/tainted frame can't be read — just skip the snapshot.
+      return false;
+    }
+  }, []);
+
+  const clearFreezeFrame = useCallback(() => {
+    frozenShownRef.current = false;
+    setShowFrozenFrame(false);
   }, []);
 
   /** Lazily import mpegts.js (client-only) and quiet its logging. */
@@ -217,11 +264,15 @@ export default function MpegTsPlayer({
   /** Late-bound so failure handlers declared below can call it. */
   const createAndLoadRef = useRef<((rawUrl: string) => void) | null>(null);
   const failCurrentServerRef = useRef<(() => void) | null>(null);
+  const scheduleReconnectRef = useRef<((reason: string) => void) | null>(null);
 
   /**
-   * Silent reconnect to the SAME feed — this is what absorbs the provider's
-   * 17-18s drops. The <video> element is left intact so the last frame stays
-   * on screen; only a slim status bar shows.
+   * Reconnect to the SAME feed. This runs SILENTLY: it freezes the last frame
+   * on the overlay canvas, rebuilds the player, and resumes — no toast, no
+   * dimmer. The frozen-progress watchdog (not this function) decides whether a
+   * "Reconnecting…" overlay is ever shown, and only once the picture has been
+   * genuinely stuck for FROZEN_THRESHOLD_MS. Because the proxy already absorbs
+   * the provider's 17-18s drops server-side, this rarely even fires.
    */
   const scheduleReconnect = useCallback(
     (reason: string) => {
@@ -252,8 +303,9 @@ export default function MpegTsPlayer({
         : Math.min(RECONNECT_BASE_MS * attemptsRef.current, RECONNECT_MAX_MS);
 
       setRecoveryPhase("retrying");
-      setIsLoading(true);
-      showStatus(reason);
+      // Hold the last decoded frame on screen across the rebuild — the <video>
+      // goes blank the instant we detach MediaSource, so the canvas covers it.
+      captureFreezeFrame();
       destroyPlayer();
 
       reconnectTimerRef.current = setTimeout(() => {
@@ -262,8 +314,9 @@ export default function MpegTsPlayer({
         createAndLoadRef.current?.(stream.url);
       }, delay);
     },
-    [clearTimers, destroyPlayer, showStatus]
+    [clearTimers, destroyPlayer, captureFreezeFrame]
   );
+  scheduleReconnectRef.current = scheduleReconnect;
 
   /** Advance to the next server that hasn't already proven dead. */
   const advanceToNextServer = useCallback((): boolean => {
@@ -322,6 +375,9 @@ export default function MpegTsPlayer({
       destroyPlayer();
       setIsLoading(true);
       setErrorMsg(null);
+      // Re-arm the frozen-progress watchdog for this fresh connection attempt.
+      lastClockRef.current = 0;
+      lastAdvanceStampRef.current = Date.now();
 
       void (async () => {
         const mpegts = await ensureModule();
@@ -344,21 +400,23 @@ export default function MpegTsPlayer({
             { type: "mpegts", isLive: true, cors: true, url: proxied },
             {
               enableWorker: false,
-              // A small stash smooths micro-jitter without adding real latency.
+              // A larger IO stash rides out brief chunk delays / the proxy's
+              // sub-second reconnect gaps without underrunning the <video>.
               enableStashBuffer: true,
-              stashInitialSize: 128,
-              // Chase the live edge so reconnects don't accumulate latency.
+              stashInitialSize: 384,
+              // Chase the live edge, but tolerate a few seconds of latency so a
+              // minor delay doesn't force an immediate playback re-init.
               liveBufferLatencyChasing: true,
-              liveBufferLatencyMaxLatency: 2.0,
-              liveBufferLatencyMinRemain: 0.5,
+              liveBufferLatencyMaxLatency: 4.0,
+              liveBufferLatencyMinRemain: 1.0,
               // Never stop pulling on a live feed.
               lazyLoad: false,
               lazyLoadMaxDuration: 0,
               deferLoadAfterSourceOpen: true,
               // Keep the SourceBuffer from growing without bound.
               autoCleanupSourceBuffer: true,
-              autoCleanupMaxBackwardDuration: 30,
-              autoCleanupMinBackwardDuration: 15,
+              autoCleanupMaxBackwardDuration: 60,
+              autoCleanupMinBackwardDuration: 30,
               fixAudioTimestampGap: true,
               reuseRedirectedURL: true,
             }
@@ -375,27 +433,26 @@ export default function MpegTsPlayer({
         player.on(mpegts.Events.ERROR, (type: string, detail: string) => {
           // The proxy reconnects server-side, so a fatal error reaching the
           // client is rare (platform maxDuration, or a real network blip).
-          // Either way, rebuild playback quietly — never surface a hard error.
+          // Rebuild quietly and hold the last frame — no overlay unless the
+          // picture is still stuck after FROZEN_THRESHOLD_MS (the watchdog).
           console.warn("[MpegTsPlayer] ERROR", type, detail);
-          if (type === mpegts.ErrorTypes.NETWORK_ERROR) {
-            // Chunk drop / connection reset that reached us: silently rebuild.
-            scheduleReconnect("Reconnecting...");
-          } else if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
-            // Decode/SourceBuffer hiccup: rebuild the player in place.
-            scheduleReconnect("Recovering stream...");
+          if (type === mpegts.ErrorTypes.MEDIA_ERROR) {
+            scheduleReconnect("media");
           } else {
-            scheduleReconnect("Reconnecting...");
+            // NETWORK_ERROR (chunk drop / reset) and anything else.
+            scheduleReconnect("network");
           }
         });
 
-        // The proxy closes the stream when the platform ends the connection or
-        // the provider drops — for a live feed this is our cue to reconnect.
+        // The proxy closes the stream when the platform ends the connection
+        // (maxDuration) — for a live feed this is our cue to silently resume.
         player.on(mpegts.Events.LOADING_COMPLETE, () => {
-          scheduleReconnect("Stream ended. Reconnecting...");
+          scheduleReconnect("eof");
         });
 
+        // mpegts recovered from an early EOF on its own — nothing to surface.
         player.on(mpegts.Events.RECOVERED_EARLY_EOF, () => {
-          showStatus("Recovering stream...");
+          /* absorbed silently */
         });
 
         try {
@@ -403,7 +460,7 @@ export default function MpegTsPlayer({
           player.load();
         } catch (err) {
           console.error("[MpegTsPlayer] attach/load failed", err);
-          scheduleReconnect("Reconnecting...");
+          scheduleReconnect("attach");
           return;
         }
 
@@ -451,6 +508,11 @@ export default function MpegTsPlayer({
     clearTimers();
     setRecoveryPhase("idle");
     setStatusToast(null);
+    // Don't carry the previous channel's frozen frame into the new one.
+    frozenShownRef.current = false;
+    clearFreezeFrame();
+    lastClockRef.current = 0;
+    lastAdvanceStampRef.current = Date.now();
 
     if (hasLoadedOnceRef.current) {
       setSwitching(true);
@@ -493,6 +555,11 @@ export default function MpegTsPlayer({
     setSwitching(false);
     setPendingChannelLabel(null);
     if (recoveryPhase !== "idle") setRecoveryPhase("idle");
+    // Playback resumed — drop the frozen-frame overlay and re-arm the watchdog.
+    clearFreezeFrame();
+    const v = videoRef.current;
+    lastClockRef.current = v ? v.currentTime : 0;
+    lastAdvanceStampRef.current = Date.now();
     // It reached playback — this server is alive; reset the drop counters so a
     // later provider drop is absorbed silently instead of failing over.
     if (!hasPlayedRef.current) {
@@ -500,28 +567,90 @@ export default function MpegTsPlayer({
       attemptsRef.current = 0;
     }
     if (reconnectingRef.current) reconnectingRef.current = false;
-    if (stallTimerRef.current) {
-      clearTimeout(stallTimerRef.current);
-      stallTimerRef.current = null;
-    }
-  }, [recoveryPhase]);
+  }, [recoveryPhase, clearFreezeFrame]);
 
+  /**
+   * `waiting` is a hint, not a verdict. Minor packet stutters and the proxy's
+   * sub-second reconnect gaps resolve on their own, so we deliberately do
+   * NOTHING here — no dimmer, no toast. The frozen-progress watchdog below is
+   * the single arbiter of whether the picture is genuinely stuck.
+   */
   const handleWaiting = useCallback(() => {
-    if (recoveryPhase === "exhausted") return;
-    setIsLoading(true);
-    if (stallTimerRef.current) clearTimeout(stallTimerRef.current);
-    stallTimerRef.current = setTimeout(() => {
-      stallTimerRef.current = null;
-      scheduleReconnect("Buffering. Reconnecting...");
-    }, STALL_TIMEOUT_MS);
-  }, [recoveryPhase, scheduleReconnect]);
+    /* intentionally passive — see the progress watchdog */
+  }, []);
 
   const handlePause = useCallback(() => setIsPlaying(false), []);
 
   const handleNativeError = useCallback(() => {
     // A <video>-level error (e.g. the SourceBuffer was torn down mid-drop).
-    scheduleReconnect("Reconnecting...");
+    scheduleReconnect("native");
   }, [scheduleReconnect]);
+
+  /**
+   * Frozen-progress watchdog — the ONLY thing that surfaces buffering UI.
+   * It samples the video clock; only when playback has genuinely not advanced
+   * for FROZEN_THRESHOLD_MS (mid-stream) does it freeze the last frame, show a
+   * slim "Reconnecting…" bar, and kick a silent rebuild. A user pause never
+   * counts as frozen.
+   */
+  useEffect(() => {
+    lastAdvanceStampRef.current = Date.now();
+    progressTimerRef.current = setInterval(() => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (recoveryPhaseRef.current === "exhausted") return;
+
+      const now = Date.now();
+
+      // User paused — don't treat as a freeze; keep the baseline fresh.
+      if (video.paused || video.ended) {
+        lastAdvanceStampRef.current = now;
+        lastClockRef.current = video.currentTime;
+        return;
+      }
+
+      const clock = video.currentTime;
+      if (clock > lastClockRef.current + 0.05) {
+        // Healthy: the clock is moving. Clear any frozen overlay.
+        lastClockRef.current = clock;
+        lastAdvanceStampRef.current = now;
+        if (!hasPlayedRef.current) {
+          hasPlayedRef.current = true;
+          attemptsRef.current = 0;
+        }
+        if (frozenShownRef.current) {
+          frozenShownRef.current = false;
+          clearFreezeFrame();
+          setIsLoading(false);
+          setStatusToast(null);
+          if (reconnectingRef.current) reconnectingRef.current = false;
+        }
+        return;
+      }
+
+      // Clock is stuck. Only act once it's been frozen past the threshold and
+      // we had previously reached playback (a slow FIRST connect is handled by
+      // createAndLoad + mpegts' own network timeouts, not by this watchdog).
+      const frozenFor = now - (lastAdvanceStampRef.current || now);
+      if (frozenFor >= FROZEN_THRESHOLD_MS && hasPlayedRef.current) {
+        if (!frozenShownRef.current) {
+          frozenShownRef.current = true;
+          captureFreezeFrame();
+          setIsLoading(true);
+          showStatus("Reconnecting...");
+        }
+        if (!reconnectingRef.current) scheduleReconnectRef.current?.("frozen");
+      }
+    }, PROGRESS_POLL_MS);
+
+    return () => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Controls ----
   const scheduleControlsHide = useCallback(() => {
@@ -720,7 +849,19 @@ export default function MpegTsPlayer({
           playsInline
         />
 
-        {isLoading && recoveryPhase !== "exhausted" && (
+        {/* Frozen last-frame: covers the <video> during any teardown/reconnect
+            gap so the picture holds steady instead of flashing black. Hidden
+            the instant the clock advances again. */}
+        <canvas
+          ref={frozenCanvasRef}
+          className={`absolute inset-0 w-full h-full object-contain pointer-events-none z-10 transition-opacity duration-150 ${
+            showFrozenFrame ? "opacity-100" : "opacity-0"
+          }`}
+        />
+
+        {/* A light dim only while connecting with no frame yet — never over a
+            held freeze-frame, so buffering UI stays out of the way. */}
+        {isLoading && !showFrozenFrame && recoveryPhase !== "exhausted" && (
           <div className="absolute inset-0 bg-black/25 z-20 pointer-events-none" />
         )}
 

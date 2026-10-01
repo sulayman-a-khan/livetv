@@ -49,6 +49,22 @@ const INITIAL_CONNECT_ATTEMPTS = 3;
 const MAX_RECONNECT_ATTEMPTS = 40;
 const RECONNECT_BASE_DELAY_MS = 300;
 const RECONNECT_MAX_DELAY_MS = 3000;
+/**
+ * Tiny "buffer flush" pause taken BEFORE re-dialing the upstream. When the
+ * provider merely pauses the byte feed for a moment (rather than truly
+ * dropping), this short settle window lets any in-flight data arrive and lets
+ * mpegts.js drain its stash — preventing the reconnect loop from cycle-spinning
+ * on a brief upstream hiccup.
+ */
+const RECONNECT_FLUSH_MS = 150;
+/**
+ * Zero-byte keep-alive heartbeat. Vercel (and intermediaries) can terminate a
+ * streaming response that looks idle — e.g. during a reconnect gap or a quiet
+ * upstream. Enqueueing an empty chunk periodically keeps the HTTP stream marked
+ * as active without perturbing the transport stream (an empty payload is a
+ * no-op for the demuxer).
+ */
+const HEARTBEAT_INTERVAL_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -196,6 +212,7 @@ export async function GET(req: NextRequest) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let failures = 0; // consecutive data-less reconnect cycles
+      let closed = false; // guards controller.enqueue/close after teardown
 
       const closeReader = () => {
         const r = activeReader;
@@ -209,55 +226,76 @@ export async function GET(req: NextRequest) {
         }
       };
 
-      while (!stopped) {
-        // ---- 1) Drain the current upstream connection ----
-        let gotData = false;
+      // Zero-byte keep-alive so an idle-looking stream isn't killed by Vercel.
+      const heartbeat = setInterval(() => {
+        if (stopped || closed) return;
         try {
-          const r = activeReader;
-          if (r) {
-            // eslint-disable-next-line no-constant-condition
-            while (true) {
-              if (stopped) break;
-              const { done, value } = await r.read();
-              if (done) break; // provider dropped the feed
-              if (value && value.length) {
-                gotData = true;
-                controller.enqueue(value);
-              }
-            }
-          }
+          controller.enqueue(new Uint8Array(0));
         } catch {
-          // Upstream reset / aborted mid-read — fall through and reconnect.
-          if (stopped) break;
+          closed = true;
         }
-        if (stopped) break;
-
-        closeReader();
-        if (gotData) failures = 0;
-
-        // ---- 2) Seamlessly re-dial the provider, keeping THIS response open ----
-        let reconnected = false;
-        while (!stopped && failures <= MAX_RECONNECT_ATTEMPTS) {
-          failures += 1;
-          const delay = Math.min(RECONNECT_BASE_DELAY_MS * failures, RECONNECT_MAX_DELAY_MS);
-          await sleep(delay);
-          if (stopped) break;
-          try {
-            activeReader = await openUpstream(target, upstreamSignal);
-            reconnected = true;
-            break;
-          } catch {
-            if (stopped) break;
-            // 401/403/reset — loop retries with growing backoff (fresh session).
-          }
-        }
-        if (!reconnected) break; // upstream stayed dead — let the client retry
-      }
+      }, HEARTBEAT_INTERVAL_MS);
 
       try {
-        controller.close();
-      } catch {
-        /* already closed */
+        while (!stopped) {
+          // ---- 1) Drain the current upstream connection ----
+          let gotData = false;
+          try {
+            const r = activeReader;
+            if (r) {
+              // eslint-disable-next-line no-constant-condition
+              while (true) {
+                if (stopped) break;
+                const { done, value } = await r.read();
+                if (done) break; // provider dropped the feed
+                if (value && value.length) {
+                  gotData = true;
+                  controller.enqueue(value);
+                }
+              }
+            }
+          } catch {
+            // Upstream reset / aborted mid-read — fall through and reconnect.
+            if (stopped) break;
+          }
+          if (stopped) break;
+
+          closeReader();
+          if (gotData) failures = 0;
+
+          // Tiny settle/flush window before re-dialing: absorbs brief upstream
+          // byte pauses so we don't spin the reconnect loop on a hiccup.
+          await sleep(RECONNECT_FLUSH_MS);
+          if (stopped) break;
+
+          // ---- 2) Seamlessly re-dial the provider, keeping THIS response open ----
+          let reconnected = false;
+          while (!stopped && failures <= MAX_RECONNECT_ATTEMPTS) {
+            failures += 1;
+            const delay = Math.min(RECONNECT_BASE_DELAY_MS * failures, RECONNECT_MAX_DELAY_MS);
+            await sleep(delay);
+            if (stopped) break;
+            try {
+              activeReader = await openUpstream(target, upstreamSignal);
+              reconnected = true;
+              break;
+            } catch {
+              if (stopped) break;
+              // 401/403/reset — loop retries with growing backoff (fresh session).
+            }
+          }
+          if (!reconnected) break; // upstream stayed dead — let the client retry
+        }
+      } finally {
+        clearInterval(heartbeat);
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
       }
     },
     cancel() {

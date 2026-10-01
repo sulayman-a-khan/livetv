@@ -46,17 +46,15 @@ function corsHeaders(extra?: Record<string, string>): Record<string, string> {
 }
 
 /**
- * Aggressive anti-cache headers. A live TS feed must NEVER be cached by the
- * browser, Vercel's edge, or any intermediary — otherwise, once the upstream
- * session drops (~25s), the player re-reads the same stale bytes from cache and
- * "replays" the first chunk instead of fetching the live edge.
+ * Anti-cache headers. A live TS feed must never be cached by the browser or
+ * Vercel's edge — otherwise, once the upstream session drops, the player can
+ * re-read stale bytes instead of the live edge.
  */
 const NO_STORE_HEADERS: Record<string, string> = {
-  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+  "Cache-Control": "no-cache, no-store, must-revalidate",
   Pragma: "no-cache",
-  Expires: "0",
-  "Surrogate-Control": "no-store",
-  // Disable any intermediary (nginx/CDN) response buffering.
+  // Disable any intermediary (nginx/CDN) response buffering so TS chunks flush
+  // straight through as a smooth, continuous stream.
   "X-Accel-Buffering": "no",
 };
 
@@ -161,11 +159,12 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Pipe the transport stream straight to the client. The upstream body is a
-  // ReadableStream that CLOSES the moment the provider ends/drops the feed
-  // (session expiry at ~25s), which in turn ends this response cleanly — so
-  // mpegts.js sees end-of-feed and re-requests the live edge rather than
-  // replaying buffered bytes. No-store headers keep every layer from caching.
+  // Pipe the transport stream straight through as one continuous chunked
+  // response. A brief upstream delay simply means no bytes flow for a moment —
+  // we do NOT abort or close on it, so playback stays smooth. The response only
+  // ends when the upstream body itself ends (provider drop / session expiry),
+  // which cleanly signals end-of-feed to mpegts.js. No-store headers keep the
+  // browser and edge from caching any of it.
   return new Response(upstream.body, {
     status: 200,
     headers: corsHeaders({ "Content-Type": "video/mp2t", ...NO_STORE_HEADERS }),

@@ -16,11 +16,15 @@
  * This player mirrors the raw stream 1-to-1 for normal playback: buffering,
  * stalls and a black picture are left to mpegts.js and the <video> element to
  * render natively — there is no frozen-frame overlay and no artificial
- * "Reconnecting…" masking. The one thing it DOES handle is the provider's
- * ~25s session expiry: when the feed ends/errors, it rebuilds the player
- * against a fresh cache-busted URL (`_t=<nonce>`) so it always re-fetches the
- * LIVE edge instead of replaying the first buffered clip. `liveSync` keeps
- * playback pinned to the edge and `autoCleanupSourceBuffer` wipes old chunks.
+ * "Reconnecting…" masking. mpegts keeps a natural live buffer (stash enabled,
+ * no latency chasing) so minor chunk delays don't reset the connection.
+ *
+ * The ONE recovery path is a frozen-progress watchdog: only when the video clock
+ * has been continuously stuck for 8s (after having played) does it rebuild the
+ * player against a fresh cache-busted URL (`_t=<nonce>`) to re-fetch the LIVE
+ * edge — which is how the provider's ~25s session expiry is absorbed without
+ * replaying the first buffered clip. Frequent mpegts ERROR events from small
+ * buffer shifts are logged and ignored, so they never flash the status bar.
  *
  * The .m3u8 (HlsPlayer) and YouTube (YouTubeLivePlayer) paths are untouched —
  * the watch page picks this component only for `.ts` / proxied sources.
@@ -61,8 +65,10 @@ interface MpegTsPlayerProps {
   onSwitchingChange?: (switching: boolean, label: string | null) => void;
 }
 
-/** Minimum gap between automatic live-edge reloads (drop recovery). */
-const MIN_RELOAD_MS = 1500;
+/** Recovery only fires after playback is CONTINUOUSLY frozen this long. */
+const FROZEN_RELOAD_MS = 8000;
+/** How often the frozen-progress watchdog samples the video clock. */
+const PROGRESS_POLL_MS = 1000;
 
 export default function MpegTsPlayer({
   channelName,
@@ -176,11 +182,13 @@ export default function MpegTsPlayer({
 
   /** Late-bound so the switch effect (and reload) can call it. */
   const createAndLoadRef = useRef<((rawUrl: string) => void) | null>(null);
-  /** Late-bound so mpegts event handlers can trigger a live reload. */
+  /** Late-bound so the frozen watchdog / user Play can trigger a live reload. */
   const reloadLiveRef = useRef<(() => void) | null>(null);
-  /** Timestamp of the last auto-reload, to avoid a tight reload loop if the
-   *  feed errors again the instant it reconnects. */
-  const lastReloadRef = useRef(0);
+  // ---- Frozen-progress watchdog (the ONLY automatic recovery trigger) ----
+  const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastClockRef = useRef(0); // last observed video.currentTime
+  const frozenSinceRef = useRef(0); // when the clock last stopped advancing
+  const hasPlayedRef = useRef(false); // reached playback at least once
 
   /**
    * Appends a per-load nonce to the proxied URL so every (re)connect is a
@@ -234,12 +242,14 @@ export default function MpegTsPlayer({
             // Pure, non-seekable live source.
             { type: "mpegts", isLive: true, cors: true, url: proxied },
             {
-              // No latency chasing, but DO sync to the live edge by nudging
-              // playbackRate so we never drift into stale buffer.
+              // Natural live buffer: hold an initial stash before playback so a
+              // minor chunk delay doesn't underrun and force an instant drop.
+              enableStashBuffer: true,
+              stashInitialSize: 384,
+              // Do NOT chase the live edge by rate/seek — that constant nudging
+              // is what kept resetting the connection. Let it buffer naturally.
               liveBufferLatencyChasing: false,
-              liveSync: true,
-              // Immediately wipe old chunks from the SourceBuffer (memory +
-              // guarantees a "Play" can't replay cached bytes).
+              // Wipe old chunks from the SourceBuffer for memory health.
               autoCleanupSourceBuffer: true,
             }
           );
@@ -252,16 +262,16 @@ export default function MpegTsPlayer({
 
         playerRef.current = player;
 
-        // The provider's session drops (~25s): the proxied response ends, so
-        // mpegts fires LOADING_COMPLETE / a NETWORK ERROR. Rebuild against a
-        // fresh-nonce URL to fetch the live edge instead of replaying cache.
+        // Minor network/buffer hiccups fire ERROR frequently on a live feed.
+        // We deliberately do NOT reload here — recovery is driven solely by the
+        // frozen-progress watchdog, and only after FROZEN_RELOAD_MS of a truly
+        // stuck clock. Brief shifts never tear down the player or flash the
+        // "Connecting…" bar.
         player.on(mpegts.Events.ERROR, (type: string, detail: string) => {
-          console.warn("[MpegTsPlayer] stream error — reloading live edge", type, detail);
-          reloadLiveRef.current?.();
+          console.warn("[MpegTsPlayer] stream error (watchdog recovers if frozen)", type, detail);
         });
         player.on(mpegts.Events.LOADING_COMPLETE, () => {
-          console.warn("[MpegTsPlayer] feed ended — reloading live edge");
-          reloadLiveRef.current?.();
+          console.warn("[MpegTsPlayer] feed ended (watchdog recovers if frozen)");
         });
 
         try {
@@ -300,18 +310,19 @@ export default function MpegTsPlayer({
   createAndLoadRef.current = createAndLoad;
 
   /**
-   * Reload the CURRENT feed from the live edge: tears down the player (which
-   * purges the internal SourceBuffer) and rebuilds against a fresh-nonce URL.
-   * Throttled so a feed that errors the instant it reconnects can't spin a
-   * tight reload loop — one reload per MIN_RELOAD_MS window at most.
+   * Reload the CURRENT feed from the live edge: tears down the player (purging
+   * the SourceBuffer) and rebuilds against a fresh-nonce URL. Called ONLY by the
+   * frozen watchdog (after FROZEN_RELOAD_MS) or an explicit user Play on an
+   * ended feed — never on a minor buffer shift.
    */
   const reloadLive = useCallback(() => {
     if (!mountedRef.current) return;
-    const now = Date.now();
-    if (now - lastReloadRef.current < MIN_RELOAD_MS) return;
-    lastReloadRef.current = now;
     const url = streamsRef.current[indexRef.current]?.url;
     if (!url) return;
+    // Reset the freeze baseline so the watchdog waits a full FROZEN_RELOAD_MS
+    // before it would consider another reload.
+    frozenSinceRef.current = Date.now();
+    lastClockRef.current = 0;
     createAndLoadRef.current?.(url);
   }, []);
   reloadLiveRef.current = reloadLive;
@@ -328,6 +339,10 @@ export default function MpegTsPlayer({
     lastAppliedIdRef.current = target._id;
     indexRef.current = targetIdx;
     setDisplayedIndex(targetIdx);
+    // Re-arm the frozen watchdog for the fresh connection.
+    hasPlayedRef.current = false;
+    lastClockRef.current = 0;
+    frozenSinceRef.current = Date.now();
 
     if (hasLoadedOnceRef.current) {
       setSwitching(true);
@@ -360,12 +375,62 @@ export default function MpegTsPlayer({
     setIsLoading(false);
     setSwitching(false);
     setPendingChannelLabel(null);
-    // Playback reached the live edge — clear the reload throttle so a later
-    // genuine drop recovers immediately instead of being suppressed.
-    lastReloadRef.current = 0;
+    // Playback reached the live edge — mark healthy and re-baseline the watchdog.
+    hasPlayedRef.current = true;
+    const v = videoRef.current;
+    lastClockRef.current = v ? v.currentTime : 0;
+    frozenSinceRef.current = Date.now();
   }, []);
 
   const handlePause = useCallback(() => setIsPlaying(false), []);
+
+  /**
+   * Frozen-progress watchdog — the ONLY automatic recovery trigger. It samples
+   * the video clock once a second and reloads the live edge ONLY when playback
+   * has been continuously frozen for FROZEN_RELOAD_MS (8s) after having played.
+   * A user pause never counts as frozen, and the frequent mpegts ERROR events
+   * from minor buffer shifts are ignored here — so no more 3s reconnect loop.
+   */
+  useEffect(() => {
+    frozenSinceRef.current = Date.now();
+    progressTimerRef.current = setInterval(() => {
+      const video = videoRef.current;
+      if (!video || !mountedRef.current) return;
+
+      const now = Date.now();
+      const clock = video.currentTime;
+
+      // User paused (not ended) — keep the baseline fresh, never reload.
+      if (video.paused && !video.ended) {
+        lastClockRef.current = clock;
+        frozenSinceRef.current = now;
+        return;
+      }
+
+      // Healthy: the clock is advancing.
+      if (clock > lastClockRef.current + 0.05) {
+        lastClockRef.current = clock;
+        frozenSinceRef.current = now;
+        hasPlayedRef.current = true;
+        return;
+      }
+
+      // Genuinely frozen. Recover at most once per FROZEN_RELOAD_MS window, and
+      // only for a stream that had already started playing.
+      const frozenFor = now - (frozenSinceRef.current || now);
+      if (frozenFor >= FROZEN_RELOAD_MS && hasPlayedRef.current) {
+        reloadLiveRef.current?.(); // reloadLive resets the freeze baseline
+      }
+    }, PROGRESS_POLL_MS);
+
+    return () => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- Controls ----
   const scheduleControlsHide = useCallback(() => {
@@ -388,7 +453,6 @@ export default function MpegTsPlayer({
     // If the live feed ended (session dropped), "Play" must fetch the LIVE
     // edge again — not resume the stale buffered clip from ~25s ago.
     if (video.ended || !playerRef.current) {
-      lastReloadRef.current = 0; // bypass the throttle for an explicit user action
       reloadLive();
       return;
     }

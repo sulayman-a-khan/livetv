@@ -5,7 +5,9 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
 import HlsPlayer, { StreamMirror } from "@/components/HlsPlayer";
 import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
+import MpegTsPlayer from "@/components/MpegTsPlayer";
 import { isYouTubeUrl } from "@/lib/youtube";
+import { isMpegTsUrl } from "@/lib/streamType";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { getChannelLogo } from "@/lib/utils";
@@ -370,6 +372,12 @@ export default function WatchPage() {
   // on Vercel. YouTube's own controls stay hidden until hover.
   const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
   const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
+  // A raw MPEG-TS / Xtream `.ts` feed (or one already routed through /api/stream)
+  // can't be played by hls.js — it goes to the mpegts.js-based player instead.
+  const isActiveStreamMpegTs = useMemo(
+    () => !isActiveStreamYouTube && isMpegTsUrl(activeStreamUrl),
+    [activeStreamUrl, isActiveStreamYouTube]
+  );
 
   /**
    * Auto-scroll the sidebar so the channel that is currently playing is
@@ -585,6 +593,16 @@ export default function WatchPage() {
                       channelName={channel.name}
                       youtubeUrl={activeStreamUrl}
                       onUnavailable={handleAllServersFailed}
+                    />
+                  ) : isActiveStreamMpegTs ? (
+                    <MpegTsPlayer
+                      channelName={channel.name}
+                      streams={channel.streams}
+                      currentStreamIndex={currentStreamIndex}
+                      onStreamIndexChange={setCurrentStreamIndex}
+                      onAllServersFailed={handleAllServersFailed}
+                      onSwitchingChange={handleSwitchingChange}
+                      onSwitchFailed={handleSwitchFailed}
                     />
                   ) : (
                     <HlsPlayer

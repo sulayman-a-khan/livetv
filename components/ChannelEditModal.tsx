@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { getCountryFlag } from "@/lib/utils";
 import { isYouTubeUrl } from "@/lib/youtube";
+import { isMpegTsUrl } from "@/lib/streamType";
 import HlsPlayer from "@/components/HlsPlayer";
 import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
+import MpegTsPlayer from "@/components/MpegTsPlayer";
 import {
   X,
   Save,
@@ -345,7 +347,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             <input
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
-              placeholder="https://example.com/live/stream.m3u8"
+              placeholder="https://example.com/live/stream.m3u8  or  .../stream.ts"
               className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-brand-500 outline-none"
             />
             <button
@@ -390,6 +392,19 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             <div className="relative w-full aspect-video bg-black">
               {isYouTubeUrl(testStream.url) ? (
                 <YouTubeLivePlayer channelName={name} youtubeUrl={testStream.url} />
+              ) : isMpegTsUrl(testStream.url) ? (
+                <MpegTsPlayer
+                  channelName={name}
+                  streams={[
+                    {
+                      _id: testStream._id,
+                      url: testStream.url,
+                      priority: 0,
+                      status: "active",
+                      latency: testStream.latency || 0,
+                    },
+                  ]}
+                />
               ) : (
                 <HlsPlayer
                   channelName={name}

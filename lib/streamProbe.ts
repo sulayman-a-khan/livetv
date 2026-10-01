@@ -32,6 +32,7 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
+import { isMpegTsUrl } from "@/lib/streamType";
 
 const execFileAsync = promisify(execFile);
 
@@ -875,6 +876,164 @@ async function probeOnce(
 /** Failure statuses worth retrying — transient/network-shaped, not content-deterministic. */
 const RETRYABLE_STATUSES: HlsHealthStatus[] = ["TIMEOUT", "OFFLINE", "UNKNOWN"];
 
+/* ------------------------------------------------------------------ *
+ * MPEG-TS (.ts) probe
+ * ------------------------------------------------------------------ */
+
+/** Reads at most `maxBytes` of a response body as RAW bytes (no text decode),
+ *  then cancels the connection — used for the binary MPEG-TS sync check. */
+async function readBytesCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let collected = 0;
+  try {
+    while (collected < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value && value.length > 0) {
+        const remaining = maxBytes - collected;
+        const piece = value.length > remaining ? value.subarray(0, remaining) : value;
+        chunks.push(piece);
+        collected += piece.length;
+      }
+    }
+  } catch {
+    /* a mid-read reset still leaves us with whatever we already collected */
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  const merged = new Uint8Array(collected);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+/** MPEG-TS packets are 188 bytes and each starts with the sync byte 0x47.
+ *  Finding a repeating 188-byte sync cadence is a strong signal the feed is
+ *  genuine transport-stream media rather than an HTML error page in disguise. */
+function looksLikeMpegTs(bytes: Uint8Array): boolean {
+  if (bytes.length < 189) return false;
+  const scanLimit = Math.min(bytes.length, 188);
+  for (let start = 0; start < scanLimit; start++) {
+    if (bytes[start] !== 0x47) continue;
+    let consecutive = 0;
+    for (let p = start; p + 188 <= bytes.length; p += 188) {
+      if (bytes[p] === 0x47) consecutive++;
+      else break;
+    }
+    if (consecutive >= 2) return true;
+  }
+  return false;
+}
+
+/**
+ * Health check for a raw MPEG-TS / Xtream `.ts` feed. There is no #EXTM3U
+ * playlist to parse, so the HLS pipeline above (and its NOT_HLS_PLAYLIST
+ * rejection) doesn't apply — without this a perfectly good `.ts` link would be
+ * stored "broken" and its channel hidden by the activeStreamCount filter.
+ *
+ * Deliberately lenient, mirroring the YouTube short-circuit: a reachable feed
+ * that answers 200/206 with real transport-stream bytes (or a video/mp2t
+ * content-type) is ONLINE. Actual playback resilience against the provider's
+ * ~17-18s drops is handled client-side by MpegTsPlayer, not here.
+ */
+async function probeTsStream(
+  url: string,
+  options: typeof DEFAULTS & { headers?: Record<string, string> }
+): Promise<HlsCheckResult> {
+  const headers = {
+    ...buildHeaders(options.headers),
+    "User-Agent": "IPTVSmartersPlayer",
+    Accept: "*/*",
+    Range: "bytes=0-3759", // ~20 TS packets — enough to confirm the sync cadence
+  };
+
+  const res = await timedFetch(url, { method: "GET", headers }, options.timeoutMs);
+  if (!res.response) {
+    return baseResult({
+      status: res.errorCode === "TIMEOUT" ? "TIMEOUT" : "OFFLINE",
+      errorCode: res.errorCode || "UNKNOWN_ERROR",
+      responseTime: res.responseTime,
+      playlistType: null,
+      isLive: true,
+      error: res.errorMessage,
+    });
+  }
+
+  const response = res.response;
+  const finalUrl = response.url || url;
+
+  if (!response.ok && response.status !== 206) {
+    const { status, errorCode } = classifyHttpStatus(response.status, url);
+    return baseResult({
+      status,
+      errorCode,
+      httpStatus: response.status,
+      responseTime: res.responseTime,
+      finalUrl,
+      playlistType: null,
+      isLive: true,
+      error: `HTTP ${response.status}`,
+    });
+  }
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const bytes = await readBytesCapped(response, 3760);
+
+  // An HTML error/forbidden page disguised behind a 200 is still a failure.
+  if (bytes.length > 0 && contentType.includes("text/html")) {
+    const asText = new TextDecoder("utf-8", { fatal: false }).decode(bytes.subarray(0, 512));
+    if (looksLikeHtmlErrorPage(asText, contentType)) {
+      return baseResult({
+        status: "INVALID",
+        errorCode: "HTML_ERROR_PAGE",
+        httpStatus: response.status,
+        responseTime: res.responseTime,
+        finalUrl,
+        playlistType: null,
+        isLive: true,
+        error: "Server returned an HTML error page instead of a transport stream",
+      });
+    }
+  }
+
+  const isTs =
+    looksLikeMpegTs(bytes) ||
+    contentType.includes("mp2t") ||
+    contentType.includes("mpegts") ||
+    contentType.includes("octet-stream");
+
+  if (!isTs) {
+    return baseResult({
+      status: "INVALID",
+      errorCode: "NOT_HLS_PLAYLIST",
+      httpStatus: response.status,
+      responseTime: res.responseTime,
+      finalUrl,
+      playlistType: null,
+      isLive: true,
+      error: "Response is not a recognisable MPEG-TS stream",
+    });
+  }
+
+  return baseResult({
+    status: "ONLINE",
+    errorCode: "OK",
+    httpStatus: response.status,
+    responseTime: res.responseTime,
+    finalUrl,
+    playlistType: null,
+    isLive: true,
+    video: true,
+    audio: true,
+    error: null,
+  });
+}
+
 /**
  * Full health check with retry/backoff. A single transient blip (one dropped
  * connection, one slow DNS lookup) never immediately condemns a normally
@@ -909,6 +1068,16 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
 
   const merged = { ...DEFAULTS, ...options, headers: options.headers };
   const maxAttempts = Math.max(1, merged.maxAttempts);
+
+  // Raw MPEG-TS / Xtream `.ts` feeds (and anything already routed through the
+  // /api/stream proxy) have no #EXTM3U playlist, so the HLS pipeline below
+  // would reject them as NOT_HLS_PLAYLIST. Give them their own lenient probe
+  // so a working `.ts` link is stored "active" instead of "broken"/hidden.
+  if (isMpegTsUrl(url)) {
+    const tsResult = await probeTsStream(url, merged);
+    tsResult.attempts = 1;
+    return tsResult;
+  }
 
   let lastResult: HlsCheckResult | null = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

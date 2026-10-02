@@ -3,6 +3,7 @@ import crypto from "crypto";
 import {
   PROVIDERS,
   buildProviderStreamUrl,
+  parseProviderKey,
   resolveChannel,
   type ProviderFormat,
 } from "@/lib/providers";
@@ -17,18 +18,21 @@ import { STREAM_PROXY_PATH } from "@/lib/streamType";
  *
  * Entry points (all resolve to one upstream target):
  *   ?channel=<normalizedName>  generic routing via lib/providers (preferred)
+ *   ?provider=<p1|p2>&id=<id>  pick a provider explicitly, build {id}.m3u8
  *   ?ref=<opaque token>        an encrypted absolute URL — used for the child
  *                              links inside a rewritten .m3u8 (see below)
  *   ?url=<absolute feed>       legacy direct feed (still supported)
- *   ?id=<xtream stream id>     legacy provider1 transport-stream id
+ *   ?id=<xtream stream id>     stream id on the default provider (p1)
  *
- * Delivery depends on the provider's container:
- *   - `.ts`  (provider1) -> piped straight through as video/mp2t.
- *   - `.m3u8` (provider2) -> the playlist is fetched, and every child URI
- *     (variant playlists, media segments, key/map URIs) is rewritten to
+ * Provider `p1` (toxicplay1, default) and `p2` (BanglaView) both serve `.m3u8`.
+ *
+ * Delivery depends on the resolved container:
+ *   - `.m3u8` -> the playlist is fetched, and every child URI (variant
+ *     playlists, media segments, key/map URIs) is rewritten to
  *     `${STREAM_PROXY_PATH}?ref=<encrypted absolute url>`. Those opaque tokens
  *     keep the credentialed provider URLs on the server, so hls.js only ever
  *     sees our origin. Child requests re-enter here via `?ref=` and recurse.
+ *   - `.ts`   -> piped straight through as video/mp2t.
  *
  * There is NO retry loop, NO session recovery, and NO cross-provider fallback:
  * the active provider for a channel is used, and whatever it does — buffer,
@@ -131,16 +135,16 @@ function formatFromUrl(url: string): ProviderFormat {
 }
 
 /**
- * If someone stored a provider1 (toxicplay1) link WITHOUT credentials
- * (e.g. http://toxicplay1.com/live/1234.ts), inject them so it still plays.
- * Any other URL is returned untouched.
+ * If someone stored a provider link WITHOUT credentials
+ * (e.g. http://toxicplay1.com/live/1234.ts), inject the matching provider's
+ * creds so it still plays. Any other URL is returned untouched.
  */
-function applyProvider1Defaults(rawUrl: string): string {
-  const p = PROVIDERS.provider1;
+function applyProviderDefaults(rawUrl: string): string {
   try {
     const u = new URL(rawUrl);
-    const host = new URL(p.baseUrl).host;
-    if (u.host.toLowerCase() === host.toLowerCase()) {
+    for (const p of Object.values(PROVIDERS)) {
+      const host = new URL(p.baseUrl).host;
+      if (u.host.toLowerCase() !== host.toLowerCase()) continue;
       const parts = u.pathname.split("/").filter(Boolean); // e.g. ["live","1234.ts"]
       if (parts.length === 2 && parts[0].toLowerCase() === "live") {
         return `${p.baseUrl.replace(/\/+$/, "")}/live/${p.username}/${p.password}/${parts[1]}`;
@@ -176,19 +180,20 @@ function resolveTarget(req: NextRequest): ResolvedTarget | null {
 
   // 3) Legacy absolute feed URL.
   if (urlParam && /^https?:\/\//i.test(urlParam)) {
-    const abs = applyProvider1Defaults(urlParam);
+    const abs = applyProviderDefaults(urlParam);
     return { url: abs, format: formatFromUrl(abs) };
   }
 
-  // 4) Legacy Xtream stream id (provider1 transport stream), or a URL passed as id.
+  // 4) Provider + Xtream stream id -> `${base}/live/${user}/${pass}/${id}.m3u8`.
+  //    `?provider=` selects p1 (default) or p2; a bare `?id=` uses the default.
   if (idParam) {
     if (/^https?:\/\//i.test(idParam)) {
-      const abs = applyProvider1Defaults(idParam);
+      const abs = applyProviderDefaults(idParam);
       return { url: abs, format: formatFromUrl(abs) };
     }
     if (/^[A-Za-z0-9_-]+$/.test(idParam)) {
-      const url = buildProviderStreamUrl(PROVIDERS.provider1, idParam);
-      return { url, format: PROVIDERS.provider1.format };
+      const provider = PROVIDERS[parseProviderKey(params.get("provider"))];
+      return { url: buildProviderStreamUrl(provider, idParam), format: provider.format };
     }
   }
 
@@ -236,7 +241,7 @@ function badRequest(message: string) {
 }
 
 const MISSING_TARGET_MSG =
-  "A valid `channel`, `ref`, `id` (Xtream stream id) or `url` query parameter is required";
+  "A valid `channel`, `ref`, `provider`+`id`, or `url` query parameter is required";
 
 /** Preflight for cross-origin players. */
 export async function OPTIONS() {

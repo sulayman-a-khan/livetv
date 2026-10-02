@@ -5,18 +5,18 @@
  * imported by server code (the /api/stream route). Never import it from a
  * client component, or the credentials will be bundled into the browser.
  *
- * A "channel" is identified by its normalizedName (e.g. "tsports"). Each channel
- * maps to one or more providers, each with its own Xtream stream id, plus which
- * provider is currently `active`. The proxy resolves `?channel=<id>` to a
- * concrete, credentialed stream URL for the active provider only (no automatic
- * cross-provider fallback).
+ * Two ways to address a stream through /api/stream:
+ *   1. Explicit:  ?provider=p1|p2&id=<xtream stream id>
+ *   2. By channel: ?channel=<normalizedName>  (uses CHANNEL_STREAMS below)
  *
- * Providers differ in the container they serve for live streams:
- *   - provider1 (toxicplay1) -> raw MPEG-TS (`.ts`), piped as video/mp2t
- *   - provider2 (BanglaView)  -> HLS (`.m3u8`), proxied + playlist-rewritten
+ * Both build the canonical Xtream live URL
+ *   `${baseUrl}/live/${username}/${password}/${streamId}.${ext}`
+ * and, per current requirements, use the `.m3u8` (HLS) container for both
+ * providers. (Xtream serves the same stream id as both `.ts` and `.m3u8`; the
+ * raw-`.ts` path via `?url=` is still handled separately by the route.)
  */
 
-export type ProviderKey = "provider1" | "provider2";
+export type ProviderKey = "p1" | "p2";
 
 /** Container a provider serves for `/live/...` streams. */
 export type ProviderFormat = "ts" | "m3u8";
@@ -29,19 +29,31 @@ export interface ProviderConfig {
 }
 
 export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
-  provider1: {
+  // Provider 1 (default) — toxicplay.
+  p1: {
     baseUrl: "http://toxicplay1.com",
     username: "1Aoen7elp5",
     password: "IgMJ60tmAa",
-    format: "ts",
+    format: "m3u8",
   },
-  provider2: {
+  // Provider 2 — BanglaView.
+  p2: {
     baseUrl: "http://play.dgix.top:8080",
     username: "sulayman9991",
     password: "01999129991",
     format: "m3u8",
   },
 };
+
+/** Provider used when `?provider=` is omitted or unrecognised. */
+export const DEFAULT_PROVIDER: ProviderKey = "p1";
+
+/** Normalises a `?provider=` value to a ProviderKey (defaults to p1). */
+export function parseProviderKey(value: string | null | undefined): ProviderKey {
+  const v = (value || "").trim().toLowerCase();
+  if (v === "p2" || v === "provider2") return "p2";
+  return DEFAULT_PROVIDER; // p1 / provider1 / anything else
+}
 
 export interface ChannelRouting {
   /** Which provider currently serves this channel. */
@@ -56,14 +68,14 @@ export interface ChannelRouting {
  * SCAFFOLD: `tsports` is wired as an example. Replace the placeholder stream ids
  * with the real Xtream ids for each provider, and add more channels the same way:
  *
- *   gtv: { active: "provider2", providers: { provider1: {...}, provider2: {...} } }
+ *   gtv: { active: "p2", providers: { p1: { streamId: "…" }, p2: { streamId: "…" } } }
  */
 export const CHANNEL_STREAMS: Record<string, ChannelRouting> = {
   tsports: {
-    active: "provider1",
+    active: "p1",
     providers: {
-      provider1: { streamId: "REPLACE_PROVIDER1_STREAM_ID" },
-      provider2: { streamId: "REPLACE_PROVIDER2_STREAM_ID" },
+      p1: { streamId: "REPLACE_P1_STREAM_ID" },
+      p2: { streamId: "REPLACE_P2_STREAM_ID" },
     },
   },
 };

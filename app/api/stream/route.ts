@@ -2,9 +2,9 @@ import { NextRequest } from "next/server";
 import crypto from "crypto";
 import {
   PROVIDERS,
-  buildProviderStreamUrl,
   parseProviderKey,
   resolveChannel,
+  resolveProviderStreamUrl,
   type ProviderFormat,
 } from "@/lib/providers";
 import { STREAM_PROXY_PATH } from "@/lib/streamType";
@@ -18,13 +18,16 @@ import { STREAM_PROXY_PATH } from "@/lib/streamType";
  *
  * Entry points (all resolve to one upstream target):
  *   ?channel=<normalizedName>  generic routing via lib/providers (preferred)
- *   ?provider=<p1|p2>&id=<id>  pick a provider explicitly, build {id}.m3u8
+ *   ?provider=<p1|p2>&id=<id>  pick a provider explicitly (bare ?id= uses p1)
  *   ?ref=<opaque token>        an encrypted absolute URL — used for the child
  *                              links inside a rewritten .m3u8 (see below)
  *   ?url=<absolute feed>       legacy direct feed (still supported)
- *   ?id=<xtream stream id>     stream id on the default provider (p1)
  *
- * Provider `p1` (toxicplay1, default) and `p2` (BanglaView) both serve `.m3u8`.
+ * The two providers do NOT share a URL scheme (see lib/providers.ts):
+ *   p1 (toxicplay)  -> classic Xtream `.ts`:  /live/<user>/<pass>/<id>.ts
+ *   p2 (BanglaView) -> XUI-One tokenized URL resolved at request time from the
+ *                      panel's get.php playlist (xui-id -> /play/<token>/ts)
+ * Both resolve to a transport stream and are piped through as video/mp2t.
  *
  * Delivery depends on the resolved container:
  *   - `.m3u8` -> the playlist is fetched, and every child URI (variant
@@ -156,8 +159,9 @@ function applyProviderDefaults(rawUrl: string): string {
   }
 }
 
-/** Resolves the request to a single upstream target (url + container format). */
-function resolveTarget(req: NextRequest): ResolvedTarget | null {
+/** Resolves the request to a single upstream target (url + container format).
+ *  Async because p2 (XUI-One) has to look its tokenized URL up via get.php. */
+async function resolveTarget(req: NextRequest): Promise<ResolvedTarget | null> {
   const params = req.nextUrl.searchParams;
   const refParam = (params.get("ref") || "").trim();
   const channelParam = (params.get("channel") || "").trim();
@@ -174,8 +178,9 @@ function resolveTarget(req: NextRequest): ResolvedTarget | null {
   // 2) Generic per-channel routing (the preferred entry point).
   if (channelParam) {
     const resolved = resolveChannel(channelParam);
-    if (resolved) return { url: resolved.url, format: resolved.format };
-    return null; // unknown channel, no active provider, or placeholder id
+    if (!resolved) return null; // unknown channel, no active provider, or placeholder id
+    const stream = await resolveProviderStreamUrl(resolved.providerKey, resolved.provider, resolved.streamId);
+    return stream ? { url: stream.url, format: stream.format } : null;
   }
 
   // 3) Legacy absolute feed URL.
@@ -184,17 +189,17 @@ function resolveTarget(req: NextRequest): ResolvedTarget | null {
     return { url: abs, format: formatFromUrl(abs) };
   }
 
-  // 4) Provider + Xtream stream id -> `${base}/live/${user}/${pass}/${id}.m3u8`.
-  //    `?provider=` selects p1 (default) or p2; a bare `?id=` uses the default.
+  // 4) Provider + stream id. `?provider=` selects p1 (default) or p2; a bare
+  //    `?id=` uses the default. p1 builds a classic Xtream `.ts`; p2 resolves
+  //    its xui-id to a tokenized `/play/<token>/ts` URL via get.php.
   if (idParam) {
     if (/^https?:\/\//i.test(idParam)) {
       const abs = applyProviderDefaults(idParam);
       return { url: abs, format: formatFromUrl(abs) };
     }
-    if (/^[A-Za-z0-9_-]+$/.test(idParam)) {
-      const provider = PROVIDERS[parseProviderKey(params.get("provider"))];
-      return { url: buildProviderStreamUrl(provider, idParam), format: provider.format };
-    }
+    const providerKey = parseProviderKey(params.get("provider"));
+    const stream = await resolveProviderStreamUrl(providerKey, PROVIDERS[providerKey], idParam);
+    if (stream) return { url: stream.url, format: stream.format };
   }
 
   return null;
@@ -249,7 +254,7 @@ export async function OPTIONS() {
 }
 
 export async function HEAD(req: NextRequest) {
-  const target = resolveTarget(req);
+  const target = await resolveTarget(req);
   if (!target) return badRequest(MISSING_TARGET_MSG);
   const contentType =
     target.format === "m3u8" ? "application/vnd.apple.mpegurl" : "video/mp2t";
@@ -260,7 +265,7 @@ export async function HEAD(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const target = resolveTarget(req);
+  const target = await resolveTarget(req);
   if (!target) return badRequest(MISSING_TARGET_MSG);
 
   let upstream: Response;

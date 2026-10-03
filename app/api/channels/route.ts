@@ -33,42 +33,45 @@ export async function GET(req: NextRequest) {
         .sort({ isPinned: -1, priorityOrder: 1, name: 1 })
         .lean();
       const channelIds = channels.map((c) => c._id);
+      const channelIdStrings = channelIds.map((c) => c.toString());
 
-      // Prefer confirmed-active streams. A degraded mirror is only exposed as
-      // a per-channel fallback when every active mirror is temporarily absent.
+      // Fetch all candidate stream links for these channels (matching ObjectId and string representations)
       const usableStreams = await StreamLink.find({
-        channelId: { $in: channelIds },
-        $or: [
-          { status: "active" },
-          { status: "degraded", failedAttempts: { $lt: MAX_CONSECUTIVE_FAILURES } },
-        ],
+        channelId: { $in: [...channelIds, ...channelIdStrings] },
       })
         .sort({ priority: 1, latency: 1 })
         .lean();
 
-      // Group active streams by channelId
+      // Group streams by channelId
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const streamMap = new Map<string, any[]>();
       for (const stream of usableStreams) {
-        const cId = stream.channelId.toString();
+        const cId = stream.channelId ? stream.channelId.toString() : "";
+        if (!cId) continue;
         if (!streamMap.has(cId)) streamMap.set(cId, []);
         streamMap.get(cId)!.push(stream);
       }
 
-      // A degraded link is a last resort, never shown beside confirmed-active links.
-      const result = channels
-        .map((c) => {
-          const candidates = streamMap.get(c._id.toString()) || [];
-          const active = candidates.filter((stream) => stream.status === "active");
-          const streams = active.length > 0 ? active : candidates;
-          return {
-            ...c,
-            logo: getChannelLogo(c.name, c.logo),
-            activeStreamCount: streams.length,
-            primaryStream: streams[0] || null,
-          };
-        })
-        .filter((channel) => channel.activeStreamCount > 0);
+      const result = channels.map((c) => {
+        const cId = c._id.toString();
+        const candidates = streamMap.get(cId) || [];
+        const active = candidates.filter((stream) => stream.status === "active");
+        const degraded = candidates.filter(
+          (stream) => stream.status === "degraded" && (stream.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES
+        );
+        const streams = active.length > 0 ? active : degraded.length > 0 ? degraded : candidates;
+        const directUrl = (c as any).streamUrl || (c as any).url;
+        const primaryStream =
+          streams[0] ||
+          (directUrl ? { url: directUrl, status: "active", priority: 1 } : null);
+
+        return {
+          ...c,
+          logo: getChannelLogo(c.name, c.logo),
+          activeStreamCount: streams.length > 0 ? streams.length : (directUrl ? 1 : (candidates.length > 0 ? candidates.length : 1)),
+          primaryStream,
+        };
+      });
 
       return NextResponse.json({ success: true, count: result.length, channels: result });
     } else {
@@ -89,24 +92,26 @@ export async function GET(req: NextRequest) {
         channels = channels.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
       }
 
-      // Keep a degraded mirror only when the channel has no active mirror.
       const result = channels
         .map((c) => {
-          const candidates = streams.filter(
-            (s) => s.channelId === c._id &&
-              (s.status === "active" ||
-                (s.status === "degraded" && s.failedAttempts < MAX_CONSECUTIVE_FAILURES))
-          );
+          const candidates = streams.filter((s) => s.channelId === c._id);
           const active = candidates.filter((stream) => stream.status === "active");
-          const chActiveStreams = active.length > 0 ? active : candidates;
+          const degraded = candidates.filter(
+            (stream) => stream.status === "degraded" && (stream.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES
+          );
+          const chActiveStreams = active.length > 0 ? active : degraded.length > 0 ? degraded : candidates;
+          const directUrl = (c as any).streamUrl || (c as any).url;
+          const primaryStream =
+            chActiveStreams[0] ||
+            (directUrl ? { url: directUrl, status: "active", priority: 1 } : null);
+
           return {
             ...c,
             logo: getChannelLogo(c.name, c.logo),
-            activeStreamCount: chActiveStreams.length,
-            primaryStream: chActiveStreams[0] || null,
+            activeStreamCount: chActiveStreams.length > 0 ? chActiveStreams.length : (directUrl ? 1 : 1),
+            primaryStream,
           };
         })
-        .filter((c) => c.activeStreamCount > 0)
         .sort((a, b) => {
           // Pinned channels first
           const aPinned = (a as any).isPinned === true ? 1 : 0;

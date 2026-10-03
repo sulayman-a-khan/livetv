@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
+import LiveSportsArena from "@/components/LiveSportsArena";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
 import { RefreshCw, Tv, SearchX } from "lucide-react";
 
@@ -35,8 +36,17 @@ export default function HomePage() {
       try {
         const res = await fetch("/api/channels", { cache: "no-store" });
         const data = await res.json();
-        if (active && data.success && Array.isArray(data.channels)) {
-          setChannels(data.channels);
+        const list = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.channels)
+          ? data.channels
+          : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.items)
+          ? data.items
+          : [];
+        if (active) {
+          setChannels(list);
         }
       } catch (err) {
         console.error("Failed to load home channels", err);
@@ -62,11 +72,35 @@ export default function HomePage() {
     const pool = trimmedQuery
       ? channels.filter((ch) => ch.name.toLowerCase().includes(trimmedQuery))
       : channels;
-    return CATEGORIES.map((category) => ({
+    const catRails = CATEGORIES.map((category) => ({
       category,
       title: RAIL_TITLES[category.slug] || category.title,
       channels: pool.filter((ch) => isChannelInCategory(ch, category)),
     })).filter((rail) => rail.channels.length > 0);
+
+    // Fallback: If channels exist but didn't match any specific category rail, show them in a general rail
+    if (catRails.length === 0 && pool.length > 0) {
+      return [
+        {
+          category: {
+            slug: "all-channels",
+            name: "All Channels",
+            title: "Live Stream Channels",
+            badge: "📺",
+            flag: "📺",
+            subtitle: "All Available Live Streams",
+            description: "All live channels",
+            image: "",
+            filterType: "category" as const,
+            filterValues: [],
+          },
+          title: "All Live Channels",
+          channels: pool,
+        },
+      ];
+    }
+
+    return catRails;
   }, [channels, trimmedQuery]);
 
   return (
@@ -78,6 +112,9 @@ export default function HomePage() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
+        {/* Live Sports Arena Feed */}
+        {!trimmedQuery && <LiveSportsArena />}
+
         {/* Channel rails */}
         {loading ? (
           <div className="space-y-8" aria-busy="true">

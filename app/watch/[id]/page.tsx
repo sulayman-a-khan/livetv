@@ -26,6 +26,7 @@ import {
   Radio,
   CheckCircle2,
 } from "lucide-react";
+import { buildStreamCandidates, resolveStreamUrl } from "@/lib/streamUrl";
 
 interface ChannelDetails {
   _id: string;
@@ -220,7 +221,7 @@ export default function WatchPage() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/channels/${channelId}`);
+      const res = await fetch(`/api/channels/${channelId}`, { cache: "no-store" });
       const data = await res.json();
 
       // A newer channel switch has started since this request went out —
@@ -230,17 +231,73 @@ export default function WatchPage() {
       if (data.success && data.channel) {
         setChannel(data.channel);
         setCurrentStreamIndex(0);
-      } else if (!isInitial) {
-        // Switching to this channel failed at the metadata level (e.g. it
-        // just went offline) — stay on whatever was already playing instead
-        // of blanking the whole page out from under the viewer.
-        revertFailedSwitch();
       } else {
-        setError(data.error || "Channel stream not found");
+        // Fallback 1: check /api/events for a sports event match
+        let sportsFound = false;
+        try {
+          const evRes = await fetch(`/api/events?_t=${Date.now()}`, { cache: "no-store" });
+          if (evRes.ok) {
+            const evData = await evRes.json();
+            const list = evData?.events || evData?.data || [];
+            const evMatch = list.find((e: any) => e.id === channelId || e._id === channelId);
+            if (evMatch) {
+              sportsFound = true;
+              const pUrl = evMatch.primaryStreamUrl || evMatch.streamUrl || "";
+              const bUrls = evMatch.backupStreamUrls || [];
+              const candidates = buildStreamCandidates(pUrl, bUrls, channelId);
+              setChannel({
+                _id: channelId,
+                name: evMatch.matchTitle || "Live Sports Match",
+                logo: "",
+                category: evMatch.sportType || "Live Sports",
+                country: "Global",
+                streams: candidates as StreamMirror[],
+              });
+              setCurrentStreamIndex(0);
+            }
+          }
+        } catch {
+          // ignore error and check query params
+        }
+
+        // Fallback 2: check if direct stream query parameter exists
+        if (!sportsFound) {
+          const streamParam = searchParams.get("stream");
+          const titleParam = searchParams.get("title");
+          if (streamParam) {
+            const candidates = buildStreamCandidates(streamParam, [], channelId);
+            setChannel({
+              _id: channelId,
+              name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+              logo: "",
+              category: "Live Sports",
+              country: "Global",
+              streams: candidates as StreamMirror[],
+            });
+            setCurrentStreamIndex(0);
+          } else if (!isInitial) {
+            // Switching to this channel failed at the metadata level — stay on whatever was already playing
+            revertFailedSwitch();
+          } else {
+            setError(data.error || "Channel stream not found");
+          }
+        }
       }
     } catch {
       if (requestId !== latestRequestIdRef.current) return;
-      if (!isInitial) {
+      const streamParam = searchParams.get("stream");
+      const titleParam = searchParams.get("title");
+      if (streamParam) {
+        const candidates = buildStreamCandidates(streamParam, [], channelId);
+        setChannel({
+          _id: channelId,
+          name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+          logo: "",
+          category: "Live Sports",
+          country: "Global",
+          streams: candidates as StreamMirror[],
+        });
+      } else if (!isInitial) {
         revertFailedSwitch();
       } else {
         setError("Network error fetching stream configuration");
@@ -250,7 +307,7 @@ export default function WatchPage() {
         setInitialLoading(false);
       }
     }
-  }, [revertFailedSwitch]);
+  }, [revertFailedSwitch, searchParams]);
 
   /**
    * Loads the playlist. The API only returns channels that currently have at
@@ -281,12 +338,27 @@ export default function WatchPage() {
 
   // Initial load
   useEffect(() => {
-    if (channelIdParam) {
+    const streamParam = searchParams.get("stream");
+    const titleParam = searchParams.get("title");
+
+    if (streamParam) {
+      setActiveChannelId(channelIdParam || "live-sports-event");
+      const candidates = buildStreamCandidates(streamParam, [], channelIdParam || "direct");
+      setChannel({
+        _id: channelIdParam || "live-sports-event",
+        name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+        logo: "",
+        category: "Live Sports",
+        country: "Global",
+        streams: candidates as StreamMirror[],
+      });
+      setInitialLoading(false);
+    } else if (channelIdParam) {
       setActiveChannelId(channelIdParam);
       loadChannelData(channelIdParam, true);
     }
     fetchSidebarChannels();
-  }, [channelIdParam, loadChannelData, fetchSidebarChannels]);
+  }, [channelIdParam, searchParams, loadChannelData, fetchSidebarChannels]);
 
   /**
    * Channel switches update the URL with a raw `window.history.replaceState`

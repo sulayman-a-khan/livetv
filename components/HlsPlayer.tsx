@@ -15,6 +15,7 @@ import {
   Gauge,
   Check,
 } from "lucide-react";
+import { resolveStreamUrl } from "@/lib/streamUrl";
 
 export interface StreamMirror {
   _id: string;
@@ -620,16 +621,26 @@ export default function HlsPlayer({
           startFragPrefetch: true,
 
           // ---- Loader timeouts / retries ----
-          manifestLoadingTimeOut: 10000,
-          manifestLoadingMaxRetry: 3,
-          levelLoadingTimeOut: 10000,
+          manifestLoadingTimeOut: 12000,
+          manifestLoadingMaxRetry: 4,
+          levelLoadingTimeOut: 12000,
           levelLoadingMaxRetry: 4,
           fragLoadingTimeOut: isSlow ? 30000 : 20000,
           fragLoadingMaxRetry: 6,
+
+          // ---- CORS & credentials handling for Cloudflare Tunnel & Forwarder ----
+          xhrSetup: (xhr: XMLHttpRequest) => {
+            try {
+              xhr.withCredentials = false;
+            } catch {
+              /* ignore restricted browser properties */
+            }
+          },
         });
 
+        const normalizedUrl = resolveStreamUrl(url);
         hlsRefObj.current = hls;
-        hls.loadSource(url);
+        hls.loadSource(normalizedUrl);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -714,8 +725,10 @@ export default function HlsPlayer({
         });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         // Native Safari HLS support
+        const normalizedUrl = resolveStreamUrl(url);
         video.muted = opts.front ? isMutedRef.current : true;
-        video.src = url;
+        video.crossOrigin = "anonymous";
+        video.src = normalizedUrl;
         video
           .play()
           .then(() => {
@@ -1243,6 +1256,7 @@ export default function HlsPlayer({
           onPause={() => handleSlotPause("A")}
           onError={() => handleSlotNativeError("A")}
           playsInline
+          crossOrigin="anonymous"
         />
         {/* Slot B */}
         <video
@@ -1256,6 +1270,7 @@ export default function HlsPlayer({
           onPause={() => handleSlotPause("B")}
           onError={() => handleSlotNativeError("B")}
           playsInline
+          crossOrigin="anonymous"
         />
 
         {/* A light dim while connecting/reconnecting keeps focus on the status

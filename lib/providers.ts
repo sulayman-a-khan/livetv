@@ -1,9 +1,19 @@
 /**
  * IPTV provider registry + per-channel routing (server-only).
  *
- * IMPORTANT: this module holds provider credentials. It must only ever be
- * imported by server code (the /api/stream route). Never import it from a
- * client component, or the credentials will be bundled into the browser.
+ * IMPORTANT: this module reads provider credentials from environment variables.
+ * It must only ever be imported by server code (the /api/stream route). Never
+ * import it from a client component, or the credentials end up in the browser.
+ *
+ * SECURITY: no provider host, username, password or token is stored in source
+ * control any more. Configure them in the environment (see .env.example):
+ *
+ *   P1_BASE_URL   P1_USERNAME   P1_PASSWORD     provider 1 (Xtream Codes panel)
+ *   P2_BASE_URL   P2_USERNAME   P2_PASSWORD     provider 2 (XUI-One panel)
+ *
+ * A provider with any of the three values missing is treated as "not
+ * configured": its streams simply fail to resolve (null) and a single warning
+ * is logged — nothing falls back to a default credential.
  *
  * Two ways to address a stream through /api/stream:
  *   1. Explicit:  ?provider=p1|p2&id=<stream id>
@@ -12,12 +22,12 @@
  * The two live providers do NOT share a URL scheme (verified against each
  * panel's own player_api.php / get.php on 2026-10-02):
  *
- *   p1 — toxicplay (STAR-NETWORK), a classic Xtream Codes panel.
+ *   p1 — a classic Xtream Codes panel.
  *        allowed_output_formats = ["ts"] ONLY; `.m3u8` returns HTTP 405.
  *        Streams live at `${base}/live/${user}/${pass}/${streamId}.ts` and the
  *        `id` is the numeric Xtream stream_id from get_live_streams.
  *
- *   p2 — BanglaView, an XUI-One 1.5.5 panel. It does NOT serve the classic
+ *   p2 — an XUI-One 1.5.5 panel. It does NOT serve the classic
  *        `/live/user/pass/id.*` path at all (every id 404s). Its real playback
  *        URLs are tokenized — `https://<mediaHost>/play/<token>/ts` — and are
  *        only discoverable from the panel's `get.php` export playlist, where
@@ -50,24 +60,58 @@ export interface ProviderConfig {
   scheme: ProviderScheme;
 }
 
+function readEnv(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+/**
+ * Builds a provider whose fields are read from the environment on every access
+ * (getters), so values injected after module load — and `next build` runs where
+ * runtime secrets are absent — never get frozen in as empty strings.
+ */
+function providerFromEnv(
+  prefix: "P1" | "P2",
+  format: ProviderFormat,
+  scheme: ProviderScheme
+): ProviderConfig {
+  return {
+    get baseUrl() {
+      return readEnv(`${prefix}_BASE_URL`);
+    },
+    get username() {
+      return readEnv(`${prefix}_USERNAME`);
+    },
+    get password() {
+      return readEnv(`${prefix}_PASSWORD`);
+    },
+    format,
+    scheme,
+  };
+}
+
 export const PROVIDERS: Record<ProviderKey, ProviderConfig> = {
-  // Provider 1 (default) — toxicplay / STAR-NETWORK. TS only.
-  p1: {
-    baseUrl: "http://toxicplay1.com",
-    username: "1Aoen7elp5",
-    password: "IgMJ60tmAa",
-    format: "ts",
-    scheme: "xtream",
-  },
-  // Provider 2 — BanglaView (XUI-One). Tokenized /play/<token>/ts via get.php.
-  p2: {
-    baseUrl: "http://play.dgix.top:8080",
-    username: "sulayman9991",
-    password: "01999129991",
-    format: "ts",
-    scheme: "xui-token",
-  },
+  // Provider 1 (default) — Xtream Codes panel. TS only.
+  p1: providerFromEnv("P1", "ts", "xtream"),
+  // Provider 2 — XUI-One panel. Tokenized /play/<token>/ts via get.php.
+  p2: providerFromEnv("P2", "ts", "xui-token"),
 };
+
+/** True when baseUrl, username and password are all present in the environment. */
+export function isProviderConfigured(provider: ProviderConfig): boolean {
+  return Boolean(provider.baseUrl && provider.username && provider.password);
+}
+
+const warnedUnconfigured = new Set<ProviderKey>();
+
+function warnUnconfigured(providerKey: ProviderKey): void {
+  if (warnedUnconfigured.has(providerKey)) return;
+  warnedUnconfigured.add(providerKey);
+  const prefix = providerKey.toUpperCase();
+  console.warn(
+    `[providers] ${providerKey} is not configured — set ${prefix}_BASE_URL, ${prefix}_USERNAME and ${prefix}_PASSWORD. ` +
+      `Streams for this provider will not resolve.`
+  );
+}
 
 /** Provider used when `?provider=` is omitted or unrecognised. */
 export const DEFAULT_PROVIDER: ProviderKey = "p1";
@@ -165,7 +209,7 @@ async function fetchPlaylist(providerKey: ProviderKey, provider: ProviderConfig)
  * export playlist. Entries look like:
  *
  *   #EXTINF:-1 xui-id="3" tvg-name="LIVE CRICKET 1" ...,LIVE CRICKET 1
- *   https://play.dgix.top:443/play/<token>/ts
+ *   https://media-host.example:443/play/<token>/ts
  *
  * so we locate the `#EXTINF` line whose `xui-id` matches exactly, then take the
  * next non-blank, non-comment line as the URL.
@@ -207,8 +251,8 @@ export interface ResolvedStream {
  * Resolves a provider + stream id to the actual upstream URL to fetch.
  *   - `xtream`    -> built synchronously (`.ts` for both today).
  *   - `xui-token` -> resolved via the cached get.php playlist.
- * Returns null when the id can't be resolved (unknown xui-id, panel down, or an
- * unedited scaffold placeholder).
+ * Returns null when the id can't be resolved (unknown xui-id, panel down, provider
+ * credentials missing from the environment, or an unedited scaffold placeholder).
  */
 export async function resolveProviderStreamUrl(
   providerKey: ProviderKey,
@@ -217,6 +261,12 @@ export async function resolveProviderStreamUrl(
 ): Promise<ResolvedStream | null> {
   const id = (streamId || "").trim();
   if (!id || /^REPLACE_/i.test(id)) return null;
+
+  // No credentials in the environment -> never build a URL (it would embed empty/undefined values).
+  if (!isProviderConfigured(provider)) {
+    warnUnconfigured(providerKey);
+    return null;
+  }
 
   if (provider.scheme === "xui-token") {
     const url = await resolveXuiTokenUrl(providerKey, provider, id);

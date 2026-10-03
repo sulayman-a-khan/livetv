@@ -44,17 +44,23 @@ export default function CategoryPage() {
       try {
         const res = await fetch("/api/channels");
         const data = await res.json();
-        if (data.success && Array.isArray(data.channels)) {
-          if (categoryConfig) {
-            const filtered = data.channels.filter((ch: ChannelItem) =>
-              isChannelInCategory(ch, categoryConfig)
-            );
-            setCategoryChannels(filtered);
-          } else {
-            setCategoryChannels(data.channels);
-          }
+        const list: ChannelItem[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.channels)
+          ? data.channels
+          : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+        if (categoryConfig) {
+          const filtered = list.filter((ch: ChannelItem) =>
+            isChannelInCategory(ch, categoryConfig)
+          );
+          setCategoryChannels(filtered);
         } else {
-          setError("Failed to load channel directory");
+          setCategoryChannels(list);
         }
       } catch (err: any) {
         setError(err.message || "Network error loading channels");

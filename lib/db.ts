@@ -1,11 +1,14 @@
 import mongoose from "mongoose";
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/freetv";
+const MONGODB_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://livetvUser:freetv123456@cluster0.cslrfh8.mongodb.net/freetv?retryWrites=true&w=majority";
 
 // Skip retrying immediately after a failed connection attempt so a MongoDB
-// outage doesn't cost every single request its own full 2s timeout — after a
+// outage doesn't cost every single request its own full timeout — after a
 // failure we fall back to in-memory instantly for this long, then try again.
-const RETRY_COOLDOWN_MS = 10_000;
+// On Vercel serverless each cold start is a fresh process, so keep it short.
+const RETRY_COOLDOWN_MS = process.env.VERCEL ? 2_000 : 10_000;
 
 interface MongooseCache {
   conn: typeof mongoose | null;
@@ -25,7 +28,7 @@ if (!global.mongooseCache) {
 }
 
 /**
- * Connects to MongoDB with a 2-second connection timeout.
+ * Connects to MongoDB with a short connection timeout.
  * If MongoDB is not running/reachable, catches the error and returns null
  * so API routes seamlessly switch to the in-memory data store.
  */
@@ -44,9 +47,11 @@ export async function connectToDatabase(): Promise<typeof mongoose | null> {
     // mongoose.connect() for every concurrent request (previously every
     // simultaneous caller started its own redundant connection attempt).
     if (!cached.promise) {
-      const opts = {
+      const opts: mongoose.ConnectOptions = {
         bufferCommands: false,
-        serverSelectionTimeoutMS: 2000,
+        // Vercel cold starts need a little extra time to resolve DNS and connect
+        serverSelectionTimeoutMS: process.env.VERCEL ? 8000 : 5000,
+        dbName: "freetv",
       };
       cached.promise = mongoose.connect(MONGODB_URI, opts);
     }

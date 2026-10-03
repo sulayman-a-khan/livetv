@@ -152,6 +152,13 @@ export function isChannelInCategory(
         chName
       );
     }
+    if (categoryConfig.slug === "global-tv") {
+      // Global TV captures global, international, or any channel not strictly tied to BD, IN, PK
+      const isRegional =
+        /bangladesh|india|pakistan/i.test(chCountry) ||
+        /bangla|atn|ntv|somoy|gtv|star sports|sony ten|ptv|a sports/i.test(chName);
+      if (!isRegional) return true;
+    }
   }
 
   return false;

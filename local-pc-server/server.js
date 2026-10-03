@@ -974,10 +974,22 @@ class QuickTunnelManager {
       }, 30000);
 
       try {
-        const proc = spawn("cloudflared", ["tunnel", "--url", "http://localhost:" + port], {
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-        });
+        const proc = spawn(
+          "cloudflared",
+          [
+            "tunnel",
+            "--url", "http://localhost:" + port,
+            "--protocol", "quic",
+            "--ha-connections", "1",
+            "--no-autoupdate",
+            "--edge-ip-version", "auto",
+            "--grace-period", "2s"
+          ],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+          }
+        );
         this.process = proc;
         this.startedAt = new Date();
 
@@ -988,6 +1000,19 @@ class QuickTunnelManager {
             this.url = match[0];
             this.status = "running";
             console.log("[tunnel] Active Cloudflare Quick Tunnel:", this.url);
+            // Rapid warm-up: fire immediate parallel background pings to accelerate Cloudflare edge DNS/SSL propagation
+            (async () => {
+              for (let i = 0; i < 6; i++) {
+                try {
+                  await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(3000) });
+                  await probeAll();
+                  break;
+                } catch (e) {
+                  await sleep(1000);
+                }
+              }
+            })().catch(() => {});
+
             if (!resolved) {
               resolved = true;
               clearTimeout(timer);

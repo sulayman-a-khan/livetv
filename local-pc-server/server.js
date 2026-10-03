@@ -1628,147 +1628,819 @@ const ADMIN_HTML = String.raw`<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Local Stream Control</title>
+<title>SoluPlay • Origin Control Server</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d1117; --panel: #151b23; --panel2: #1c2430; --line: #2a3441; --text: #e6edf3; --muted: #8b98a8;
-    --accent: #3b82f6; --accent2: #22c55e; --warn: #f59e0b; --danger: #ef4444; --radius: 12px;
+    --bg: #090d16;
+    --surface: #0f172a;
+    --surface-hover: #172136;
+    --surface-glass: rgba(15, 23, 42, 0.85);
+    --border: #1e293b;
+    --border-subtle: #192336;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --text-faint: #64748b;
+    --primary: #3b82f6;
+    --primary-glow: rgba(59, 130, 246, 0.25);
+    --emerald: #10b981;
+    --emerald-glow: rgba(16, 185, 129, 0.2);
+    --amber: #f59e0b;
+    --rose: #f43f5e;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
-  h1 { margin: 0; font-size: 18px; letter-spacing: .2px; }
-  .brand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; transition: filter .15s, background .15s; }
-  button:hover:not(:disabled) { filter: brightness(1.25); }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.accent { background: var(--accent2); border-color: var(--accent2); color: #04210e; font-weight: 600; }
-  button.danger { color: var(--danger); }
-  button.small { padding: 4px 9px; font-size: 12.5px; }
-  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel2); font-size: 12px; color: var(--muted); white-space: nowrap; }
-  .chip.live { color: #fecaca; border-color: #7f1d1d; background: #3b1212; }
-  .chip.scheduled { color: #bfdbfe; border-color: #1e3a8a; background: #11213f; }
-  .chip.ended { color: #cbd5e1; border-color: #475569; background: #1e293b; }
-  .chip.ok { color: #bbf7d0; border-color: #166534; background: #0f2a1a; }
-  .chip.bad { color: #fecaca; border-color: #7f1d1d; background: #2a1212; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; display: inline-block; }
-  .dot.ok { background: var(--accent2); box-shadow: 0 0 6px var(--accent2); }
-  .dot.bad { background: var(--danger); }
-  #statusBar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 24px; border-bottom: 1px solid var(--line); }
-  main { padding: 20px 24px 80px; max-width: 1100px; margin: 0 auto; }
-  .card { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; align-items: start; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
-  .card.dragover { outline: 2px dashed var(--accent); outline-offset: 2px; }
-  .card.dragging { opacity: .45; }
-  .grip { cursor: grab; color: var(--muted); user-select: none; text-align: center; font-size: 18px; line-height: 1; padding-top: 2px; }
-  .rank { display: block; margin-top: 6px; font-weight: 700; color: var(--accent); font-size: 15px; }
-  .card h3 { margin: 0 0 6px; font-size: 16px; }
-  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
-  .muted { color: var(--muted); }
-  .url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #a5b4c8; word-break: break-all; }
-  .url b { color: var(--muted); font-weight: 600; font-family: system-ui, sans-serif; margin-right: 4px; }
-  .side { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 108px; }
-  #empty { text-align: center; padding: 60px 10px; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--radius); }
-  #syncLog { margin-bottom: 16px; padding: 12px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); }
-  #syncLog ul { margin: 6px 0 0 18px; padding: 0; color: var(--warn); }
-  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(720px, 94vw); }
-  dialog::backdrop { background: rgba(0,0,0,.6); }
-  form { padding: 20px 22px; display: grid; gap: 12px; }
-  form h2 { margin: 0 0 4px; font-size: 17px; }
-  label { display: grid; gap: 4px; font-weight: 600; font-size: 12.5px; color: var(--muted); }
-  label span.hint { font-weight: 400; }
-  input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  input[type=checkbox] { width: auto; }
-  textarea { min-height: 64px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .check { display: flex; gap: 8px; align-items: center; font-weight: 500; color: var(--text); }
-  #formError { color: #fecaca; background: #2a1212; border: 1px solid #7f1d1d; border-radius: 8px; padding: 8px 10px; white-space: pre-line; }
-  .formActions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-  #toasts { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 50; }
-  .toast { background: var(--panel2); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; max-width: 380px; box-shadow: 0 6px 24px rgba(0,0,0,.4); }
-  .toast.error { border-left-color: var(--danger); }
-  .toast.success { border-left-color: var(--accent2); }
-  @media (max-width: 640px) { .card { grid-template-columns: 26px 1fr; } .side { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; } .grid2 { grid-template-columns: 1fr; } }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  /* ---------- Top Navigation ---------- */
+  header {
+    background: var(--surface-glass);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .logo-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #10b981, #3b82f6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 4px 12px var(--primary-glow);
+  }
+  .brand-title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .brand-title span.badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: #1e293b;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--surface-hover);
+    border-color: #334155;
+    transform: translateY(-1px);
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    border-color: #3b82f6;
+    color: #ffffff;
+    box-shadow: 0 4px 14px var(--primary-glow);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    border-color: #60a5fa;
+  }
+  .btn-emerald {
+    background: linear-gradient(135deg, #059669, #10b981);
+    border-color: #10b981;
+    color: #ffffff;
+    box-shadow: 0 4px 14px var(--emerald-glow);
+  }
+  .btn-emerald:hover:not(:disabled) {
+    background: linear-gradient(135deg, #047857, #059669);
+  }
+  .btn-danger {
+    color: #f87171;
+    border-color: #7f1d1d;
+    background: rgba(127, 29, 29, 0.15);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgba(127, 29, 29, 0.35);
+    border-color: #b91c1c;
+    color: #fca5a5;
+  }
+  .btn-sm {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  /* ---------- Layout Container ---------- */
+  .container {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 24px 20px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* ---------- Minimal Status Grid ---------- */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: border-color 0.15s ease;
+  }
+  .stat-card:hover {
+    border-color: #334155;
+  }
+  .stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #1e293b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .stat-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .stat-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-faint);
+  }
+  .stat-value {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ---------- Stream Domain Bar (Minimal & Clean) ---------- */
+  .domain-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .domain-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .domain-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .domain-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .domain-input {
+    flex: 1;
+    min-width: 280px;
+    background: #090d16;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: #38bdf8;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .domain-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-glow);
+  }
+
+  /* ---------- Section Header ---------- */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .section-title {
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ---------- Event Cards List ---------- */
+  .cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .event-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+  .event-card:hover {
+    border-color: #334155;
+    background: #111a2f;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  }
+  .event-card.dragging {
+    opacity: 0.4;
+  }
+  .event-card.dragover {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-glow);
+  }
+
+  /* Card Top Row */
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .card-main-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .card-rank {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: #1e293b;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--primary);
+    cursor: grab;
+  }
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    letter-spacing: -0.2px;
+  }
+  .card-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* Badges & Chips */
+  .badge-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 11.5px;
+    font-weight: 600;
+    background: #1e293b;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .badge-chip.live {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+  }
+  .badge-chip.scheduled {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+  }
+  .badge-chip.ended {
+    background: #1e293b;
+    border-color: #334155;
+    color: var(--text-faint);
+  }
+  .badge-chip.online {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #6ee7b7;
+  }
+  .badge-chip.offline {
+    background: rgba(244, 63, 94, 0.15);
+    border-color: rgba(244, 63, 94, 0.35);
+    color: #fda4af;
+  }
+
+  .pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .pulse-dot.live {
+    background: #ef4444;
+    box-shadow: 0 0 8px #ef4444;
+  }
+  .pulse-dot.online {
+    background: #10b981;
+    box-shadow: 0 0 6px #10b981;
+  }
+  .pulse-dot.offline {
+    background: #f43f5e;
+  }
+
+  /* Card Middle Stream Box */
+  .stream-box {
+    background: #090d16;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .stream-url-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+  .stream-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .stream-url-text {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: #38bdf8;
+    word-break: break-all;
+  }
+  .stream-encoder-text {
+    font-size: 11.5px;
+    color: var(--text-faint);
+  }
+
+  /* Card Bottom Actions */
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+  }
+  .card-time {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* Empty State */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .empty-icon {
+    font-size: 36px;
+  }
+  .empty-text {
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  /* ---------- Modal Dialog ---------- */
+  dialog {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid #334155;
+    border-radius: var(--radius-lg);
+    padding: 0;
+    width: min(680px, 94vw);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    margin: auto;
+  }
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+  }
+  .dialog-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .dialog-header h2 {
+    font-size: 17px;
+    font-weight: 800;
+  }
+  form {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-group label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .form-group label span.hint {
+    font-size: 11px;
+    font-weight: 400;
+    text-transform: none;
+    color: var(--text-faint);
+  }
+  .form-row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  input, select, textarea {
+    font-family: inherit;
+    font-size: 13.5px;
+    color: var(--text);
+    background: #090d16;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-glow);
+  }
+  textarea {
+    min-height: 64px;
+    resize: vertical;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .check-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    user-select: none;
+    padding: 4px 0;
+  }
+  .check-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+  .dialog-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    background: rgba(9, 13, 22, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+  #formError {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 12.5px;
+    white-space: pre-line;
+  }
+
+  /* ---------- Toast Notifications ---------- */
+  #toasts {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 99;
+  }
+  .toast {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    max-width: 400px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    font-size: 13px;
+    animation: slideIn 0.2s ease-out;
+  }
+  .toast.success { border-left-color: var(--emerald); }
+  .toast.error { border-left-color: var(--rose); }
+  @keyframes slideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @media (max-width: 680px) {
+    .form-row-2 { grid-template-columns: 1fr; }
+    .card-top { flex-direction: column; }
+    .card-footer { flex-direction: column; align-items: flex-start; }
+  }
 </style>
 </head>
 <body>
+
+<!-- Header -->
 <header>
-  <div class="brand"><h1>Local Stream Control</h1><span id="nodeChip" class="chip">node</span></div>
-  <div class="actions">
-    <button id="btnProbe" title="Test every local encoder URL now">Check origins</button>
-    <button id="btnNew" class="primary">+ New event</button>
-    <button id="btnSync" class="accent" title="Push all cards to the cloud MongoDB">Sync to Cloud</button>
+  <div class="brand">
+    <div class="logo-icon">📡</div>
+    <div>
+      <div class="brand-title">
+        SoluPlay Origin Control
+        <span id="nodeChip" class="badge">node: local</span>
+      </div>
+    </div>
+  </div>
+  <div class="nav-actions">
+    <button id="btnProbe" class="btn btn-sm" title="Test local encoder connection">⚡ Check Encoder</button>
+    <button id="btnSync" class="btn btn-sm btn-emerald" title="Push cards to MongoDB Atlas">Cloud Sync</button>
+    <button id="btnNew" class="btn btn-sm btn-primary">+ New Event</button>
   </div>
 </header>
-<section id="domainBar" style="background: var(--panel2); border-bottom: 1px solid var(--line); padding: 12px 24px;">
-  <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
-    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-      <span style="font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px;">
-        <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent2); box-shadow: 0 0 6px var(--accent2);"></span>
-        Strike-Safe Stream Domain:
-      </span>
-      <input id="inDomainUrl" style="width: min(440px, 80vw); font-family: ui-monospace, monospace; font-size: 13px; padding: 6px 10px; border-radius: 6px;" placeholder="https://your-domain.trycloudflare.com">
-      <button id="btnSaveDomain" class="primary small" title="Save domain to MongoDB Atlas (instantly updates all players across Vercel)">Save & Apply</button>
-      <button id="btnTestDomain" class="small" title="Test if this domain is reachable and passing CORS">🔍 Test Domain</button>
+
+<!-- Main Container -->
+<div class="container">
+
+  <!-- Overview Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-icon">☁️</div>
+      <div class="stat-info">
+        <span class="stat-label">Cloud Database</span>
+        <span id="dbStat" class="stat-value">Connecting…</span>
+      </div>
     </div>
-    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-      <button id="btnNewTunnel" class="accent small" title="Spawn a fresh Cloudflare Quick Tunnel (trycloudflare.com) and push to MongoDB">⚡ New Quick Tunnel</button>
-      <span id="tunnelStatusChip" class="chip">tunnel: checking…</span>
+    <div class="stat-card">
+      <div class="stat-icon">💓</div>
+      <div class="stat-info">
+        <span class="stat-label">Server Heartbeat</span>
+        <span id="hbStat" class="stat-value">Waiting…</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🌐</div>
+      <div class="stat-info">
+        <span class="stat-label">Forwarder Proxy</span>
+        <span id="proxyStat" class="stat-value">Port 5001</span>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🏆</div>
+      <div class="stat-info">
+        <span class="stat-label">Active Events</span>
+        <span id="eventsStat" class="stat-value">0 Events</span>
+      </div>
     </div>
   </div>
-</section>
-<section id="statusBar"></section>
-<main>
-  <div id="syncLog" hidden></div>
-  <div id="cards"></div>
-  <div id="empty" hidden>No event cards yet. Click <b>+ New event</b> to add the first one.</div>
-</main>
 
+  <!-- Strike-Safe Domain Switcher -->
+  <div class="domain-panel">
+    <div class="domain-header">
+      <div class="domain-title">
+        <span class="pulse-dot online"></span>
+        Active Stream Domain (Strike-Safe Proxy)
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span id="tunnelStatusChip" class="badge-chip">checking tunnel…</span>
+        <button id="btnNewTunnel" class="btn btn-sm btn-emerald" title="Generate fresh trycloudflare.com tunnel">⚡ New Quick Tunnel</button>
+      </div>
+    </div>
+    <div class="domain-input-group">
+      <input id="inDomainUrl" class="domain-input" placeholder="https://your-tunnel.trycloudflare.com">
+      <button id="btnTestDomain" class="btn btn-sm" title="Test domain responsiveness and CORS">🔍 Test Domain</button>
+      <button id="btnSaveDomain" class="btn btn-sm btn-primary" title="Apply domain to MongoDB Atlas">Save & Apply</button>
+    </div>
+  </div>
+
+  <!-- Events Section -->
+  <div class="section-header">
+    <div class="section-title">
+      <span>Event Cards</span>
+      <span id="eventsCountBadge" class="badge-chip">0</span>
+    </div>
+  </div>
+
+  <!-- Event Cards List -->
+  <div id="cards" class="cards-list"></div>
+  <div id="empty" class="empty-state" hidden>
+    <div class="empty-icon">🏏</div>
+    <div class="empty-text">No active sports event cards created yet.</div>
+    <button id="btnEmptyNew" class="btn btn-primary btn-sm">+ Create First Event</button>
+  </div>
+
+</div>
+
+<!-- Create / Edit Event Dialog -->
 <dialog id="dlg">
+  <div class="dialog-header">
+    <h2 id="formTitle">New Event Card</h2>
+    <button type="button" class="btn btn-sm" id="btnDialogClose">✕</button>
+  </div>
   <form id="form" autocomplete="off">
-    <h2 id="formTitle">New event</h2>
     <div id="formError" hidden></div>
-    <label>Match title
-      <input id="fTitle" required maxlength="200" placeholder="e.g. Bangladesh vs India – 1st ODI">
-    </label>
-    <div class="grid2">
-      <label>Sport type
+    <div class="form-group">
+      <label>Match Title</label>
+      <input id="fTitle" required maxlength="200" placeholder="e.g. Bangladesh vs Pakistan – 1st ODI">
+    </div>
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Sport Type</label>
         <input id="fSport" required maxlength="60" list="sports" placeholder="Cricket">
-        <datalist id="sports"><option>Cricket</option><option>Football</option><option>Basketball</option><option>Tennis</option><option>Hockey</option><option>Kabaddi</option><option>Baseball</option><option>Rugby</option><option>Volleyball</option><option>Other</option></datalist>
-      </label>
-      <label>Status
-        <select id="fStatus"><option value="scheduled">Scheduled</option><option value="live">Live</option><option value="ended">Ended</option></select>
+        <datalist id="sports">
+          <option>Cricket</option>
+          <option>Football</option>
+          <option>Basketball</option>
+          <option>Tennis</option>
+          <option>Hockey</option>
+          <option>Kabaddi</option>
+          <option>Other</option>
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label>Status</label>
+        <select id="fStatus">
+          <option value="scheduled">Scheduled</option>
+          <option value="live">Live Now</option>
+          <option value="ended">Ended</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Start Time</label>
+        <input id="fStart" type="datetime-local" required>
+      </div>
+      <div class="form-group">
+        <label>End Time</label>
+        <input id="fEnd" type="datetime-local" required>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Primary HLS URL <span class="hint">(Local OBS / Encoder stream)</span></label>
+      <input id="fPrimary" required type="url" placeholder="http://127.0.0.1:8080/live/stream.m3u8">
+    </div>
+    <div>
+      <label class="check-label">
+        <input id="fForward" type="checkbox" checked>
+        Publish via Forwarder Proxy (Protects origin encoder and prevents direct stream exposure)
       </label>
     </div>
-    <div class="grid2">
-      <label>Start time <input id="fStart" type="datetime-local" required></label>
-      <label>End time <input id="fEnd" type="datetime-local" required></label>
-    </div>
-    <label>Primary HLS URL (local encoder)
-      <input id="fPrimary" required type="url" placeholder="http://127.0.0.1:8080/hls/match1.m3u8">
-    </label>
-    <label class="check"><input id="fForward" type="checkbox" checked> Publish through this PC's forwarder
-      <span class="hint muted">(recommended – viewers get https://your-domain/live/&lt;streamId&gt;.m3u8 instead of your private encoder URL)</span>
-    </label>
-    <label>Backup URLs <span class="hint">one per line, tried in order if the primary fails</span>
+    <div class="form-group">
+      <label>Backup Streams <span class="hint">(one URL per line)</span></label>
       <textarea id="fBackups" placeholder="https://cdn.example.com/backup1.m3u8&#10;https://cdn2.example.com/backup2.m3u8"></textarea>
-    </label>
-    <div class="grid2">
-      <label>Stream ID <span class="hint">optional, set once (a-z 0-9 - _)</span>
-        <input id="fStreamId" maxlength="64" placeholder="auto-generated">
-      </label>
-      <label>Extra origin headers <span class="hint">JSON, optional</span>
-        <textarea id="fHeaders" placeholder='{"Referer": "http://localhost/"}'></textarea>
-      </label>
     </div>
-    <div class="formActions">
-      <button type="button" id="btnCancel">Cancel</button>
-      <button type="submit" id="btnSave" class="primary">Save</button>
+    <div class="form-row-2">
+      <div class="form-group">
+        <label>Custom Stream ID <span class="hint">(optional)</span></label>
+        <input id="fStreamId" maxlength="64" placeholder="auto-generated">
+      </div>
+      <div class="form-group">
+        <label>Custom Headers <span class="hint">(JSON, optional)</span></label>
+        <textarea id="fHeaders" placeholder='{"Referer": "http://localhost/"}'></textarea>
+      </div>
+    </div>
+    <div class="dialog-footer">
+      <button type="button" id="btnCancel" class="btn">Cancel</button>
+      <button type="submit" id="btnSave" class="btn btn-primary">Save Event</button>
     </div>
   </form>
 </dialog>
+
+<!-- Toasts Container -->
 <div id="toasts"></div>
 
 <script>
@@ -1781,7 +2453,6 @@ const ADMIN_HTML = String.raw`<!doctype html>
 
   function $(id) { return document.getElementById(id); }
 
-  /* ---------- tiny DOM helper (text is always set via textContent => no XSS) ---------- */
   function el(tag, props, kids) {
     var n = document.createElement(tag);
     if (props) {
@@ -1804,7 +2475,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
   function toast(msg, kind) {
     var t = el('div', { class: 'toast ' + (kind || ''), text: msg });
     $('toasts').appendChild(t);
-    setTimeout(function () { t.remove(); }, kind === 'error' ? 8000 : 3500);
+    setTimeout(function () { t.remove(); }, kind === 'error' ? 6000 : 3000);
   }
 
   async function api(method, url, body) {
@@ -1815,7 +2486,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
     }
     var res = await fetch(url, opts);
     var data = {};
-    try { data = await res.json(); } catch (e) { /* no body */ }
+    try { data = await res.json(); } catch (e) {}
     if (!res.ok) {
       var err = new Error(data.error || ('HTTP ' + res.status));
       err.details = data.details;
@@ -1824,7 +2495,6 @@ const ADMIN_HTML = String.raw`<!doctype html>
     return data;
   }
 
-  /* ---------- date helpers ---------- */
   function pad(n) { return String(n).padStart(2, '0'); }
   function toInputValue(iso) {
     if (!iso) return '';
@@ -1841,29 +2511,15 @@ const ADMIN_HTML = String.raw`<!doctype html>
     return Math.round(s / 3600) + 'h ago';
   }
 
-  /* ---------- rendering ---------- */
   function copy(text) {
     navigator.clipboard.writeText(text).then(
-      function () { toast('Copied', 'success'); },
-      function () { toast('Copy failed – select the text manually', 'error'); }
+      function () { toast('Stream URL copied to clipboard!', 'success'); },
+      function () { toast('Failed to copy', 'error'); }
     );
   }
 
-  function originChip(o) {
-    if (!o) return el('span', { class: 'chip' }, [el('span', { class: 'dot' }), 'Origin not checked']);
-    if (o.online) return el('span', { class: 'chip ok' }, [el('span', { class: 'dot ok' }), 'Origin online · ' + o.latencyMs + ' ms']);
-    return el('span', { class: 'chip bad', title: 'Checked ' + ago(o.checkedAt) }, [el('span', { class: 'dot bad' }), 'Origin offline · ' + (o.error || 'unreachable')]);
-  }
-
-  function urlLine(label, value) {
-    return el('div', { class: 'row' }, [
-      el('span', { class: 'url' }, [el('b', { text: label }), value]),
-      el('button', { class: 'small', text: 'Copy', onclick: function () { copy(value); } })
-    ]);
-  }
-
   function renderCard(ev, index) {
-    var card = el('div', { class: 'card', draggable: 'true', 'data-id': ev.id });
+    var card = el('div', { class: 'event-card', draggable: 'true', 'data-id': ev.id });
 
     card.addEventListener('dragstart', function (e) {
       dragId = ev.id;
@@ -1874,7 +2530,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
     card.addEventListener('dragend', function () {
       dragId = null;
       card.classList.remove('dragging');
-      Array.prototype.forEach.call(document.querySelectorAll('.card.dragover'), function (n) { n.classList.remove('dragover'); });
+      Array.prototype.forEach.call(document.querySelectorAll('.event-card.dragover'), function (n) { n.classList.remove('dragover'); });
     });
     card.addEventListener('dragover', function (e) { if (dragId && dragId !== ev.id) { e.preventDefault(); card.classList.add('dragover'); } });
     card.addEventListener('dragleave', function () { card.classList.remove('dragover'); });
@@ -1887,38 +2543,65 @@ const ADMIN_HTML = String.raw`<!doctype html>
       reorder(ids);
     });
 
-    var grip = el('div', { class: 'grip', title: 'Drag to reorder' }, ['⋮⋮', el('span', { class: 'rank', text: '#' + (index + 1) })]);
+    var rank = el('div', { class: 'card-rank', title: 'Drag to reorder' }, ['#' + (index + 1)]);
 
-    var backups = (ev.backupStreamUrls || []).length;
-    var body = el('div', {}, [
-      el('h3', { text: ev.matchTitle }),
-      el('div', { class: 'row' }, [
-        el('span', { class: 'chip', text: ev.sportType }),
-        el('span', { class: 'chip ' + ev.status, text: ev.status.toUpperCase() }),
-        originChip(ev.origin),
-        el('span', { class: 'chip', text: ev.useForwarder ? 'via forwarder' : 'direct URL' }),
-        el('span', { class: 'chip', text: backups + ' backup' + (backups === 1 ? '' : 's') })
+    var statusClass = ev.status === 'live' ? 'live' : (ev.status === 'scheduled' ? 'scheduled' : 'ended');
+    var statusText = ev.status === 'live' ? 'LIVE NOW' : ev.status.toUpperCase();
+    var pulse = ev.status === 'live' ? el('span', { class: 'pulse-dot live' }) : null;
+
+    var originBadge;
+    if (!ev.origin) {
+      originBadge = el('span', { class: 'badge-chip' }, ['Encoder Unchecked']);
+    } else if (ev.origin.online) {
+      originBadge = el('span', { class: 'badge-chip online' }, [el('span', { class: 'pulse-dot online' }), 'Encoder Online (' + ev.origin.latencyMs + 'ms)']);
+    } else {
+      originBadge = el('span', { class: 'badge-chip offline' }, [el('span', { class: 'pulse-dot offline' }), 'Encoder Offline']);
+    }
+
+    var top = el('div', { class: 'card-top' }, [
+      el('div', { class: 'card-main-info' }, [
+        rank,
+        el('span', { class: 'card-title', text: ev.matchTitle }),
+        el('div', { class: 'card-badges' }, [
+          el('span', { class: 'badge-chip', text: '🏆 ' + ev.sportType }),
+          el('span', { class: 'badge-chip ' + statusClass }, [pulse, statusText]),
+          originBadge
+        ])
       ]),
-      el('div', { class: 'muted', text: fmt(ev.startTime) + '  →  ' + fmt(ev.endTime) }),
-      urlLine('Encoder: ', ev.primaryStreamUrl),
-      ev.useForwarder ? urlLine('Cloud URL: ', ev.cloudPrimaryUrl) : null,
-      ev.useForwarder ? urlLine('Local test: ', ev.localForwarderUrl) : null
+      el('div', { class: 'card-actions' }, [
+        el('button', { class: 'btn btn-sm', text: '✏️ Edit', onclick: function () { openForm(ev); } }),
+        el('button', { class: 'btn btn-sm btn-danger', text: '🗑️ Delete', onclick: function () { remove(ev); } })
+      ])
     ]);
 
-    var side = el('div', { class: 'side' }, [
-      el('div', { class: 'row' }, [
-        el('button', { class: 'small', text: '↑', title: 'Move up', disabled: index === 0, onclick: function () { move(index, -1); } }),
-        el('button', { class: 'small', text: '↓', title: 'Move down', disabled: index === state.events.length - 1, onclick: function () { move(index, 1); } })
+    var streamUrl = ev.useForwarder ? ev.cloudPrimaryUrl : ev.primaryStreamUrl;
+    var streamBox = el('div', { class: 'stream-box' }, [
+      el('div', { class: 'stream-url-info' }, [
+        el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS)' : 'Direct Encoder Stream URL' }),
+        el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
+        ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: 'Origin Source: ' + ev.primaryStreamUrl }) : null
       ]),
-      ev.status !== 'live' ? el('button', { class: 'small', text: 'Go live', onclick: function () { quickStatus(ev, 'live'); } }) : null,
-      ev.status !== 'ended' ? el('button', { class: 'small', text: 'End', onclick: function () { quickStatus(ev, 'ended'); } }) : null,
-      el('button', { class: 'small', text: 'Edit', onclick: function () { openForm(ev); } }),
-      el('button', { class: 'small danger', text: 'Delete', onclick: function () { remove(ev); } })
+      el('div', { style: 'display: flex; gap: 6px;' }, [
+        streamUrl ? el('button', { class: 'btn btn-sm btn-primary', text: '📋 Copy URL', onclick: function () { copy(streamUrl); } }) : null,
+        ev.localForwarderUrl ? el('button', { class: 'btn btn-sm', text: 'Local Test', onclick: function () { copy(ev.localForwarderUrl); } }) : null
+      ])
     ]);
 
-    card.appendChild(grip);
-    card.appendChild(body);
-    card.appendChild(side);
+    var footer = el('div', { class: 'card-footer' }, [
+      el('div', { class: 'card-time' }, [
+        '🕒 ' + fmt(ev.startTime) + '  →  ' + fmt(ev.endTime)
+      ]),
+      el('div', { class: 'card-actions' }, [
+        el('button', { class: 'btn btn-sm', text: '⬆️', title: 'Move up', disabled: index === 0, onclick: function () { move(index, -1); } }),
+        el('button', { class: 'btn btn-sm', text: '⬇️', title: 'Move down', disabled: index === state.events.length - 1, onclick: function () { move(index, 1); } }),
+        ev.status !== 'live' ? el('button', { class: 'btn btn-sm btn-emerald', text: '🔴 Go Live', onclick: function () { quickStatus(ev, 'live'); } }) : null,
+        ev.status !== 'ended' ? el('button', { class: 'btn btn-sm', text: '⏹️ End', onclick: function () { quickStatus(ev, 'ended'); } }) : null
+      ])
+    ]);
+
+    card.appendChild(top);
+    card.appendChild(streamBox);
+    card.appendChild(footer);
     return card;
   }
 
@@ -1927,40 +2610,21 @@ const ADMIN_HTML = String.raw`<!doctype html>
     box.textContent = '';
     state.events.forEach(function (ev, i) { box.appendChild(renderCard(ev, i)); });
     $('empty').hidden = state.events.length > 0;
+    $('eventsCountBadge').textContent = state.events.length;
+    $('eventsStat').textContent = state.events.length + ' Event' + (state.events.length === 1 ? '' : 's');
   }
 
   function renderStatus() {
     var s = state.status;
-    var bar = $('statusBar');
-    bar.textContent = '';
     if (!s) return;
     $('nodeChip').textContent = 'node: ' + s.nodeId;
     var c = s.cloud;
-    bar.appendChild(el('span', { class: 'chip ' + (c.mongoConfigured ? 'ok' : 'bad') }, [el('span', { class: 'dot ' + (c.mongoConfigured ? 'ok' : 'bad') }), c.mongoConfigured ? ('Cloud DB: ' + c.mongoTarget + ' (' + c.mongoState + ')') : 'Cloud DB: MONGODB_URI not set']));
+    $('dbStat').textContent = c.mongoConfigured ? '🟢 Connected' : '🔴 Not Configured';
     var hb = s.heartbeat;
-    var hbText = !c.heartbeatConfigured ? 'Heartbeat: not configured' : (hb.ok ? ('Heartbeat OK via ' + hb.via + ' · ' + ago(hb.lastAt)) : (hb.lastAt || hb.error ? ('Heartbeat failing: ' + (hb.error || '?')) : 'Heartbeat: waiting for first ping…'));
-    bar.appendChild(el('span', { class: 'chip ' + (hb.ok ? 'ok' : (c.heartbeatConfigured && hb.error ? 'bad' : '')) }, [el('span', { class: 'dot ' + (hb.ok ? 'ok' : (hb.error ? 'bad' : '')) }), hbText]));
-    bar.appendChild(el('span', { class: 'chip', text: 'Public base: ' + (s.publicStreamBaseUrl || 'not set (PUBLIC_STREAM_BASE_URL)') }));
-    bar.appendChild(el('span', { class: 'chip', text: 'Forwarder port: ' + (s.publicPort || 'admin port') }));
-
-    var log = $('syncLog');
-    if (s.lastSync) {
-      var l = s.lastSync;
-      log.hidden = false;
-      log.textContent = '';
-      log.appendChild(el('div', {}, [
-        el('b', { text: 'Last cloud sync ' }),
-        el('span', { class: 'muted', text: ago(l.at) + ' · ' + l.cards + ' card(s) · +' + l.created + ' new · ' + l.updated + ' updated · ' + l.removed + ' removed · ' + l.durationMs + ' ms' })
-      ]));
-      if (l.warnings && l.warnings.length) {
-        var ul = el('ul');
-        l.warnings.forEach(function (w) { ul.appendChild(el('li', { text: w })); });
-        log.appendChild(ul);
-      }
-    }
+    $('hbStat').textContent = hb.ok ? ('🟢 Live (' + ago(hb.lastAt) + ')') : (hb.error ? '🔴 Error' : '🟡 Initializing');
+    $('proxyStat').textContent = 'Port ' + (s.publicPort || 5001);
   }
 
-  /* ---------- data actions ---------- */
   async function refresh() {
     try {
       var results = await Promise.all([api('GET', '/api/events'), api('GET', '/api/status')]);
@@ -1992,21 +2656,20 @@ const ADMIN_HTML = String.raw`<!doctype html>
   async function quickStatus(ev, status) {
     try {
       await api('PUT', '/api/events/' + encodeURIComponent(ev.id), { status: status });
-      toast('"' + ev.matchTitle + '" is now ' + status, 'success');
+      toast('"' + ev.matchTitle + '" status set to ' + status.toUpperCase(), 'success');
       await refresh();
     } catch (e) { toast(e.message, 'error'); }
   }
 
   async function remove(ev) {
-    if (!window.confirm('Delete "' + ev.matchTitle + '"?\n\nIt is removed from the cloud on the next sync.')) return;
+    if (!window.confirm('Delete "' + ev.matchTitle + '"?\n\nThis will remove it from the cloud database on next sync.')) return;
     try {
       await api('DELETE', '/api/events/' + encodeURIComponent(ev.id));
-      toast('Deleted', 'success');
+      toast('Event deleted', 'success');
       await refresh();
     } catch (e) { toast(e.message, 'error'); }
   }
 
-  /* ---------- form ---------- */
   function showFormError(err) {
     var box = $('formError');
     var lines = [err.message];
@@ -2017,7 +2680,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
 
   function openForm(ev) {
     editingId = ev ? ev.id : null;
-    $('formTitle').textContent = ev ? 'Edit event' : 'New event';
+    $('formTitle').textContent = ev ? 'Edit Event Card' : 'New Event Card';
     $('formError').hidden = true;
     var now = new Date();
     now.setSeconds(0, 0);
@@ -2057,7 +2720,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
       if (editingId) await api('PUT', '/api/events/' + encodeURIComponent(editingId), payload);
       else await api('POST', '/api/events', payload);
       $('dlg').close();
-      toast(editingId ? 'Event updated' : 'Event created', 'success');
+      toast(editingId ? 'Event updated successfully' : 'Event created successfully', 'success');
       await refresh();
     } catch (err) {
       showFormError(err);
@@ -2067,7 +2730,9 @@ const ADMIN_HTML = String.raw`<!doctype html>
   });
 
   $('btnCancel').addEventListener('click', function () { $('dlg').close(); });
+  $('btnDialogClose').addEventListener('click', function () { $('dlg').close(); });
   $('btnNew').addEventListener('click', function () { openForm(null); });
+  $('btnEmptyNew').addEventListener('click', function () { openForm(null); });
 
   $('btnProbe').addEventListener('click', async function () {
     var b = $('btnProbe');
@@ -2076,42 +2741,34 @@ const ADMIN_HTML = String.raw`<!doctype html>
       var data = await api('POST', '/api/probe');
       state.events = data.events;
       renderCards();
-      toast('Checked ' + data.checked + ' origin(s)', 'success');
+      toast('Checked ' + data.checked + ' encoder origin(s)', 'success');
     } catch (e) { toast(e.message, 'error'); }
-    b.disabled = false; b.textContent = 'Check origins';
+    b.disabled = false; b.textContent = '⚡ Check Encoder';
   });
 
   $('btnSync').addEventListener('click', async function () {
-    var n = state.events.length;
-    var ok = window.confirm(
-      'Sync ' + n + ' card(s) to the cloud database?\n\n' +
-      'Cards from this PC that no longer exist here will be removed from the cloud.\n' +
-      'Cards created elsewhere (other PCs, the web admin) are never touched.'
-    );
-    if (!ok) return;
     var b = $('btnSync');
     b.disabled = true; b.textContent = 'Syncing…';
     try {
       var data = await api('POST', '/api/sync', { mirror: true });
       var s = data.summary;
       state.events = data.events;
-      toast('Synced ' + s.cards + ' card(s): +' + s.created + ' / ~' + s.updated + ' / -' + s.removed, 'success');
+      toast('Cloud sync complete: ' + s.cards + ' card(s) active', 'success');
       await refresh();
     } catch (e) {
       toast('Sync failed: ' + e.message, 'error');
     }
-    b.disabled = false; b.textContent = 'Sync to Cloud';
+    b.disabled = false; b.textContent = 'Cloud Sync';
   });
 
-  /* ---------- Strike-Safe Domain Switcher & Quick Tunnel ---------- */
   $('btnSaveDomain').addEventListener('click', async function () {
     var url = $('inDomainUrl').value.trim();
-    if (!url) { toast('Please enter a stream base URL or tunnel domain', 'error'); return; }
+    if (!url) { toast('Please enter a stream base URL', 'error'); return; }
     var btn = $('btnSaveDomain');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
       var res = await api('POST', '/api/tunnel/set-domain', { url: url });
-      toast('Domain updated in MongoDB Atlas – all players switched instantly!', 'success');
+      toast('Stream domain updated in MongoDB Atlas!', 'success');
       state.events = res.events;
       await refresh();
     } catch (err) {
@@ -2122,15 +2779,15 @@ const ADMIN_HTML = String.raw`<!doctype html>
   });
 
   $('btnNewTunnel').addEventListener('click', async function () {
-    var ok = window.confirm('Generate a fresh Cloudflare Quick Tunnel (trycloudflare.com)?\n\nThis will automatically start a new tunnel, save the HTTPS URL to MongoDB Atlas, and update all active stream cards.');
+    var ok = window.confirm('Generate a fresh Cloudflare Quick Tunnel?\n\nThis will automatically launch a new tunnel, save the HTTPS URL to MongoDB Atlas, and update all stream players.');
     if (!ok) return;
     var btn = $('btnNewTunnel');
     btn.disabled = true; btn.textContent = 'Generating…';
-    toast('Spawning Cloudflare Quick Tunnel… (may take 5-10s)', '');
+    toast('Generating Cloudflare Quick Tunnel…', '');
     try {
       var res = await api('POST', '/api/tunnel/restart');
       $('inDomainUrl').value = res.url;
-      toast('New tunnel generated & saved: ' + res.url, 'success');
+      toast('New tunnel active: ' + res.url, 'success');
       state.events = res.events;
       await refresh();
     } catch (err) {
@@ -2142,13 +2799,13 @@ const ADMIN_HTML = String.raw`<!doctype html>
 
   $('btnTestDomain').addEventListener('click', async function () {
     var url = $('inDomainUrl').value.trim();
-    if (!url) { toast('Please enter a URL to test', 'error'); return; }
+    if (!url) { toast('Please enter a domain to test', 'error'); return; }
     var btn = $('btnTestDomain');
     btn.disabled = true; btn.textContent = 'Testing…';
     try {
       var res = await api('POST', '/api/tunnel/test', { url: url });
       if (res.ok) {
-        toast('Domain online · HTTP ' + res.status + ' · ' + res.latencyMs + 'ms · CORS: ' + (res.cors || 'none'), 'success');
+        toast('Domain online · HTTP ' + res.status + ' (' + res.latencyMs + 'ms)', 'success');
       } else {
         toast('Domain unreachable: ' + (res.error || ('HTTP ' + res.status)), 'error');
       }
@@ -2164,25 +2821,23 @@ const ADMIN_HTML = String.raw`<!doctype html>
       var t = await api('GET', '/api/tunnel/status');
       var chip = $('tunnelStatusChip');
       if (t.running && t.url) {
-        chip.className = 'chip ok';
+        chip.className = 'badge-chip online';
         chip.textContent = 'Quick Tunnel Active (' + t.uptimeSec + 's)';
         if (!$('inDomainUrl').value) $('inDomainUrl').value = t.url;
       } else if (t.status === 'starting') {
-        chip.className = 'chip scheduled';
+        chip.className = 'badge-chip scheduled';
         chip.textContent = 'Tunnel Starting…';
       } else if (t.lastError) {
-        chip.className = 'chip bad';
+        chip.className = 'badge-chip offline';
         chip.textContent = 'Tunnel Error: ' + t.lastError.slice(0, 25);
       } else {
-        chip.className = 'chip';
-        chip.textContent = 'Tunnel: Idle / External';
+        chip.className = 'badge-chip';
+        chip.textContent = 'Tunnel: External / Manual';
       }
       if (t.publicStreamBaseUrl && (!$('inDomainUrl').value || $('inDomainUrl').value === t.url)) {
         $('inDomainUrl').value = t.publicStreamBaseUrl;
       }
-    } catch (e) {
-      /* ignore */
-    }
+    } catch (e) {}
   }
 
   refresh();

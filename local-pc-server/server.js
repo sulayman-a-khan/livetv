@@ -451,10 +451,11 @@ function looksLocal(url) {
 }
 
 /* ========================================================================== *
- * Origin health probing
+ * Health probing (Origin Encoder & Cloud URL)
  * ========================================================================== */
 
 const originState = new Map(); // event.id -> { online, checkedAt, latencyMs, httpStatus, error }
+const cloudState = new Map();  // event.id -> { online, checkedAt, latencyMs, httpStatus, error, url }
 
 function basicAuthFrom(url) {
   if (!url.username && !url.password) return null;
@@ -469,8 +470,6 @@ function buildUpstreamHeaders(ev, req, primaryUrl) {
   Object.assign(h, lowerKeys(CONFIG.upstreamHeaders), lowerKeys(ev.headers));
   FORBIDDEN_UPSTREAM_HEADERS.forEach((k) => delete h[k]);
   if (req && req.headers && req.headers.range) h.range = req.headers.range;
-  // If the event specifies a Referer in its headers, it's already merged above.
-  // If no Referer was specified in event config, set a sensible default using the primary URL's origin.
   if (!h.referer && primaryUrl) {
     try {
       h.referer = primaryUrl.origin + "/";
@@ -525,14 +524,53 @@ async function probeOrigin(ev) {
   return state;
 }
 
+async function probeCloud(ev) {
+  if (!ev.useForwarder) {
+    const state = { online: true, checkedAt: new Date().toISOString(), latencyMs: 0, direct: true };
+    cloudState.set(ev.id, state);
+    return state;
+  }
+  const cloudUrl = cloudPrimaryUrl(ev);
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  const state = { online: false, checkedAt: new Date().toISOString(), latencyMs: null, httpStatus: null, error: null, url: cloudUrl };
+  try {
+    const res = await fetch(cloudUrl, {
+      method: "GET",
+      headers: { Range: "bytes=0-512", "User-Agent": "SoluPlayProbe/" + VERSION },
+      signal: controller.signal,
+    });
+    state.httpStatus = res.status;
+    state.latencyMs = Date.now() - started;
+    if (res.ok || res.status === 206 || res.status === 200) {
+      state.online = true;
+    } else {
+      state.error = "HTTP " + res.status;
+    }
+  } catch (e) {
+    state.error = e.name === "AbortError" ? "Timed out (Tunnel Dead)" : (e.cause && e.cause.code) || e.message || "Unreachable";
+  } finally {
+    clearTimeout(timer);
+  }
+  cloudState.set(ev.id, state);
+  return state;
+}
+
 async function probeAll() {
   const live = store.events.filter((e) => e.status !== "ended");
   const known = new Set(store.events.map((e) => e.id));
   Array.from(originState.keys()).forEach((id) => {
     if (!known.has(id)) originState.delete(id);
   });
-  store.events.filter((e) => e.status === "ended").forEach((e) => originState.delete(e.id));
-  await Promise.all(live.map((e) => probeOrigin(e)));
+  Array.from(cloudState.keys()).forEach((id) => {
+    if (!known.has(id)) cloudState.delete(id);
+  });
+  store.events.filter((e) => e.status === "ended").forEach((e) => {
+    originState.delete(e.id);
+    cloudState.delete(e.id);
+  });
+  await Promise.all(live.map((e) => Promise.all([probeOrigin(e), probeCloud(e)])));
   return live.length;
 }
 
@@ -1274,15 +1312,22 @@ function viewOf(ev) {
     localForwarderUrl: localForwarderBase() + forwarderPath(ev),
     cloudPrimaryUrl: cloudPrimaryUrl(ev),
     origin: originState.get(ev.id) || null,
+    cloudHealth: cloudState.get(ev.id) || null,
   });
 }
 
 function buildApiRouter() {
   const api = express.Router();
 
-  api.get("/events", (req, res) => {
-    res.json({ events: store.events.map(viewOf) });
-  });
+  api.get(
+    "/events",
+    wrapAsync(async (req, res) => {
+      if (req.query.probe === "1" || (store.events.length > 0 && cloudState.size === 0)) {
+        await probeAll().catch((e) => console.warn("[probe] auto-probe error: " + e.message));
+      }
+      res.json({ events: store.events.map(viewOf) });
+    })
+  );
 
   api.post(
     "/events",
@@ -2042,6 +2087,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
   }
   .pulse-dot.offline {
     background: #f43f5e;
+    box-shadow: 0 0 6px #f43f5e;
   }
 
   /* Card Middle Stream Box */
@@ -2049,7 +2095,18 @@ const ADMIN_HTML = String.raw`<!doctype html>
     background: #090d16;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    padding: 10px 14px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.2s ease;
+  }
+  .stream-box.stream-box-alert {
+    border-color: rgba(239, 68, 68, 0.6);
+    background: rgba(239, 68, 68, 0.06);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.15);
+  }
+  .stream-box-main {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2079,6 +2136,20 @@ const ADMIN_HTML = String.raw`<!doctype html>
   .stream-encoder-text {
     font-size: 11.5px;
     color: var(--text-faint);
+  }
+  .stream-alert-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: rgba(239, 68, 68, 0.16);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+    font-size: 12px;
+    font-weight: 600;
+    flex-wrap: wrap;
   }
 
   /* Card Bottom Actions */
@@ -2286,7 +2357,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
     </div>
   </div>
   <div class="nav-actions">
-    <button id="btnProbe" class="btn btn-sm" title="Test local encoder connection">⚡ Check Encoder</button>
+    <button id="btnProbe" class="btn btn-sm" title="Test Encoder and Cloud Stream health">⚡ Check All Streams</button>
     <button id="btnSync" class="btn btn-sm btn-emerald" title="Push cards to MongoDB Atlas">Cloud Sync</button>
     <button id="btnNew" class="btn btn-sm btn-primary">+ New Event</button>
   </div>
@@ -2518,6 +2589,23 @@ const ADMIN_HTML = String.raw`<!doctype html>
     );
   }
 
+  async function restartQuickTunnel() {
+    var btn = $('btnNewTunnel');
+    btn.disabled = true; btn.textContent = 'Generating…';
+    toast('Spawning Cloudflare Quick Tunnel…', '');
+    try {
+      var res = await api('POST', '/api/tunnel/restart');
+      $('inDomainUrl').value = res.url;
+      toast('New tunnel active: ' + res.url, 'success');
+      state.events = res.events;
+      await refresh();
+    } catch (err) {
+      toast('Tunnel generation failed: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false; btn.textContent = '⚡ New Quick Tunnel';
+    }
+  }
+
   function renderCard(ev, index) {
     var card = el('div', { class: 'event-card', draggable: 'true', 'data-id': ev.id });
 
@@ -2549,13 +2637,28 @@ const ADMIN_HTML = String.raw`<!doctype html>
     var statusText = ev.status === 'live' ? 'LIVE NOW' : ev.status.toUpperCase();
     var pulse = ev.status === 'live' ? el('span', { class: 'pulse-dot live' }) : null;
 
+    // 1. Origin Encoder Signal
     var originBadge;
     if (!ev.origin) {
-      originBadge = el('span', { class: 'badge-chip' }, ['Encoder Unchecked']);
+      originBadge = el('span', { class: 'badge-chip' }, ['Encoder Checking…']);
     } else if (ev.origin.online) {
-      originBadge = el('span', { class: 'badge-chip online' }, [el('span', { class: 'pulse-dot online' }), 'Encoder Online (' + ev.origin.latencyMs + 'ms)']);
+      originBadge = el('span', { class: 'badge-chip online', title: 'Local encoder is active (' + ev.origin.latencyMs + 'ms)' }, [el('span', { class: 'pulse-dot online' }), 'Encoder Online (' + ev.origin.latencyMs + 'ms)']);
     } else {
-      originBadge = el('span', { class: 'badge-chip offline' }, [el('span', { class: 'pulse-dot offline' }), 'Encoder Offline']);
+      originBadge = el('span', { class: 'badge-chip offline', title: ev.origin.error || 'Encoder offline' }, [el('span', { class: 'pulse-dot offline' }), 'Encoder Offline']);
+    }
+
+    // 2. Cloud URL Signal
+    var cloudBadge;
+    var isCloudDead = false;
+    if (!ev.useForwarder) {
+      cloudBadge = el('span', { class: 'badge-chip' }, ['Direct (No Proxy)']);
+    } else if (!ev.cloudHealth) {
+      cloudBadge = el('span', { class: 'badge-chip' }, ['Cloud URL Checking…']);
+    } else if (ev.cloudHealth.online) {
+      cloudBadge = el('span', { class: 'badge-chip online', title: 'Public stream URL is LIVE on Cloudflare edge (' + ev.cloudHealth.latencyMs + 'ms)' }, [el('span', { class: 'pulse-dot online' }), 'Cloud URL LIVE (' + ev.cloudHealth.latencyMs + 'ms)']);
+    } else {
+      isCloudDead = true;
+      cloudBadge = el('span', { class: 'badge-chip offline', title: ev.cloudHealth.error || 'Cloud URL Offline' }, [el('span', { class: 'pulse-dot offline' }), '🔴 Cloud URL OFFLINE']);
     }
 
     var top = el('div', { class: 'card-top' }, [
@@ -2565,7 +2668,8 @@ const ADMIN_HTML = String.raw`<!doctype html>
         el('div', { class: 'card-badges' }, [
           el('span', { class: 'badge-chip', text: '🏆 ' + ev.sportType }),
           el('span', { class: 'badge-chip ' + statusClass }, [pulse, statusText]),
-          originBadge
+          originBadge,
+          cloudBadge
         ])
       ]),
       el('div', { class: 'card-actions' }, [
@@ -2575,17 +2679,33 @@ const ADMIN_HTML = String.raw`<!doctype html>
     ]);
 
     var streamUrl = ev.useForwarder ? ev.cloudPrimaryUrl : ev.primaryStreamUrl;
-    var streamBox = el('div', { class: 'stream-box' }, [
-      el('div', { class: 'stream-url-info' }, [
-        el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS)' : 'Direct Encoder Stream URL' }),
-        el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
-        ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: 'Origin Source: ' + ev.primaryStreamUrl }) : null
-      ]),
-      el('div', { style: 'display: flex; gap: 6px;' }, [
-        streamUrl ? el('button', { class: 'btn btn-sm btn-primary', text: '📋 Copy URL', onclick: function () { copy(streamUrl); } }) : null,
-        ev.localForwarderUrl ? el('button', { class: 'btn btn-sm', text: 'Local Test', onclick: function () { copy(ev.localForwarderUrl); } }) : null
+    var streamBoxClass = 'stream-box' + (isCloudDead ? ' stream-box-alert' : '');
+
+    var streamBoxChildren = [
+      el('div', { class: 'stream-box-main' }, [
+        el('div', { class: 'stream-url-info' }, [
+          el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS)' : 'Direct Encoder Stream URL' }),
+          el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
+          ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: 'Origin Source: ' + ev.primaryStreamUrl }) : null
+        ]),
+        el('div', { style: 'display: flex; gap: 6px; flex-wrap: wrap;' }, [
+          streamUrl ? el('button', { class: 'btn btn-sm btn-primary', text: '📋 Copy URL', onclick: function () { copy(streamUrl); } }) : null,
+          isCloudDead ? el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ Fix Tunnel', onclick: function () { restartQuickTunnel(); } }) : null,
+          ev.localForwarderUrl ? el('button', { class: 'btn btn-sm', text: 'Local Test', onclick: function () { copy(ev.localForwarderUrl); } }) : null
+        ])
       ])
-    ]);
+    ];
+
+    if (isCloudDead) {
+      streamBoxChildren.push(
+        el('div', { class: 'stream-alert-banner' }, [
+          el('span', { text: '⚠️ Cloud stream is UNREACHABLE (Tunnel Disconnected/Expired)! Viewers cannot watch.' }),
+          el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ 1-Click Fix Quick Tunnel', onclick: function () { restartQuickTunnel(); } })
+        ])
+      );
+    }
+
+    var streamBox = el('div', { class: streamBoxClass }, streamBoxChildren);
 
     var footer = el('div', { class: 'card-footer' }, [
       el('div', { class: 'card-time' }, [
@@ -2741,9 +2861,9 @@ const ADMIN_HTML = String.raw`<!doctype html>
       var data = await api('POST', '/api/probe');
       state.events = data.events;
       renderCards();
-      toast('Checked ' + data.checked + ' encoder origin(s)', 'success');
+      toast('Checked ' + data.checked + ' stream(s) [Encoder & Cloud Live]', 'success');
     } catch (e) { toast(e.message, 'error'); }
-    b.disabled = false; b.textContent = '⚡ Check Encoder';
+    b.disabled = false; b.textContent = '⚡ Check All Streams';
   });
 
   $('btnSync').addEventListener('click', async function () {
@@ -2781,20 +2901,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
   $('btnNewTunnel').addEventListener('click', async function () {
     var ok = window.confirm('Generate a fresh Cloudflare Quick Tunnel?\n\nThis will automatically launch a new tunnel, save the HTTPS URL to MongoDB Atlas, and update all stream players.');
     if (!ok) return;
-    var btn = $('btnNewTunnel');
-    btn.disabled = true; btn.textContent = 'Generating…';
-    toast('Generating Cloudflare Quick Tunnel…', '');
-    try {
-      var res = await api('POST', '/api/tunnel/restart');
-      $('inDomainUrl').value = res.url;
-      toast('New tunnel active: ' + res.url, 'success');
-      state.events = res.events;
-      await refresh();
-    } catch (err) {
-      toast('Tunnel generation failed: ' + err.message, 'error');
-    } finally {
-      btn.disabled = false; btn.textContent = '⚡ New Quick Tunnel';
-    }
+    await restartQuickTunnel();
   });
 
   $('btnTestDomain').addEventListener('click', async function () {
@@ -2847,7 +2954,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
       refresh();
       updateTunnelChip();
     }
-  }, 15000);
+  }, 10000);
 })();
 </script>
 </body>

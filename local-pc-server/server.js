@@ -2688,11 +2688,9 @@ const ADMIN_HTML = String.raw`<!doctype html>
           el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
           ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: 'Origin Source: ' + ev.primaryStreamUrl }) : null
         ]),
-        el('div', { style: 'display: flex; gap: 6px; flex-wrap: wrap;' }, [
-          streamUrl ? el('button', { class: 'btn btn-sm btn-primary', text: '📋 Copy URL', onclick: function () { copy(streamUrl); } }) : null,
-          isCloudDead ? el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ Fix Tunnel', onclick: function () { restartQuickTunnel(); } }) : null,
-          ev.localForwarderUrl ? el('button', { class: 'btn btn-sm', text: 'Local Test', onclick: function () { copy(ev.localForwarderUrl); } }) : null
-        ])
+        isCloudDead ? el('div', { style: 'display: flex; gap: 6px;' }, [
+          el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ Fix Tunnel', onclick: function () { restartQuickTunnel(); } })
+        ]) : null
       ])
     ];
 

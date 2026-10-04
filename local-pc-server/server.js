@@ -108,6 +108,7 @@ function loadConfig(env) {
 
     nodeId: slugify(env.LOCAL_NODE_ID || os.hostname(), 60) || "local-pc",
     publicStreamBaseUrl: trimSlash(env.PUBLIC_STREAM_BASE_URL),
+    tunnelToken: (env.CLOUDFLARE_TUNNEL_TOKEN || "").trim(),
 
     mongoUri: (env.MONGODB_URI || "").trim(),
     cloudAppUrl: trimSlash(env.CLOUD_APP_URL),
@@ -939,13 +940,14 @@ async function setStreamBaseUrlInMongo(url) {
 }
 
 /* ========================================================================== *
- * Cloudflare Quick Tunnel Manager
+ * Cloudflare Tunnel Manager (Named Tunnel & Quick Tunnel Support)
  * ========================================================================== */
 
-class QuickTunnelManager {
+class TunnelManager {
   constructor() {
     this.process = null;
     this.url = null;
+    this.mode = CONFIG.tunnelToken ? "named" : "quick";
     this.status = "stopped";
     this.lastError = null;
     this.startedAt = null;
@@ -955,6 +957,7 @@ class QuickTunnelManager {
     if (this.process && this.url) return this.url;
     this.status = "starting";
     this.lastError = null;
+    this.mode = CONFIG.tunnelToken ? "named" : "quick";
 
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -967,56 +970,89 @@ class QuickTunnelManager {
             resolve(this.url);
           } else {
             this.status = "error";
-            this.lastError = "Timed out waiting for trycloudflare.com URL";
+            this.lastError = this.mode === "named" ? "Timed out connecting named tunnel" : "Timed out waiting for trycloudflare.com URL";
             reject(new Error(this.lastError));
           }
         }
       }, 30000);
 
       try {
-        const proc = spawn(
-          "cloudflared",
-          [
-            "tunnel",
-            "--url", "http://localhost:" + port,
-            "--protocol", "quic",
-            "--ha-connections", "1",
-            "--no-autoupdate",
-            "--edge-ip-version", "auto",
-            "--grace-period", "2s"
-          ],
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-            windowsHide: true,
-          }
-        );
+        const isNamed = Boolean(CONFIG.tunnelToken);
+        const args = isNamed
+          ? [
+              "tunnel",
+              "run",
+              "--token", CONFIG.tunnelToken,
+              "--protocol", "quic",
+              "--ha-connections", "1",
+              "--no-autoupdate",
+              "--edge-ip-version", "auto",
+              "--grace-period", "2s",
+            ]
+          : [
+              "tunnel",
+              "--url", "http://localhost:" + port,
+              "--protocol", "quic",
+              "--ha-connections", "1",
+              "--no-autoupdate",
+              "--edge-ip-version", "auto",
+              "--grace-period", "2s",
+            ];
+
+        const proc = spawn("cloudflared", args, {
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
         this.process = proc;
         this.startedAt = new Date();
 
         const handleOutput = (chunk) => {
           const text = chunk.toString();
-          const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-          if (match) {
-            this.url = match[0];
-            this.status = "running";
-            console.log("[tunnel] Active Cloudflare Quick Tunnel:", this.url);
-            // Rapid warm-up: fire immediate parallel background pings to accelerate Cloudflare edge DNS/SSL propagation
-            (async () => {
-              for (let i = 0; i < 6; i++) {
-                try {
-                  await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(3000) });
-                  await probeAll();
-                  break;
-                } catch (e) {
-                  await sleep(1000);
-                }
-              }
-            })().catch(() => {});
 
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timer);
-              resolve(this.url);
+          if (isNamed) {
+            // Named tunnel mode
+            if (!this.url && CONFIG.publicStreamBaseUrl) {
+              this.url = CONFIG.publicStreamBaseUrl;
+            }
+            if (
+              text.includes("Registered tunnel connection") ||
+              text.includes("Connection registered") ||
+              text.includes("Starting tunnel") ||
+              text.includes("connIndex=0")
+            ) {
+              this.status = "running";
+              console.log("[tunnel] Active Cloudflare Named Tunnel running on:", this.url || CONFIG.publicStreamBaseUrl || "Custom Domain");
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timer);
+                resolve(this.url || CONFIG.publicStreamBaseUrl);
+              }
+            }
+          } else {
+            // Quick tunnel mode
+            const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+            if (match) {
+              this.url = match[0];
+              this.status = "running";
+              console.log("[tunnel] Active Cloudflare Quick Tunnel:", this.url);
+              // Rapid warm-up: fire immediate parallel background pings to accelerate Cloudflare edge DNS/SSL propagation
+              (async () => {
+                for (let i = 0; i < 6; i++) {
+                  try {
+                    await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(3000) });
+                    await probeAll();
+                    break;
+                  } catch (e) {
+                    await sleep(1000);
+                  }
+                }
+              })().catch(() => {});
+
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timer);
+                resolve(this.url);
+              }
             }
           }
         };
@@ -1079,6 +1115,8 @@ class QuickTunnelManager {
   getStatus() {
     return {
       status: this.status,
+      mode: this.mode,
+      tokenConfigured: Boolean(CONFIG.tunnelToken),
       url: this.url,
       publicStreamBaseUrl: CONFIG.publicStreamBaseUrl || null,
       uptimeSec: this.startedAt && this.status === "running" ? Math.round((Date.now() - this.startedAt.getTime()) / 1000) : 0,
@@ -1088,7 +1126,7 @@ class QuickTunnelManager {
   }
 }
 
-const tunnelManager = new QuickTunnelManager();
+const tunnelManager = new TunnelManager();
 
 /**
  * Mirrors models/SportsEvent.ts of the Next.js app (same collection name and
@@ -2766,6 +2804,18 @@ const ADMIN_HTML = String.raw`<!doctype html>
     var hb = s.heartbeat;
     $('hbStat').textContent = hb.ok ? ('🟢 Live (' + ago(hb.lastAt) + ')') : (hb.error ? '🔴 Error' : '🟡 Initializing');
     $('proxyStat').textContent = 'Port ' + (s.publicPort || 5001);
+
+    if (s.publicStreamBaseUrl && $('inDomainUrl') && !$('inDomainUrl').value) {
+      $('inDomainUrl').value = s.publicStreamBaseUrl;
+    }
+    if (s.tunnel) {
+      var isNamed = s.tunnel.mode === 'named';
+      var isRunning = s.tunnel.running;
+      $('tunnelStatusChip').textContent = isNamed
+        ? (isRunning ? '💎 Named Tunnel Active' : '💎 Named Tunnel (Starting…)')
+        : (isRunning ? '⚡ Quick Tunnel Active' : '⚡ Quick Tunnel');
+      $('tunnelStatusChip').className = 'badge-chip ' + (isRunning ? 'online' : '');
+    }
   }
 
   async function refresh() {

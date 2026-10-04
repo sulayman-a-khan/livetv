@@ -66,6 +66,13 @@ export default function WatchPage() {
   const channelIdParam = (params?.id as string) || "";
   const [activeChannelId, setActiveChannelId] = useState<string>(channelIdParam);
   const [channel, setChannel] = useState<ChannelDetails | null>(null);
+  /**
+   * The sidebar entry the viewer just picked, held only while its stream
+   * config loads: the player frame shows a spinner against it (unmounting
+   * the previous player and its buffers), then it clears once the fetched
+   * channel catches up — or the switch reverts.
+   */
+  const [selectedChannel, setSelectedChannel] = useState<SidebarChannel | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentStreamIndex, setCurrentStreamIndex] = useState(0);
@@ -174,6 +181,19 @@ export default function WatchPage() {
   hiddenChannelIdsRef.current = hiddenChannelIds;
 
   /**
+   * Drops the pending-switch UI — frame spinner, CONNECTING badge and the
+   * rollback snapshot. Used when a switch lands, fails and reverts, or is
+   * superseded by back/forward navigation.
+   */
+  const clearSwitchUi = useCallback(() => {
+    setSelectedChannel(null);
+    setIsTuning(false);
+    setTuningLabel(null);
+    pendingSwitchTargetIdRef.current = null;
+    previousChannelSnapshotRef.current = null;
+  }, []);
+
+  /**
    * Undoes an in-flight channel switch that didn't pan out, putting the
    * player, sidebar highlight and URL back exactly where they were before
    * the attempt — so a channel that never actually started playing never
@@ -192,8 +212,7 @@ export default function WatchPage() {
       return;
     }
 
-    pendingSwitchTargetIdRef.current = null;
-    previousChannelSnapshotRef.current = null;
+    clearSwitchUi();
 
     // Don't revert onto a channel already confirmed dead (e.g. this switch
     // was itself an auto-hop away from a channel whose servers all just
@@ -375,29 +394,28 @@ export default function WatchPage() {
   }, [channelIdParam, searchParams, loadChannelData, fetchSidebarChannels]);
 
   /**
-   * Channel switches update the URL with a raw `window.history.replaceState`
-   * (see `handleSelectChannel`) so the player never remounts and flipping
-   * through channels never piles up browser-history entries — a hardware
-   * back press should return to the page the viewer actually came from (e.g.
-   * a category list), not step backward through every channel they tuned
-   * past. Since replaceState doesn't create history entries, Next's router
-   * never sees these URL changes either. This listener only matters for the
-   * rare case of a real back/forward navigation that still lands on a
-   * `/watch/:id` URL (e.g. forward-navigating into one from history built
-   * before this page loaded) and re-syncs the page state to match.
+   * Channel switches update the URL with a raw `window.history.pushState`
+   * (see `handleSelectChannel`) so the player never remounts and the switch
+   * never goes through the Next.js router — a manual history call is
+   * invisible to App Router, so no route re-render or refetch is triggered
+   * and only the player frame changes. Each tuned channel becomes its own
+   * history entry, so back/forward steps through the channels the viewer
+   * tuned past; this listener re-syncs the page state to whatever
+   * `/watch/:id` URL the browser actually lands on.
    */
   useEffect(() => {
     const onPopState = () => {
       const match = window.location.pathname.match(/\/watch\/([^/?]+)/);
       const newId = match?.[1];
       if (newId && newId !== activeChannelId) {
+        clearSwitchUi();
         setActiveChannelId(newId);
         loadChannelData(newId, false);
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [activeChannelId, loadChannelData]);
+  }, [activeChannelId, loadChannelData, clearSwitchUi]);
 
   /**
    * Background health poll. Picks up channels the server-side health checker
@@ -465,6 +483,12 @@ export default function WatchPage() {
     [activeStreamUrl, isActiveStreamYouTube]
   );
 
+  // A switch is pending while the picked sidebar channel's stream config is
+  // still loading: the frame shows a spinner and the previous player stays
+  // unmounted, so its buffers are already purged.
+  const isFrameSwitching =
+    selectedChannel !== null && channel?._id !== selectedChannel._id;
+
   /**
    * Auto-scroll the sidebar so the channel that is currently playing is
    * centered in the list. Runs on first load (arriving from a category page)
@@ -492,10 +516,18 @@ export default function WatchPage() {
     return () => cancelAnimationFrame(raf);
   }, [activeChannelId, sidebarLoading, filteredSidebarChannels, leftHeight]);
 
-  // Handle instant channel switch without full page reload
+  /**
+   * Instant channel switch: the picked sidebar entry goes into local state
+   * right away, so the player frame swaps to a spinner and the previous
+   * player — HLS instance and buffered video included — is unmounted on the
+   * spot. The channel's stream config is then fetched and swapped in without
+   * a full page reload, and the URL is synced with a raw
+   * `window.history.pushState` that the Next.js router never sees (no route
+   * re-render).
+   */
   const handleSelectChannel = useCallback(
-    (newChannelId: string) => {
-      if (newChannelId === activeChannelId) return;
+    (nextChannel: SidebarChannel) => {
+      if (nextChannel._id === activeChannelId) return;
 
       // Remember what's actually on screen right now so we can restore it if
       // this switch doesn't pan out.
@@ -505,21 +537,30 @@ export default function WatchPage() {
         streamIndex: currentStreamIndex,
         url: window.location.pathname + window.location.search,
       };
-      pendingSwitchTargetIdRef.current = newChannelId;
+      pendingSwitchTargetIdRef.current = nextChannel._id;
 
-      setActiveChannelId(newChannelId);
+      setSelectedChannel(nextChannel);
+      setIsTuning(true);
+      setTuningLabel(nextChannel.name);
+      setActiveChannelId(nextChannel._id);
       const catQuery = activeCategorySlug ? `?category=${activeCategorySlug}` : "";
-      // replaceState, not pushState: flipping through channels shouldn't pile
-      // up browser-history entries. Otherwise the hardware/gesture back button
-      // steps backward through every channel the viewer has tuned past
-      // instead of returning to the page (e.g. the category list) they
-      // actually came from.
-      window.history.replaceState(null, "", `/watch/${newChannelId}${catQuery}`);
+      window.history.pushState(null, "", `/watch/${nextChannel._id}${catQuery}`);
 
-      loadChannelData(newChannelId, false);
+      loadChannelData(nextChannel._id, false);
     },
     [activeChannelId, channel, currentStreamIndex, activeCategorySlug, loadChannelData]
   );
+
+  /**
+   * A switch lands the moment the fetched channel matches the picked sidebar
+   * entry — the frame spinner and CONNECTING badge come down and the
+   * rollback snapshot retires (nothing pending left to revert).
+   */
+  useEffect(() => {
+    if (selectedChannel && channel && channel._id === selectedChannel._id) {
+      clearSwitchUi();
+    }
+  }, [channel, selectedChannel, clearSwitchUi]);
 
   /**
    * Reflects the player's background-tuning state outside the player itself —
@@ -573,7 +614,7 @@ export default function WatchPage() {
     fetchSidebarChannels(true);
 
     if (next) {
-      handleSelectChannel(next._id);
+      handleSelectChannel(next);
     } else {
       setError("No other channels are available in this category right now.");
     }
@@ -674,7 +715,16 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  {isActiveStreamMpegTs ? (
+                  {isFrameSwitching ? (
+                    <div className="relative w-full aspect-video bg-black flex items-center justify-center">
+                      <div className="flex flex-col items-center">
+                        <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
+                        <p className="text-xs font-bold text-white tracking-wide">
+                          Switching to {selectedChannel?.name}...
+                        </p>
+                      </div>
+                    </div>
+                  ) : isActiveStreamMpegTs ? (
                     <MpegTsPlayer
                       channelName={channel.name}
                       streams={channel.streams}
@@ -817,7 +867,7 @@ export default function WatchPage() {
                             ref={isActive ? activeItemRef : undefined}
                             onClick={(e) => {
                               e.preventDefault();
-                              handleSelectChannel(ch._id);
+                              handleSelectChannel(ch);
                             }}
                             className={`group w-full min-w-0 flex flex-col items-center gap-1 p-1.5 rounded-xl transition-all text-center border ${
                               isActive

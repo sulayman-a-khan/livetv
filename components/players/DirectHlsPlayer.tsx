@@ -55,7 +55,7 @@ export default function DirectHlsPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1.0);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingStream, setIsLoadingStream] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
@@ -127,7 +127,9 @@ export default function DirectHlsPlayer({
     }
   }, [streams, activeIndex, controlledIndex, onStreamIndexChange, onAllServersFailed]);
 
-  // Main stream loader effect
+  // Main stream loader effect — re-runs on every channel or server-mirror
+  // switch and synchronously tears the previous instance down first, so no
+  // old HLS session or buffered video survives the change.
   useEffect(() => {
     // Synchronous hard buffer purge & previous HLS teardown
     if (videoRef.current) {
@@ -147,11 +149,11 @@ export default function DirectHlsPlayer({
     }
 
     if (!activeStream || isYouTube) {
-      setIsLoading(false);
+      setIsLoadingStream(false);
       return;
     }
 
-    setIsLoading(true);
+    setIsLoadingStream(true);
     setErrorMsg(null);
     setLevels([]);
     setSelectedLevel(-1);
@@ -179,6 +181,12 @@ export default function DirectHlsPlayer({
         fragLoadingTimeOut: 10000,
         fragLoadingMaxRetry: 3,
         capLevelToPlayerSize: true,
+        xhrSetup: (xhr) => {
+          // Never let an HTTP-cached manifest leak a previous channel's
+          // playlist back in during a switch.
+          xhr.setRequestHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          xhr.setRequestHeader("Pragma", "no-cache");
+        },
       });
 
       hlsRef.current = hls;
@@ -187,7 +195,7 @@ export default function DirectHlsPlayer({
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        setIsLoading(false);
+        setIsLoadingStream(false);
 
         // Filter and cap levels
         const parsedLevels: LevelInfo[] = data.levels.map((lvl, index) => ({
@@ -257,7 +265,7 @@ export default function DirectHlsPlayer({
       // Native Safari iOS/macOS HLS
       video.src = streamUrl;
       video.addEventListener("loadedmetadata", () => {
-        setIsLoading(false);
+        setIsLoadingStream(false);
         video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
       video.addEventListener("error", () => {
@@ -266,13 +274,13 @@ export default function DirectHlsPlayer({
       });
     } else {
       setErrorMsg("HLS streaming is not supported on this device");
-      setIsLoading(false);
+      setIsLoadingStream(false);
     }
 
     return () => {
       purgeAndDestroyPlayer();
     };
-  }, [activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, onStreamFailed, purgeAndDestroyPlayer]);
+  }, [channelId, activeIndex, activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, onStreamFailed, purgeAndDestroyPlayer]);
 
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {
@@ -363,12 +371,17 @@ export default function DirectHlsPlayer({
           className="w-full h-full object-contain bg-black"
           onClick={togglePlay}
           onPlay={() => setIsPlaying(true)}
+          onPlaying={() => {
+            // Frames are actually rendering — the switch is truly done.
+            setIsPlaying(true);
+            setIsLoadingStream(false);
+          }}
           onPause={() => setIsPlaying(false)}
         />
       )}
 
       {/* Loading Spinner */}
-      {isLoading && !isYouTube && (
+      {isLoadingStream && !isYouTube && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
           <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
           <p className="text-xs font-bold text-white tracking-wide">Direct High-Speed Stream Tuning...</p>
@@ -394,7 +407,7 @@ export default function DirectHlsPlayer({
       {/* Top Channel Badge Overlay */}
       <div
         className={`absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none transition-opacity duration-300 ${
-          controlsVisible || isLoading ? "opacity-100" : "opacity-0"
+          controlsVisible || isLoadingStream ? "opacity-100" : "opacity-0"
         }`}
       >
         <div className="flex items-center gap-2 bg-[#080e1b]/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">

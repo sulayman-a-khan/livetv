@@ -181,6 +181,18 @@ export default function WatchPage() {
   hiddenChannelIdsRef.current = hiddenChannelIds;
 
   /**
+   * Same idea for searchParams: `handleSelectChannel` uses a raw
+   * `history.pushState`, which expires `useSearchParams()`'s identity even
+   * though the values this page reads from it (`stream`, `title`) never
+   * change mid-session. Reading through a ref keeps `loadChannelData` and
+   * the initial-load effect stable, so a pushState can't re-trigger them
+   * with the stale route param and yank the page off the channel the
+   * viewer just picked.
+   */
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+
+  /**
    * Drops the pending-switch UI — frame spinner, CONNECTING badge and the
    * rollback snapshot. Used when a switch lands, fails and reverts, or is
    * superseded by back/forward navigation.
@@ -291,8 +303,8 @@ export default function WatchPage() {
 
         // Fallback 2: check if direct stream query parameter exists
         if (!sportsFound) {
-          const streamParam = searchParams.get("stream");
-          const titleParam = searchParams.get("title");
+          const streamParam = searchParamsRef.current.get("stream");
+          const titleParam = searchParamsRef.current.get("title");
           if (streamParam) {
             const candidates = buildFreeStreamLadder(streamParam, [], channelId);
             setChannel({
@@ -314,8 +326,8 @@ export default function WatchPage() {
       }
     } catch {
       if (requestId !== latestRequestIdRef.current) return;
-      const streamParam = searchParams.get("stream");
-      const titleParam = searchParams.get("title");
+      const streamParam = searchParamsRef.current.get("stream");
+      const titleParam = searchParamsRef.current.get("title");
       if (streamParam) {
         const candidates = buildFreeStreamLadder(streamParam, [], channelId);
         setChannel({
@@ -336,7 +348,7 @@ export default function WatchPage() {
         setInitialLoading(false);
       }
     }
-  }, [revertFailedSwitch, searchParams]);
+  }, [revertFailedSwitch]);
 
   /**
    * Loads the playlist. The API only returns channels that currently have at
@@ -365,10 +377,13 @@ export default function WatchPage() {
     }
   }, []);
 
-  // Initial load
+  // Initial load — runs on mount and whenever the route param changes via a
+  // real Next navigation. Deliberately NOT keyed on searchParams: the switch
+  // pushState expires its identity, and re-running this effect with the stale
+  // mount-time param would yank the page back to the original channel.
   useEffect(() => {
-    const streamParam = searchParams.get("stream");
-    const titleParam = searchParams.get("title");
+    const streamParam = searchParamsRef.current.get("stream");
+    const titleParam = searchParamsRef.current.get("title");
 
     if (streamParam) {
       setActiveChannelId(channelIdParam || "live-sports-event");
@@ -391,7 +406,7 @@ export default function WatchPage() {
       loadChannelData(channelIdParam, true);
     }
     fetchSidebarChannels();
-  }, [channelIdParam, searchParams, loadChannelData, fetchSidebarChannels]);
+  }, [channelIdParam, loadChannelData, fetchSidebarChannels]);
 
   /**
    * Channel switches update the URL with a raw `window.history.pushState`
@@ -476,7 +491,7 @@ export default function WatchPage() {
   // on Vercel. YouTube's own controls stay hidden until hover.
   const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
   const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
-  // A raw MPEG-TS / Xtream `.ts` feed (or one already routed through /api/stream)
+  // A raw MPEG-TS `.ts` feed (or one already routed through /api/stream)
   // can't be played by hls.js — it goes to the mpegts.js-based player instead.
   const isActiveStreamMpegTs = useMemo(
     () => !isActiveStreamYouTube && isMpegTsUrl(activeStreamUrl),

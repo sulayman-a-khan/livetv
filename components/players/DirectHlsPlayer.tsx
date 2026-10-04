@@ -181,11 +181,15 @@ export default function DirectHlsPlayer({
         fragLoadingTimeOut: 10000,
         fragLoadingMaxRetry: 3,
         capLevelToPlayerSize: true,
-        xhrSetup: (xhr) => {
-          // Never let an HTTP-cached manifest leak a previous channel's
-          // playlist back in during a switch.
-          xhr.setRequestHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-          xhr.setRequestHeader("Pragma", "no-cache");
+        xhrSetup: (xhr, url) => {
+          // Same-origin only: a custom request header on a cross-origin
+          // manifest triggers a CORS preflight the stream CDNs reject,
+          // killing playback. Same-origin gets the anti-stale-cache guard
+          // without a preflight.
+          if (typeof window !== "undefined" && url.startsWith(window.location.origin)) {
+            xhr.setRequestHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            xhr.setRequestHeader("Pragma", "no-cache");
+          }
         },
       });
 

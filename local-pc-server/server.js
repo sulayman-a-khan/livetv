@@ -38,6 +38,29 @@ const mongoose = require("mongoose");
 
 const VERSION = "1.0.0";
 
+function isAbortError(err) {
+  if (!err) return false;
+  return (
+    err.name === "AbortError" ||
+    err.name === "DOMException" ||
+    err.code === "ERR_STREAM_PREMATURE_CLOSE" ||
+    err.code === "ECONNRESET" ||
+    err.code === "EPIPE" ||
+    err.code === 20 ||
+    err.code === "ECANCELED" ||
+    (typeof err.message === "string" && err.message.toLowerCase().includes("aborted")) ||
+    (err.cause && isAbortError(err.cause))
+  );
+}
+
+// Global safety net for client stream disconnects and aborts
+process.on("uncaughtException", (err) => {
+  if (isAbortError(err)) {
+    return;
+  }
+  console.error("[uncaughtException]", err);
+});
+
 /* ========================================================================== *
  * Configuration
  * ========================================================================== */
@@ -1260,8 +1283,15 @@ async function forward(req, res, streamId, rawRest) {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    res.on("close", () => controller.abort());
+    const timer = setTimeout(() => {
+      try { controller.abort(); } catch (e) {}
+    }, 8000);
+    const onClose = () => {
+      if (!controller.signal.aborted) {
+        try { controller.abort(); } catch (e) {}
+      }
+    };
+    res.on("close", onClose);
 
     let upstream;
     try {
@@ -1272,9 +1302,14 @@ async function forward(req, res, streamId, rawRest) {
       });
     } catch (e) {
       clearTimeout(timer);
+      res.removeListener("close", onClose);
+      if (isAbortError(e) || res.destroyed || res.writableEnded) {
+        return;
+      }
       return sendJson(res, 502, { error: "Decryption key fetch error: " + e.message });
     }
     clearTimeout(timer);
+    res.removeListener("close", onClose);
 
     if (!upstream.ok) {
       try { await upstream.body.cancel(); } catch (e) {}
@@ -1335,23 +1370,35 @@ async function forward(req, res, streamId, rawRest) {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000); // 12s timeout for stall detection
-    res.on("close", () => controller.abort());
+    const timer = setTimeout(() => {
+      try { controller.abort(); } catch (e) {}
+    }, 12000); // 12s timeout for stall detection
+    const onClose = () => {
+      if (!controller.signal.aborted) {
+        try { controller.abort(); } catch (e) {}
+      }
+    };
+    res.on("close", onClose);
 
     let upstream;
     try {
       upstream = await fetch(target, { headers: buildUpstreamHeaders(ev, req, primary), signal: controller.signal, redirect: "follow" });
     } catch (e) {
       clearTimeout(timer);
+      res.removeListener("close", onClose);
+      if (isAbortError(e) && (res.destroyed || res.writableEnded || req.destroyed)) {
+        return;
+      }
       console.warn(`[forwarder] Upstream fetch failed on "${streamId}" (${e.message}). Attempting failover...`);
       // Problem-triggered failover
-      const newStream = await strictStreamManager.triggerFailover(ev, e.name === "AbortError" ? "Upstream timeout (>4.5s stall)" : e.message);
-      if (newStream) {
+      const newStream = await strictStreamManager.triggerFailover(ev, e.name === "AbortError" ? "Upstream timeout (>12s stall)" : e.message);
+      if (newStream && !res.headersSent && !res.destroyed) {
         return forward(req, res, streamId, rawRest);
       }
       return sendJson(res, 502, { error: "Origin unreachable & no working backups" });
     }
     clearTimeout(timer);
+    res.removeListener("close", onClose);
 
     if (!upstream.ok) {
       try { await upstream.body.cancel(); } catch (e) {}
@@ -1367,6 +1414,9 @@ async function forward(req, res, streamId, rawRest) {
     try {
       body = await upstream.text();
     } catch (e) {
+      if (isAbortError(e) || res.destroyed || res.writableEnded) {
+        return;
+      }
       return sendJson(res, 502, { error: "Origin closed connection during playlist" });
     }
 
@@ -1400,50 +1450,94 @@ async function forward(req, res, streamId, rawRest) {
 
   /* ---------------- 2. Media Segment Handler: Zero-Delay Stream Piping ---------------- */
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CONFIG.upstreamTimeoutMs);
-  res.on("close", () => controller.abort());
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch (e) {}
+  }, CONFIG.upstreamTimeoutMs);
+  const onClose = () => {
+    if (!controller.signal.aborted) {
+      try { controller.abort(); } catch (e) {}
+    }
+  };
+  res.on("close", onClose);
 
   let upstream;
   try {
     upstream = await fetch(target, { headers: buildUpstreamHeaders(ev, req, primary), signal: controller.signal, redirect: "follow" });
   } catch (e) {
     clearTimeout(timer);
+    res.removeListener("close", onClose);
+    if (isAbortError(e) || res.destroyed || res.writableEnded) {
+      // Client disconnected cleanly
+      return;
+    }
     return sendJson(res, 502, { error: "Segment fetch error: " + e.message });
   }
   clearTimeout(timer);
 
   if (!upstream.ok) {
+    res.removeListener("close", onClose);
     try { await upstream.body.cancel(); } catch (e) {}
     return sendJson(res, 502, { error: "Segment HTTP " + upstream.status });
   }
 
   const contentType = upstream.headers.get("content-type") || "video/mp2t";
-  res.status(upstream.status);
-  res.setHeader("Content-Type", contentType);
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.setHeader("Connection", "keep-alive");
+  if (!res.headersSent) {
+    res.status(upstream.status);
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("Connection", "keep-alive");
+  }
 
   if (upstream.body) {
-    if (typeof Readable.fromWeb === "function" && upstream.body instanceof Object && typeof upstream.body.getReader === "function") {
-      Readable.fromWeb(upstream.body).pipe(res);
-    } else if (typeof upstream.body.pipe === "function") {
-      upstream.body.pipe(res);
-    } else {
-      const arrayBuffer = await upstream.arrayBuffer();
-      res.send(Buffer.from(arrayBuffer));
+    try {
+      if (typeof Readable.fromWeb === "function" && upstream.body instanceof Object && typeof upstream.body.getReader === "function") {
+        const nodeStream = Readable.fromWeb(upstream.body);
+        nodeStream.on("error", (err) => {
+          if (isAbortError(err)) return;
+          console.error("[forwarder] Stream error:", err ? err.message : err);
+        });
+        res.on("error", (err) => {
+          if (isAbortError(err)) return;
+        });
+        nodeStream.pipe(res);
+      } else if (typeof upstream.body.pipe === "function") {
+        upstream.body.on("error", (err) => {
+          if (isAbortError(err)) return;
+          console.error("[forwarder] Stream error:", err ? err.message : err);
+        });
+        res.on("error", (err) => {
+          if (isAbortError(err)) return;
+        });
+        upstream.body.pipe(res);
+      } else {
+        const arrayBuffer = await upstream.arrayBuffer();
+        if (!res.writableEnded && !res.destroyed) {
+          res.send(Buffer.from(arrayBuffer));
+        }
+      }
+    } catch (pipeErr) {
+      if (isAbortError(pipeErr) || res.destroyed || res.writableEnded) return;
+      console.error("[forwarder] Segment stream error:", pipeErr ? pipeErr.message : pipeErr);
     }
   } else {
-    res.end();
+    if (!res.writableEnded && !res.destroyed) {
+      res.end();
+    }
   }
 }
 
 function wrapAsync(fn) {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch((err) => {
+      if (isAbortError(err) || res.destroyed || res.writableEnded) {
+        return;
+      }
       console.error("[forwarder] " + req.method + " " + req.path + " failed: " + (err && err.message));
-      sendJson(res, 500, { error: "Forwarder error" });
+      if (!res.headersSent && !res.destroyed) {
+        sendJson(res, 500, { error: "Forwarder error" });
+      }
     });
   };
 }
@@ -4392,6 +4486,9 @@ async function main() {
 }
 
 process.on("unhandledRejection", (reason) => {
+  if (isAbortError(reason)) {
+    return;
+  }
   console.error("[unhandledRejection]", reason && reason.message ? reason.message : reason);
 });
 

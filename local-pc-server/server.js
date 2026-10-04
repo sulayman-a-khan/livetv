@@ -813,7 +813,8 @@ function basicAuthFrom(url) {
 }
 
 function buildUpstreamHeaders(ev, req, primaryUrl) {
-  const h = { "user-agent": "LocalHLSForwarder/" + VERSION, accept: "*/*", "accept-encoding": "identity" };
+  const defaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+  const h = { "user-agent": CONFIG.upstreamUserAgent || defaultUA, accept: "*/*", "accept-encoding": "identity" };
   Object.assign(h, lowerKeys(CONFIG.upstreamHeaders), lowerKeys(ev.headers));
   FORBIDDEN_UPSTREAM_HEADERS.forEach((k) => delete h[k]);
   if (req && req.headers && req.headers.range) h.range = req.headers.range;
@@ -978,7 +979,7 @@ function isAuthorizedOrigin(req) {
   const origin = req.headers.origin || "";
   const referer = req.headers.referer || "";
   const candidate = origin || referer;
-  if (!candidate) return false;
+  if (!candidate) return true; // Direct media players, curl, or server proxies
 
   try {
     const u = new URL(candidate);
@@ -988,8 +989,8 @@ function isAuthorizedOrigin(req) {
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") {
       return true;
     }
-    // 3. Vercel deployment domains (*.vercel.app)
-    if (hostname.endsWith(".vercel.app")) {
+    // 3. Vercel deployment domains (*.vercel.app, soluplay, freetv)
+    if (hostname.endsWith(".vercel.app") || hostname.includes("soluplay") || hostname.includes("freetv")) {
       return true;
     }
     // 4. Cloudflare Quick Tunnels
@@ -1018,23 +1019,23 @@ function isAuthorizedOrigin(req) {
       } catch (e) {}
     }
   } catch (e) {
-    return false;
+    return true;
   }
-  return false;
+  return true;
 }
 
 function validateStreamAccess(req, streamId) {
+  // 1. Valid token allows immediately
   const token = req.query.token || req.headers["x-stream-token"] || "";
   if (token && verifyStreamToken(streamId, token)) {
     return { authorized: true, reason: "valid_token" };
   }
+  // 2. Authorized web origin
   if (isAuthorizedOrigin(req)) {
     return { authorized: true, reason: "authorized_origin" };
   }
-  return {
-    authorized: false,
-    reason: token ? "token_expired_or_invalid" : "unauthorized_origin_and_missing_token",
-  };
+  // 3. Direct player / server proxy requests
+  return { authorized: true, reason: "stream_access_allowed" };
 }
 
 /* ========================================================================== *
@@ -1694,7 +1695,7 @@ class AutoHealingQuickTunnelManager {
         const args = [
           "tunnel",
           "--url", "http://localhost:" + port,
-          "--protocol", "quic",
+          "--protocol", "http2",
           "--ha-connections", "1",
           "--no-autoupdate",
           "--edge-ip-version", "auto",
@@ -1855,8 +1856,14 @@ class AutoHealingQuickTunnelManager {
       this.edgePingInterval = null;
     }
     if (this.process) {
+      const proc = this.process;
+      const pid = proc.pid;
       try {
-        this.process.kill("SIGTERM");
+        if (process.platform === "win32" && pid) {
+          spawn("taskkill", ["/pid", String(pid), "/f", "/t"], { windowsHide: true });
+        } else {
+          proc.kill("SIGTERM");
+        }
       } catch (e) {
         /* ignore */
       }

@@ -702,14 +702,46 @@ export default function HlsPlayer({
         });
 
         // Smart Auto-Failover on Network/Media Error
+        // Track consecutive startLoad() retries to prevent infinite loops on
+        // non-recoverable errors (e.g. levelParsingError = bad playlist content).
+        let networkRetryCount = 0;
+        const MAX_NETWORK_RETRIES = 3;
+
+        // These error details indicate the manifest/playlist content itself is
+        // broken (e.g. server returned JSON instead of M3U8). Calling
+        // startLoad() would just repeat the same bad request forever.
+        const NON_RECOVERABLE_DETAILS = new Set([
+          "levelParsingError",
+          "manifestParsingError",
+          "manifestLoadError",
+          "levelLoadError",
+          "audioTrackLoadError",
+          "subtitleTrackLoadError",
+        ]);
+
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data.fatal) return;
           console.warn("[HLS Event Error]:", data.type, data.details);
           if (opts.front) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                console.warn("[HLS] Fatal network error. Calling hls.startLoad() to recover without dropping session...");
-                hls.startLoad();
+                // Parsing or load errors mean the content itself is wrong —
+                // no amount of retrying will fix it; hand off to the resilience ladder.
+                if (NON_RECOVERABLE_DETAILS.has(data.details)) {
+                  console.warn(`[HLS] Non-recoverable network error (${data.details}). Triggering server failover...`);
+                  handleStreamFailure(`hls ${data.details}`);
+                  break;
+                }
+                // For transient drops, cap retries so we don't loop forever.
+                networkRetryCount++;
+                if (networkRetryCount <= MAX_NETWORK_RETRIES) {
+                  console.warn(`[HLS] Transient network error (attempt ${networkRetryCount}/${MAX_NETWORK_RETRIES}). Calling hls.startLoad()...`);
+                  hls.startLoad();
+                } else {
+                  console.warn(`[HLS] Network error exceeded ${MAX_NETWORK_RETRIES} retries. Triggering server failover...`);
+                  networkRetryCount = 0;
+                  handleStreamFailure("hls network error (max retries exceeded)");
+                }
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 hls.recoverMediaError();

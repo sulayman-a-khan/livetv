@@ -28,6 +28,16 @@ export function isMpegTsUrl(url: string): boolean {
     if (path.endsWith(".ts")) return true;
 
     if (path.endsWith(STREAM_PROXY_PATH) || path.includes(`${STREAM_PROXY_PATH}?`)) {
+      // A proxy URL wrapping an m3u8 is still HLS — check the inner target.
+      const inner = u.searchParams.get("url");
+      if (inner) {
+        try {
+          const innerPath = new URL(inner).pathname.toLowerCase();
+          if (innerPath.endsWith(".m3u8")) return false; // HLS, not MPEG-TS
+        } catch {
+          /* ignore malformed inner url */
+        }
+      }
       return true;
     }
 

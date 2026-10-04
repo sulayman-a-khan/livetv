@@ -130,6 +130,27 @@ function loadConfig(env) {
 
 const CONFIG = loadConfig(process.env);
 
+/* ---------- Startup env validation for Xtream Codes credentials ---------- */
+(function validateXtreamEnv() {
+  const missing = [];
+  if (!CONFIG.xtreamServerUrl) missing.push("XTREAM_SERVER_URL");
+  if (!CONFIG.xtreamUsername)  missing.push("XTREAM_USERNAME");
+  if (!CONFIG.xtreamPassword)  missing.push("XTREAM_PASSWORD");
+  if (missing.length) {
+    console.error("╔══════════════════════════════════════════════════════════════╗");
+    console.error("║  ⚠️  CRITICAL: Missing Xtream Codes env variable(s):        ║");
+    missing.forEach((v) => {
+      console.error(`║    → ${v.padEnd(50)}     ║`);
+    });
+    console.error("║                                                              ║");
+    console.error("║  Xtream stream URLs will be BROKEN without these values.     ║");
+    console.error("║  Set them in  local-pc-server/.env  and restart the server.  ║");
+    console.error("╚══════════════════════════════════════════════════════════════╝");
+  } else {
+    console.log(`[xtream:env] ✅ Xtream credentials loaded — Server: ${CONFIG.xtreamServerUrl}, User: ${CONFIG.xtreamUsername}, Password: ${"•".repeat(CONFIG.xtreamPassword.length)} (${CONFIG.xtreamPassword.length} chars)`);
+  }
+})();
+
 /* ========================================================================== *
  * Small utilities
  * ========================================================================== */

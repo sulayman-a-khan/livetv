@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import Link from "next/link";
-import { Tv, Flame, RefreshCw, Calendar } from "lucide-react";
+import { useEffect, useState } from "react";
 import MatchCard from "@/components/MatchCard";
 
 export interface SportsEventCard {
@@ -50,14 +48,14 @@ function getSportIcon(sportType?: string): string {
   return "🏆";
 }
 
+/** Card width: full on mobile, halves on sm, thirds on lg — rows stay centered via flex wrap. */
+const CARD_WIDTH = "w-full sm:w-[calc((100%-0.875rem)/2)] lg:w-[calc((100%-1.75rem)/3)]";
+
 export default function LiveSportsArena() {
   const [events, setEvents] = useState<SportsEventCard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeSportFilter, setActiveSportFilter] = useState("All");
 
-  const loadSportsEvents = async (manual: boolean = false) => {
-    if (manual) setIsRefreshing(true);
+  const loadSportsEvents = async () => {
     try {
       const t = Date.now();
       const res = await fetch(`/api/events?_t=${t}`, {
@@ -109,127 +107,31 @@ export default function LiveSportsArena() {
       console.warn("Live Sports Arena fetch fallback:", err);
     } finally {
       setLoading(false);
-      if (manual) setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
     loadSportsEvents();
-    const interval = setInterval(() => loadSportsEvents(false), 15_000);
+    const interval = setInterval(() => loadSportsEvents(), 15_000);
     return () => clearInterval(interval);
   }, []);
 
-  const sportTypes = useMemo(() => {
-    const types = new Set<string>();
-    events.forEach((ev) => {
-      if (ev.sportType) types.add(ev.sportType);
-    });
-    return ["All", ...Array.from(types)];
-  }, [events]);
-
-  const filteredEvents = useMemo(() => {
-    if (activeSportFilter === "All") return events;
-    return events.filter(
-      (ev) => ev.sportType?.toLowerCase() === activeSportFilter.toLowerCase()
-    );
-  }, [events, activeSportFilter]);
+  if (!loading && events.length === 0) return null;
 
   return (
-    <section className="space-y-4 rounded-3xl border border-emerald-500/20 bg-gradient-to-b from-[#091523] via-[#060e1a] to-[#040810] p-4 sm:p-6 shadow-2xl relative overflow-hidden animate-fade-in">
-      {/* Decorative Glow */}
-      <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 -mb-8 -ml-8 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Header bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 relative z-10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 to-cyan-400 p-0.5 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <div className="w-full h-full bg-[#060e1a] rounded-[14px] flex items-center justify-center">
-              <Flame className="w-5 h-5 text-emerald-400 animate-pulse" />
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-xl font-black text-white tracking-tight">
-                Live Sports Arena
-              </h2>
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
-                Live Hub
-              </span>
-              <button
-                onClick={() => loadSportsEvents(true)}
-                title="Refresh Live Matches"
-                className="p-1.5 rounded-lg bg-[#0d1728] border border-slate-800 text-slate-400 hover:text-emerald-400 hover:border-emerald-500/40 transition-all cursor-pointer ml-1"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-emerald-400" : ""}`} />
-              </button>
-            </div>
-            <p className="text-xs text-slate-400">
-              HD Match Feeds &amp; Direct Multi-Bitrate Streams
-            </p>
-          </div>
-        </div>
-
-        {/* Sport Type Filters */}
-        {sportTypes.length > 2 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
-            {sportTypes.map((type) => {
-              const active = activeSportFilter === type;
-              return (
-                <button
-                  key={type}
-                  onClick={() => setActiveSportFilter(type)}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-                    active
-                      ? "bg-[#00c978] text-slate-950 shadow-md shadow-emerald-500/20"
-                      : "bg-[#0d1728] text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700"
-                  }`}
-                >
-                  {type === "All" ? "🔥 All Matches" : `${getSportIcon(type)} ${type}`}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Content: Loading Skeleton vs Empty State vs Match Cards */}
+    <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-b from-[#091523] via-[#060e1a] to-[#040810] p-4 sm:p-6 shadow-2xl animate-fade-in">
       {loading && events.length === 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 relative z-10">
+        <div className="flex flex-wrap justify-center gap-3.5">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-2xl border border-slate-800 bg-[#0a1322] aspect-video animate-pulse" />
+            <div key={i} className={`${CARD_WIDTH} rounded-2xl border border-slate-800 bg-[#0a1322] aspect-video animate-pulse`} />
           ))}
         </div>
-      ) : filteredEvents.length === 0 ? (
-        <div className="rounded-2xl border border-slate-800/80 bg-[#0a1322]/80 p-8 sm:p-10 text-center relative z-10">
-          <div className="w-12 h-12 rounded-2xl bg-[#0f1b2e] border border-slate-700/80 flex items-center justify-center mx-auto mb-3 shadow-inner">
-            <Calendar className="w-6 h-6 text-emerald-400" />
-          </div>
-          <h3 className="text-sm sm:text-base font-bold text-white mb-1">
-            No Live Matches Scheduled Right Now
-          </h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto mb-4">
-            Live tournament feeds and fixtures will appear here automatically when matches begin. Tune into our 24/7 Live Sports channels below anytime.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Link
-              href="/category/sports-tv"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#00c978] hover:bg-[#00db84] text-slate-950 text-xs font-bold transition-all shadow-md shadow-emerald-500/20"
-            >
-              <Tv className="w-3.5 h-3.5" />
-              <span>Browse 24/7 Sports Channels</span>
-            </Link>
-          </div>
-        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 relative z-10">
-          {filteredEvents.map((ev) => (
-            <MatchCard
-              key={ev.id || ev._id || "event"}
-              event={ev}
-              icon={getSportIcon(ev.sportType)}
-            />
+        <div className="flex flex-wrap justify-center gap-3.5">
+          {events.map((ev) => (
+            <div key={ev.id || ev._id || "event"} className={CARD_WIDTH}>
+              <MatchCard event={ev} icon={getSportIcon(ev.sportType)} />
+            </div>
           ))}
         </div>
       )}

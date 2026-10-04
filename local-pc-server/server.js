@@ -115,6 +115,10 @@ function loadConfig(env) {
     autoHeartbeat: envBool(env, "AUTO_HEARTBEAT", true),
     heartbeatIntervalSec: envInt(env, "HEARTBEAT_INTERVAL_SEC", 30, 5, 3600),
 
+    xtreamServerUrl: trimSlash(env.XTREAM_SERVER_URL || "http://play.dgix.top:8080"),
+    xtreamUsername: (env.XTREAM_USERNAME || "sulayman9991").trim(),
+    xtreamPassword: (env.XTREAM_PASSWORD || "").trim(),
+
     corsOrigins: (env.CORS_ORIGINS || "*").split(",").map((s) => s.trim()).filter(Boolean),
     upstreamHeaders: envHeaders(env, "UPSTREAM_HEADERS_JSON"),
     responseHeaders: envHeaders(env, "RESPONSE_HEADERS_JSON"),
@@ -279,6 +283,14 @@ function parseIso(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+function isValidStreamInput(v) {
+  if (!v || typeof v !== "string") return false;
+  const s = v.trim();
+  if (/^\d+$/.test(s)) return true; // Xtream Stream ID (e.g. 98231)
+  if (s.includes("://") || s.includes("{SERVER}") || s.includes("[SERVER]") || s.includes("{USER}")) return true;
+  return isHttpUrl(s);
+}
+
 function parseUrlList(input, errors) {
   let list;
   if (Array.isArray(input)) list = input;
@@ -291,8 +303,8 @@ function parseUrlList(input, errors) {
   list.forEach((item) => {
     const v = typeof item === "string" ? item.trim() : "";
     if (!v) return;
-    if (v.length > 2048 || !isHttpUrl(v)) {
-      errors.push("invalid backup URL: " + v.slice(0, 80));
+    if (v.length > 2048 || !isValidStreamInput(v)) {
+      errors.push("invalid backup stream URL/ID: " + v.slice(0, 80));
       return;
     }
     if (out.indexOf(v) === -1) out.push(v);
@@ -350,13 +362,18 @@ function validateEventInput(body, existing, takenStreamIds) {
 
   if (has("primaryStreamUrl")) {
     const u = typeof src.primaryStreamUrl === "string" ? src.primaryStreamUrl.trim() : "";
-    if (u && u.length <= 2048 && isHttpUrl(u)) v.primaryStreamUrl = u;
-    else errors.push("primaryStreamUrl must be an absolute http(s) URL");
+    if (u && u.length <= 2048 && isValidStreamInput(u)) v.primaryStreamUrl = u;
+    else errors.push("primaryStreamUrl must be an absolute http(s) URL or Xtream Stream ID");
   } else if (creating) {
     errors.push("primaryStreamUrl is required");
   }
 
   if (has("backupStreamUrls")) v.backupStreamUrls = parseUrlList(src.backupStreamUrls, errors);
+
+  if (has("activeStreamIndex")) {
+    const idx = Number(src.activeStreamIndex);
+    if (Number.isInteger(idx) && idx >= 0 && idx < 20) v.activeStreamIndex = idx;
+  }
 
   if (has("useForwarder")) {
     if (typeof src.useForwarder === "boolean") v.useForwarder = src.useForwarder;
@@ -411,9 +428,62 @@ function newStreamId(title, taken) {
  * URL helpers
  * ========================================================================== */
 
+/* ========================================================================== *
+ * Xtream Codes & URL helpers
+ * ========================================================================== */
+
 function localForwarderBase() {
   const port = CONFIG.publicPort > 0 ? CONFIG.publicPort : 5001;
   return "http://localhost:" + port;
+}
+
+/** Resolves an Xtream Stream ID or URL template into a valid upstream stream URL */
+function resolveXtreamUrl(input) {
+  if (!input || typeof input !== "string") return "";
+  let raw = input.trim();
+  if (!raw) return "";
+
+  // Pure numeric stream ID (e.g., "98231")
+  if (/^\d+$/.test(raw)) {
+    const srv = CONFIG.xtreamServerUrl || "http://play.dgix.top:8080";
+    const usr = CONFIG.xtreamUsername || "sulayman9991";
+    const pwd = CONFIG.xtreamPassword || "";
+    return `${srv}/live/${usr}/${pwd}/${raw}.m3u8`;
+  }
+
+  // Replace placeholders if used
+  if (CONFIG.xtreamServerUrl) {
+    raw = raw.replace(/\{SERVER\}/gi, CONFIG.xtreamServerUrl).replace(/\[SERVER\]/gi, CONFIG.xtreamServerUrl);
+  }
+  if (CONFIG.xtreamUsername) {
+    raw = raw.replace(/\{USER\}/gi, CONFIG.xtreamUsername).replace(/\[USER\]/gi, CONFIG.xtreamUsername).replace(/\{USERNAME\}/gi, CONFIG.xtreamUsername);
+  }
+  if (CONFIG.xtreamPassword) {
+    raw = raw.replace(/\{PASS\}/gi, CONFIG.xtreamPassword).replace(/\[PASS\]/gi, CONFIG.xtreamPassword).replace(/\{PASSWORD\}/gi, CONFIG.xtreamPassword);
+  }
+
+  return raw;
+}
+
+/** Masks raw credentials in URLs to prevent exposure */
+function maskCredentials(url) {
+  if (!url || typeof url !== "string") return "";
+  return url.replace(/\/live\/([^/]+)\/([^/]+)\//g, (m, u, p) => `/live/${u}/••••••••/`);
+}
+
+/** Returns all candidate stream channels for an event */
+function getEventCandidates(ev) {
+  const list = [ev.primaryStreamUrl].concat(ev.backupStreamUrls || []).filter(Boolean);
+  return list.map((raw, idx) => {
+    const resolved = resolveXtreamUrl(raw);
+    return {
+      index: idx,
+      label: idx === 0 ? "Channel 1 (Primary)" : `Channel ${idx + 1} (Backup ${idx})`,
+      rawUrl: raw,
+      resolvedUrl: resolved,
+      maskedUrl: maskCredentials(resolved),
+    };
+  });
 }
 
 /** URL viewers should use for a forwarded stream. */
@@ -425,7 +495,6 @@ function forwarderPath(ev) {
 function cloudPrimaryUrl(ev) {
   if (!ev.useForwarder) return ev.primaryStreamUrl;
   let base = (CONFIG.publicStreamBaseUrl || localForwarderBase()).trim().replace(/\/+$/, "");
-  // Force HTTPS on public / Cloudflare tunnel domains to prevent Mixed Content security blocks
   if (base.startsWith("http://") && !looksLocal(base)) {
     base = "https://" + base.slice(7);
   }
@@ -451,6 +520,218 @@ function looksLocal(url) {
 }
 
 /* ========================================================================== *
+ * Strict Single-Active Stream Enforcer, Smart Failover & Broadcasting Hub
+ * ========================================================================== */
+
+class StrictStreamManager {
+  constructor() {
+    this.activeStream = null; // { streamId, candidateIndex, resolvedUrl, label, controller, status, lastDataAt, failures, viewers: Set }
+    this.lockQueue = Promise.resolve();
+    this.segmentCache = new Map(); // url -> { buffer, contentType, headers, expiresAt }
+    this.playlistCache = new Map(); // streamId -> { text, upstreamUrl, primaryHref, fetchedAt, expiresAt }
+    this.idleCheckTimer = null;
+    this.startIdleWatcher();
+  }
+
+  // Mutex Lock to strictly serialize stream teardown and startup
+  async withLock(fn) {
+    let release;
+    const nextLock = new Promise((resolve) => (release = resolve));
+    const currentLock = this.lockQueue;
+    this.lockQueue = this.lockQueue.then(() => nextLock);
+    await currentLock;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  // Gracefully and completely terminates active upstream connection before opening any new one
+  async closeActiveStream(reason) {
+    if (!this.activeStream) return;
+    const s = this.activeStream;
+    console.log(`[xtream:enforcer] 🛑 Gracefully closing upstream connection for "${s.streamId}" (${s.label}) – Reason: ${reason}`);
+    s.status = "closed";
+    if (s.controller) {
+      try {
+        s.controller.abort();
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    this.activeStream = null;
+    // Safety pause: ensure remote Xtream server releases socket before opening a new connection
+    await sleep(500);
+  }
+
+  // Switches to a specific candidate channel (or opens initial connection) with strict single-connection guarantee
+  async switchToCandidate(ev, candidateIndex, reason) {
+    return this.withLock(async () => {
+      const candidates = getEventCandidates(ev);
+      if (!candidates.length) throw new Error("No stream candidates available for event");
+      const targetIndex = ((candidateIndex % candidates.length) + candidates.length) % candidates.length;
+      const target = candidates[targetIndex];
+
+      // If already connected to this target, keep it!
+      if (
+        this.activeStream &&
+        this.activeStream.streamId === ev.streamId &&
+        this.activeStream.candidateIndex === targetIndex &&
+        this.activeStream.status === "active"
+      ) {
+        return this.activeStream;
+      }
+
+      // STRICT ENFORCER: Close previous stream BEFORE opening new one
+      await this.closeActiveStream(reason || "Channel switch");
+
+      const controller = new AbortController();
+      this.activeStream = {
+        streamId: ev.streamId,
+        candidateIndex: targetIndex,
+        resolvedUrl: target.resolvedUrl,
+        label: target.label,
+        controller: controller,
+        status: "active",
+        lastDataAt: Date.now(),
+        failures: 0,
+        viewers: new Set(),
+      };
+
+      ev.activeStreamIndex = targetIndex;
+      store.save().catch(() => {});
+      console.log(`[xtream:enforcer] 🔒 Single connection locked on ${target.label} for "${ev.matchTitle}"`);
+      return this.activeStream;
+    });
+  }
+
+  // Problem-triggered failover: Triggered ONLY when active stream crashes or stalls for > 4.5s
+  async triggerFailover(ev, reason) {
+    return this.withLock(async () => {
+      const candidates = getEventCandidates(ev);
+      if (candidates.length <= 1) {
+        console.warn(`[xtream:failover] ⚠️ Stream issue detected (${reason}), but no backup channels configured.`);
+        return null;
+      }
+
+      const currentIndex = this.activeStream ? this.activeStream.candidateIndex : (ev.activeStreamIndex || 0);
+      const nextIndex = (currentIndex + 1) % candidates.length;
+      const nextCandidate = candidates[nextIndex];
+
+      console.warn(`[xtream:failover] ⚡ Stream failure on Channel #${currentIndex + 1} (${reason})! Auto-switching to ${nextCandidate.label}...`);
+
+      // Gracefully close active connection first
+      await this.closeActiveStream(`Failover from Channel #${currentIndex + 1} (${reason})`);
+
+      const controller = new AbortController();
+      this.activeStream = {
+        streamId: ev.streamId,
+        candidateIndex: nextIndex,
+        resolvedUrl: nextCandidate.resolvedUrl,
+        label: nextCandidate.label,
+        controller: controller,
+        status: "active",
+        lastDataAt: Date.now(),
+        failures: 0,
+        viewers: new Set(),
+      };
+
+      ev.activeStreamIndex = nextIndex;
+      store.save().catch(() => {});
+
+      // Lock onto the new backup channel
+      console.log(`[xtream:failover] 🔒 Switched and locked onto ${nextCandidate.label} for "${ev.matchTitle}"`);
+      return this.activeStream;
+    });
+  }
+
+  // Active viewer tracking
+  registerViewer(streamId, viewerId) {
+    if (!this.activeStream || this.activeStream.streamId !== streamId) return;
+    this.activeStream.viewers.add(viewerId || "client-" + Date.now());
+    this.activeStream.lastDataAt = Date.now();
+  }
+
+  getViewersCount(streamId) {
+    if (this.activeStream && this.activeStream.streamId === streamId && this.activeStream.status === "active") {
+      return this.activeStream.viewers.size;
+    }
+    return 0;
+  }
+
+  // In-memory cache for high-throughput shared broadcasting
+  getCachedPlaylist(streamId) {
+    const entry = this.playlistCache.get(streamId);
+    if (entry && Date.now() < entry.expiresAt) return entry.text;
+    return null;
+  }
+
+  setCachedPlaylist(streamId, text, upstreamUrl, primaryHref) {
+    this.playlistCache.set(streamId, {
+      text,
+      upstreamUrl,
+      primaryHref,
+      fetchedAt: Date.now(),
+      expiresAt: Date.now() + 1500, // 1.5s cache for seamless multi-user playlist sync
+    });
+  }
+
+  getCachedSegment(url) {
+    const entry = this.segmentCache.get(url);
+    if (entry && Date.now() < entry.expiresAt) return entry;
+    return null;
+  }
+
+  setCachedSegment(url, buffer, contentType, headers) {
+    // Keep max 100 segments in memory (~100MB max)
+    if (this.segmentCache.size > 100) {
+      const oldest = this.segmentCache.keys().next().value;
+      this.segmentCache.delete(oldest);
+    }
+    this.segmentCache.set(url, {
+      buffer,
+      contentType,
+      headers,
+      expiresAt: Date.now() + 30000, // 30s TTL
+    });
+  }
+
+  startIdleWatcher() {
+    if (this.idleCheckTimer) clearInterval(this.idleCheckTimer);
+    // Runs every 5s to check if active stream has had 0 viewers for 30s
+    this.idleCheckTimer = setInterval(() => {
+      if (!this.activeStream || this.activeStream.status !== "active") return;
+      const now = Date.now();
+      const idleMs = now - (this.activeStream.lastDataAt || now);
+
+      if (idleMs > 30000) {
+        console.log(`[xtream:idle] 💤 0 active clients for 30s on "${this.activeStream.streamId}". Gracefully disconnecting upstream Xtream connection.`);
+        this.closeActiveStream("Idle disconnect (0 viewers for 30s)");
+      } else {
+        // Clear viewers set periodically so stale closed tabs don't artificially keep it alive
+        if (idleMs > 10000) this.activeStream.viewers.clear();
+      }
+    }, 5000);
+  }
+
+  getActiveInfo() {
+    if (!this.activeStream || this.activeStream.status !== "active") return null;
+    return {
+      streamId: this.activeStream.streamId,
+      candidateIndex: this.activeStream.candidateIndex,
+      label: this.activeStream.label,
+      maskedUrl: maskCredentials(this.activeStream.resolvedUrl),
+      viewers: this.activeStream.viewers.size,
+      status: this.activeStream.status,
+      lastDataAgoSec: Math.round((Date.now() - this.activeStream.lastDataAt) / 1000),
+    };
+  }
+}
+
+const strictStreamManager = new StrictStreamManager();
+
+/* ========================================================================== *
  * Health probing (Origin Encoder & Cloud URL)
  * ========================================================================== */
 
@@ -466,7 +747,6 @@ function basicAuthFrom(url) {
 
 function buildUpstreamHeaders(ev, req, primaryUrl) {
   const h = { "user-agent": "LocalHLSForwarder/" + VERSION, accept: "*/*", "accept-encoding": "identity" };
-  // Merge global upstream headers, then per-event headers (Referer, User-Agent, etc.)
   Object.assign(h, lowerKeys(CONFIG.upstreamHeaders), lowerKeys(ev.headers));
   FORBIDDEN_UPSTREAM_HEADERS.forEach((k) => delete h[k]);
   if (req && req.headers && req.headers.range) h.range = req.headers.range;
@@ -501,7 +781,11 @@ async function probeOrigin(ev) {
   const timer = setTimeout(() => controller.abort(), 5000);
   const state = { online: false, checkedAt: new Date().toISOString(), latencyMs: null, httpStatus: null, error: null };
   try {
-    const primary = new URL(ev.primaryStreamUrl);
+    const candidates = getEventCandidates(ev);
+    const activeCandidate = candidates[ev.activeStreamIndex || 0] || candidates[0];
+    if (!activeCandidate || !activeCandidate.resolvedUrl) throw new Error("No stream URL configured");
+
+    const primary = new URL(activeCandidate.resolvedUrl);
     const target = new URL(primary.href);
     target.username = "";
     target.password = "";
@@ -580,21 +864,6 @@ async function probeAll() {
 
 const SEGMENT_EXT_RE = /\.(ts|m4s|mp4|m4a|m4v|aac|ac3|ec3|cmfv|cmfa|cmft|webvtt|vtt)$/i;
 
-/**
- * Rewrites every URI in an HLS playlist (both media segments and variant sub-playlists)
- * so that they become absolute HTTPS URLs routed back through the forwarder.
- *
- * This handles:
- *   - Purely relative URIs      (segment001.ts)
- *   - Path-absolute URIs         (/hls/match1/segment001.ts)
- *   - Fully-qualified URIs       (http://encoder:8080/hls/match1/segment001.ts)
- *   - URIs in #EXT-X-MAP / KEY   (URI="init.mp4")
- *   - Redirected playlist URLs   (playlistUrl may differ from primaryHref after 302s)
- *
- * Every segment that resolves to the same origin+directory as the primary stream URL
- * is rewritten.  Segments pointing to entirely different CDNs are also proxied through
- * the forwarder to avoid mixed-content / CORS issues on the client side.
- */
 function rewritePlaylist(text, playlistUrl, primaryHref, streamId, reqBaseUrl) {
   const primary = new URL(primaryHref);
   const baseDir = dirOf(primary.pathname);
@@ -661,12 +930,6 @@ function sendJson(res, status, body) {
   res.status(status).json(body);
 }
 
-/**
- * Global CORS middleware applied before ANY route on the public port.
- * Every response (including .ts segment chunks, sub-playlist .m3u8s, error JSON,
- * and OPTIONS preflights) gets permissive cross-origin headers so that external
- * players, soluplay.vercel.app, and any web-based HLS consumer can fetch freely.
- */
 function corsMiddleware(req, res, next) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
@@ -674,36 +937,38 @@ function corsMiddleware(req, res, next) {
   res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges, X-Origin-Status, Cache-Control");
   res.setHeader("Access-Control-Max-Age", "86400");
   res.setHeader("Connection", "keep-alive");
-  // Custom response headers from config
   Object.keys(CONFIG.responseHeaders).forEach((k) => res.setHeader(k, CONFIG.responseHeaders[k]));
   if (req.method === "OPTIONS") {
-    // Immediately satisfy CORS preflight – no further processing needed.
     return res.sendStatus(200);
   }
   next();
 }
 
 /**
- * Proxies one request for `streamId`.
- *   rawRest === null  -> the event's playlist  (/live/<id>.m3u8)
- *   rawRest = "a/b.ts" -> a file below the playlist's directory (/live/<id>/a/b.ts)
- * `rawRest` is the still percent-encoded remainder of the request path.
+ * Proxies one request for `streamId` using Strict Single-Connection Enforcer & Smart Failover.
  */
 async function forward(req, res, streamId, rawRest) {
   const ev = store.byStreamId(streamId);
   if (!ev) return sendJson(res, 404, { error: "Unknown stream" });
 
+  const clientId = req.ip || req.headers["x-forwarded-for"] || "client-" + req.socket.remotePort;
+  strictStreamManager.registerViewer(streamId, clientId);
+
+  // Ensure active connection is locked onto the currently selected candidate channel
+  let activeStream = strictStreamManager.activeStream;
+  if (!activeStream || activeStream.streamId !== streamId || activeStream.status !== "active") {
+    activeStream = await strictStreamManager.switchToCandidate(ev, ev.activeStreamIndex || 0, "Client stream request");
+  }
+
   let primary;
   try {
-    primary = new URL(ev.primaryStreamUrl);
+    primary = new URL(activeStream.resolvedUrl);
   } catch (e) {
-    return sendJson(res, 500, { error: "Event has an invalid origin URL" });
+    return sendJson(res, 500, { error: "Event has an invalid upstream URL" });
   }
   const baseDir = dirOf(primary.pathname);
 
   let target;
-
-  // Handle __ext/ encoded external URLs (from rewritePlaylist for cross-origin segments)
   if (rawRest && rawRest.startsWith("__ext/")) {
     const encoded = rawRest.slice(6);
     try {
@@ -715,7 +980,6 @@ async function forward(req, res, streamId, rawRest) {
     target = new URL(primary.href);
   } else {
     try {
-      // WHATWG URL parsing collapses "." / ".." / "%2e%2e" segments, so the prefix check below is reliable.
       target = new URL(primary.origin + baseDir + rawRest);
     } catch (e) {
       return sendJson(res, 400, { error: "Bad path" });
@@ -729,74 +993,76 @@ async function forward(req, res, streamId, rawRest) {
   target.username = "";
   target.password = "";
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CONFIG.upstreamTimeoutMs);
-  res.on("close", () => controller.abort());
+  const isPlaylist = rawRest === null || /\.m3u8$/i.test(target.pathname);
 
-  let upstream;
-  try {
-    upstream = await fetch(target, { headers: buildUpstreamHeaders(ev, req, primary), signal: controller.signal, redirect: "follow" });
-  } catch (e) {
-    clearTimeout(timer);
-    const reason = e.name === "AbortError" ? "Origin timed out" : "Origin unreachable";
-    return sendJson(res, 502, { error: reason });
-  }
-  clearTimeout(timer);
-
-  if (upstream.status === 404) {
-    try {
-      await upstream.body.cancel();
-    } catch (e) {
-      /* ignore */
-    }
-    return sendJson(res, 404, { error: "Not found on origin" });
-  }
-  if (!upstream.ok) {
-    try {
-      await upstream.body.cancel();
-    } catch (e) {
-      /* ignore */
-    }
-    res.setHeader("X-Origin-Status", String(upstream.status));
-    return sendJson(res, 502, { error: "Origin answered HTTP " + upstream.status });
-  }
-
-  const contentType = upstream.headers.get("content-type") || "";
-  const isPlaylist = /\.m3u8$/i.test(target.pathname) || /mpegurl/i.test(contentType);
-
-  /* ---------------- playlist: buffer, rewrite, send ---------------- */
+  /* ---------------- 1. Playlist Handler: In-Memory Broadcast Cache ---------------- */
   if (isPlaylist) {
-    const declared = Number(upstream.headers.get("content-length") || 0);
-    if (declared > MAX_PLAYLIST_BYTES) return sendJson(res, 502, { error: "Playlist too large" });
+    const cached = strictStreamManager.getCachedPlaylist(streamId);
+    if (cached) {
+      res.status(200);
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.setHeader("Connection", "keep-alive");
+      res.send(cached);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4500); // 4.5s timeout for stall detection
+    res.on("close", () => controller.abort());
+
+    let upstream;
+    try {
+      upstream = await fetch(target, { headers: buildUpstreamHeaders(ev, req, primary), signal: controller.signal, redirect: "follow" });
+    } catch (e) {
+      clearTimeout(timer);
+      console.warn(`[forwarder] Upstream fetch failed on "${streamId}" (${e.message}). Attempting failover...`);
+      // Problem-triggered failover
+      const newStream = await strictStreamManager.triggerFailover(ev, e.name === "AbortError" ? "Upstream timeout (>4.5s stall)" : e.message);
+      if (newStream) {
+        return forward(req, res, streamId, rawRest);
+      }
+      return sendJson(res, 502, { error: "Origin unreachable & no working backups" });
+    }
+    clearTimeout(timer);
+
+    if (!upstream.ok) {
+      try { await upstream.body.cancel(); } catch (e) {}
+      console.warn(`[forwarder] Upstream HTTP ${upstream.status} on "${streamId}". Attempting failover...`);
+      const newStream = await strictStreamManager.triggerFailover(ev, "Upstream answered HTTP " + upstream.status);
+      if (newStream) {
+        return forward(req, res, streamId, rawRest);
+      }
+      return sendJson(res, 502, { error: "Origin answered HTTP " + upstream.status });
+    }
+
     let body;
-    const bodyTimer = setTimeout(() => controller.abort(), CONFIG.upstreamTimeoutMs);
     try {
       body = await upstream.text();
     } catch (e) {
-      return sendJson(res, 502, { error: "Origin closed the connection" });
-    } finally {
-      clearTimeout(bodyTimer);
+      return sendJson(res, 502, { error: "Origin closed connection during playlist" });
     }
-    if (body.length > MAX_PLAYLIST_BYTES) return sendJson(res, 502, { error: "Playlist too large" });
+
     if (!body.trimStart().startsWith("#EXTM3U")) {
+      const newStream = await strictStreamManager.triggerFailover(ev, "Invalid playlist (missing #EXTM3U)");
+      if (newStream) return forward(req, res, streamId, rawRest);
       return sendJson(res, 502, { error: "Origin did not return an HLS playlist" });
     }
-    // Build the public base URL for absolute URI rewriting.
-    // Use the INCOMING request's Host header so that whatever domain the viewer
-    // used (Cloudflare tunnel, custom domain, etc.) is what the segments point to.
-    // Fall back to PUBLIC_STREAM_BASE_URL from config, then to the raw host header.
+
+    // Rewrite playlist for clients
     let reqBaseUrl = "";
     const host = req.headers["x-forwarded-host"] || req.headers.host || "";
     const proto = req.headers["x-forwarded-proto"] || (req.secure ? "https" : "http");
     if (host) {
-      // Always force HTTPS for non-local hosts to prevent mixed-content blocks
       const scheme = looksLocal(proto + "://" + host) ? proto : "https";
       reqBaseUrl = scheme + "://" + host;
     }
-    if (!reqBaseUrl) {
-      reqBaseUrl = CONFIG.publicStreamBaseUrl || "";
-    }
+    if (!reqBaseUrl) reqBaseUrl = CONFIG.publicStreamBaseUrl || "";
+
     const rewritten = rewritePlaylist(body, upstream.url || target.href, primary.href, ev.streamId, reqBaseUrl);
+    strictStreamManager.setCachedPlaylist(streamId, rewritten, upstream.url || target.href, primary.href);
+
     res.status(200);
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
@@ -806,38 +1072,51 @@ async function forward(req, res, streamId, rawRest) {
     return;
   }
 
-  /* ---------------- media / key / other: zero-buffering direct pipe ---------------- */
-  res.status(upstream.status);
-  if (contentType) res.setHeader("Content-Type", contentType);
-  else if (/\.ts$/i.test(target.pathname)) res.setHeader("Content-Type", "video/mp2t");
-
-  const encoded = (upstream.headers.get("content-encoding") || "").toLowerCase();
-  const passLength = !encoded || encoded === "identity";
-  ["content-range", "accept-ranges", "etag", "last-modified"].forEach((h) => {
-    const val = upstream.headers.get(h);
-    if (val) res.setHeader(h, val);
-  });
-  if (passLength) {
-    const len = upstream.headers.get("content-length");
-    if (len) res.setHeader("Content-Length", len);
+  /* ---------------- 2. Media Segment Handler: Shared In-Memory Cache ---------------- */
+  const cachedSeg = strictStreamManager.getCachedSegment(target.href);
+  if (cachedSeg) {
+    res.status(200);
+    if (cachedSeg.contentType) res.setHeader("Content-Type", cachedSeg.contentType);
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600, immutable");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("Connection", "keep-alive");
+    res.send(cachedSeg.buffer);
+    return;
   }
 
-  // Cloudflare CDN edge caching: cache immutable video chunks for 3600s globally for instant multi-user delivery
-  const isSegment = SEGMENT_EXT_RE.test(target.pathname) || /\.ts$/i.test(target.pathname);
-  res.setHeader(
-    "Cache-Control",
-    isSegment ? "public, max-age=3600, s-maxage=3600, immutable" : "no-cache, no-store, must-revalidate"
-  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.upstreamTimeoutMs);
+  res.on("close", () => controller.abort());
+
+  let upstream;
+  try {
+    upstream = await fetch(target, { headers: buildUpstreamHeaders(ev, req, primary), signal: controller.signal, redirect: "follow" });
+  } catch (e) {
+    clearTimeout(timer);
+    return sendJson(res, 502, { error: "Segment fetch error: " + e.message });
+  }
+  clearTimeout(timer);
+
+  if (!upstream.ok) {
+    try { await upstream.body.cancel(); } catch (e) {}
+    return sendJson(res, 502, { error: "Segment HTTP " + upstream.status });
+  }
+
+  const contentType = upstream.headers.get("content-type") || "video/mp2t";
+  res.status(upstream.status);
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600, immutable");
   res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Connection", "keep-alive");
 
-  if (!upstream.body) {
-    res.end();
-    return;
+  try {
+    const arrayBuffer = await upstream.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    strictStreamManager.setCachedSegment(target.href, buffer, contentType, {});
+    res.send(buffer);
+  } catch (err) {
+    if (!res.destroyed) res.destroy();
   }
-  pipeline(Readable.fromWeb(upstream.body), res, (err) => {
-    if (err && !res.destroyed) res.destroy();
-  });
 }
 
 function wrapAsync(fn) {
@@ -1110,11 +1389,14 @@ class AutoHealingQuickTunnelManager {
 
   startEdgeWatcher() {
     if (this.edgePingInterval) clearInterval(this.edgePingInterval);
-    // Ultra-fast secondary fallback ping (every 2.5s)
+    // Fast secondary fallback ping (every 3s) with 12s initial warmup grace period
     this.edgePingInterval = setInterval(async () => {
       if (this.isShuttingDown || this.status !== "running" || !this.url || this.restarting) return;
+      const uptimeMs = this.startedAt ? Date.now() - this.startedAt.getTime() : 0;
+      if (uptimeMs < 12000) return; // Allow initial Cloudflare DNS & SSL edge handshake
+
       try {
-        const res = await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(2000) });
+        const res = await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(2500) });
         if (res.ok) {
           this.consecutiveEdgeFailures = 0;
         } else {
@@ -1124,12 +1406,12 @@ class AutoHealingQuickTunnelManager {
         this.consecutiveEdgeFailures++;
       }
 
-      if (this.consecutiveEdgeFailures >= 2) {
-        console.warn(`[tunnel:auto-heal] ⚠️ Edge connectivity failed 2 consecutive checks. Triggering instant tunnel recreation...`);
+      if (this.consecutiveEdgeFailures >= 3) {
+        console.warn(`[tunnel:auto-heal] ⚠️ Edge connectivity failed 3 consecutive checks. Triggering instant tunnel recreation...`);
         this.consecutiveEdgeFailures = 0;
-        this.triggerAutoHeal("Edge health check failed 2 consecutive times");
+        this.triggerAutoHeal("Edge health check failed 3 consecutive times");
       }
-    }, 2500);
+    }, 3000);
   }
 
   async stop() {
@@ -1426,17 +1708,32 @@ async function sendHeartbeat(active) {
  * ========================================================================== */
 
 function viewOf(ev) {
+  const candidates = getEventCandidates(ev);
+  const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
   return Object.assign({}, ev, {
     forwarderPath: forwarderPath(ev),
     localForwarderUrl: localForwarderBase() + forwarderPath(ev),
     cloudPrimaryUrl: cloudPrimaryUrl(ev),
     origin: originState.get(ev.id) || null,
     cloudHealth: cloudState.get(ev.id) || null,
+    activeStreamIndex: activeIdx,
+    activeCandidate: candidates[activeIdx] || candidates[0] || null,
+    candidates: candidates,
+    viewersCount: strictStreamManager.getViewersCount(ev.streamId),
   });
 }
 
 function buildApiRouter() {
   const api = express.Router();
+
+  api.get("/xtream/status", (req, res) => {
+    res.json({
+      serverUrl: CONFIG.xtreamServerUrl,
+      username: CONFIG.xtreamUsername,
+      passwordSet: Boolean(CONFIG.xtreamPassword),
+      activeStream: strictStreamManager.getActiveInfo(),
+    });
+  });
 
   api.get(
     "/events",
@@ -1469,6 +1766,7 @@ function buildApiRouter() {
         status: value.status || "scheduled",
         primaryStreamUrl: primaryUrl,
         backupStreamUrls: value.backupStreamUrls || [],
+        activeStreamIndex: value.activeStreamIndex || 0,
         useForwarder: value.useForwarder !== undefined ? value.useForwarder : true,
         headers: value.headers || {},
         priorityOrder: store.events.length + 1,
@@ -1478,11 +1776,26 @@ function buildApiRouter() {
       store.events.push(ev);
       store.normalizeOrder();
       await store.save();
-      // Auto-sync to MongoDB Atlas in background
       if (CONFIG.mongoUri) {
         syncToCloud({ mirror: true }).catch((e) => console.warn("[auto-sync] create sync failed: " + e.message));
       }
       res.status(201).json({ event: viewOf(ev) });
+    })
+  );
+
+  api.post(
+    "/events/:id/switch-channel",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      const index = Number(req.body && req.body.channelIndex);
+      if (!Number.isInteger(index) || index < 0) throw httpError(400, "channelIndex must be a non-negative integer");
+      const newStream = await strictStreamManager.switchToCandidate(ev, index, "Manual switch via Admin UI");
+      await store.save();
+      if (CONFIG.mongoUri) {
+        syncToCloud({ mirror: true }).catch((e) => console.warn("[auto-sync] switch sync failed: " + e.message));
+      }
+      res.json({ success: true, activeStream: newStream, event: viewOf(ev) });
     })
   );
 
@@ -1517,12 +1830,12 @@ function buildApiRouter() {
       const { errors, value } = validateEventInput(req.body, ev, new Set());
       if (errors.length) throw httpError(400, "Validation failed", errors);
       if (!Object.keys(value).length) throw httpError(400, "No updatable fields were provided");
-      delete value.streamId; // immutable: the public URL must keep working
+      delete value.streamId;
       if (value.primaryStreamUrl && (value.primaryStreamUrl.includes(":5000/live/") || value.primaryStreamUrl.includes("localhost:5000") || value.primaryStreamUrl.includes("127.0.0.1:5000"))) {
         value.primaryStreamUrl = value.primaryStreamUrl.replace(":5000", ":5001");
       }
       Object.assign(ev, value, { updatedAt: new Date().toISOString() });
-      if (value.primaryStreamUrl || value.headers) originState.delete(ev.id);
+      if (value.primaryStreamUrl || value.headers || value.backupStreamUrls) originState.delete(ev.id);
       await store.save();
       if (CONFIG.mongoUri) {
         syncToCloud({ mirror: true }).catch((e) => console.warn("[auto-sync] update sync failed: " + e.message));
@@ -2488,6 +2801,13 @@ const ADMIN_HTML = String.raw`<!doctype html>
   <!-- Overview Stats -->
   <div class="stats-grid">
     <div class="stat-card">
+      <div class="stat-icon">📡</div>
+      <div class="stat-info">
+        <span class="stat-label">Xtream Codes Provider</span>
+        <span id="xtreamStat" class="stat-value">play.dgix.top:8080 (sulayman9991)</span>
+      </div>
+    </div>
+    <div class="stat-card">
       <div class="stat-icon">☁️</div>
       <div class="stat-info">
         <span class="stat-label">Cloud Database</span>
@@ -2522,7 +2842,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
     <div class="domain-header">
       <div class="domain-title">
         <span class="pulse-dot online"></span>
-        Active Stream Domain (Strike-Safe Proxy)
+        Active Stream Domain (Auto-Healing Proxy)
       </div>
       <div style="display: flex; gap: 8px; align-items: center;">
         <span id="tunnelStatusChip" class="badge-chip">checking tunnel…</span>
@@ -2539,7 +2859,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
   <!-- Events Section -->
   <div class="section-header">
     <div class="section-title">
-      <span>Event Cards</span>
+      <span>Event Cards & Match Scheduler</span>
       <span id="eventsCountBadge" class="badge-chip">0</span>
     </div>
   </div>
@@ -2600,18 +2920,18 @@ const ADMIN_HTML = String.raw`<!doctype html>
       </div>
     </div>
     <div class="form-group">
-      <label>Primary HLS URL <span class="hint">(Local OBS / Encoder stream)</span></label>
-      <input id="fPrimary" required type="url" placeholder="http://127.0.0.1:8080/live/stream.m3u8">
+      <label>Primary Stream <span class="hint">(Xtream Stream ID like 98231, Template, or HLS URL)</span></label>
+      <input id="fPrimary" required placeholder="98231 or http://play.dgix.top:8080/live/.../98231.m3u8">
     </div>
     <div>
       <label class="check-label">
         <input id="fForward" type="checkbox" checked>
-        Publish via Forwarder Proxy (Protects origin encoder and prevents direct stream exposure)
+        Publish via Forwarder Proxy (Enforces 1 upstream connection & hides Xtream credentials)
       </label>
     </div>
     <div class="form-group">
-      <label>Backup Streams <span class="hint">(one URL per line)</span></label>
-      <textarea id="fBackups" placeholder="https://cdn.example.com/backup1.m3u8&#10;https://cdn2.example.com/backup2.m3u8"></textarea>
+      <label>Backup Channels <span class="hint">(One Xtream Stream ID or URL per line for Auto-Failover)</span></label>
+      <textarea id="fBackups" placeholder="98232&#10;98233&#10;https://backup-stream.com/live/ch2.m3u8"></textarea>
     </div>
     <div class="form-row-2">
       <div class="form-group">
@@ -2637,7 +2957,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
 (function () {
   'use strict';
 
-  var state = { events: [], status: null };
+  var state = { events: [], status: null, xtream: null };
   var editingId = null;
   var dragId = null;
 
@@ -2701,13 +3021,6 @@ const ADMIN_HTML = String.raw`<!doctype html>
     return Math.round(s / 3600) + 'h ago';
   }
 
-  function copy(text) {
-    navigator.clipboard.writeText(text).then(
-      function () { toast('Stream URL copied to clipboard!', 'success'); },
-      function () { toast('Failed to copy', 'error'); }
-    );
-  }
-
   async function restartQuickTunnel() {
     var btn = $('btnNewTunnel');
     btn.disabled = true; btn.textContent = 'Generating…';
@@ -2722,6 +3035,17 @@ const ADMIN_HTML = String.raw`<!doctype html>
       toast('Tunnel generation failed: ' + err.message, 'error');
     } finally {
       btn.disabled = false; btn.textContent = '⚡ New Quick Tunnel';
+    }
+  }
+
+  async function switchChannel(ev, targetIdx) {
+    try {
+      toast('Switching channel for "' + ev.matchTitle + '"…', '');
+      var res = await api('POST', '/api/events/' + encodeURIComponent(ev.id) + '/switch-channel', { channelIndex: targetIdx });
+      toast('Switched and locked on Channel #' + (targetIdx + 1), 'success');
+      await refresh();
+    } catch (err) {
+      toast('Channel switch failed: ' + err.message, 'error');
     }
   }
 
@@ -2761,9 +3085,9 @@ const ADMIN_HTML = String.raw`<!doctype html>
     if (!ev.origin) {
       originBadge = el('span', { class: 'badge-chip' }, ['Encoder Checking…']);
     } else if (ev.origin.online) {
-      originBadge = el('span', { class: 'badge-chip online', title: 'Local encoder is active (' + ev.origin.latencyMs + 'ms)' }, [el('span', { class: 'pulse-dot online' }), 'Encoder Online (' + ev.origin.latencyMs + 'ms)']);
+      originBadge = el('span', { class: 'badge-chip online', title: 'Upstream stream is responsive (' + ev.origin.latencyMs + 'ms)' }, [el('span', { class: 'pulse-dot online' }), 'Upstream Online (' + ev.origin.latencyMs + 'ms)']);
     } else {
-      originBadge = el('span', { class: 'badge-chip offline', title: ev.origin.error || 'Encoder offline' }, [el('span', { class: 'pulse-dot offline' }), 'Encoder Offline']);
+      originBadge = el('span', { class: 'badge-chip offline', title: ev.origin.error || 'Upstream offline' }, [el('span', { class: 'pulse-dot offline' }), 'Upstream Offline']);
     }
 
     // 2. Cloud URL Signal
@@ -2780,6 +3104,20 @@ const ADMIN_HTML = String.raw`<!doctype html>
       cloudBadge = el('span', { class: 'badge-chip offline', title: ev.cloudHealth.error || 'Cloud URL Offline' }, [el('span', { class: 'pulse-dot offline' }), '🔴 Cloud URL OFFLINE']);
     }
 
+    // 3. Multi-Channel Active Lock Badge
+    var activeIdx = typeof ev.activeStreamIndex === 'number' ? ev.activeStreamIndex : 0;
+    var totalChannels = ev.candidates ? ev.candidates.length : 1;
+    var channelBadge = el('span', { class: 'badge-chip online', title: 'Strict Single Stream Enforcer is active and locked' }, [
+      '🔒 Channel ' + (activeIdx + 1) + '/' + totalChannels + ' (Locked)'
+    ]);
+
+    // 4. Viewers Count Chip
+    var viewersCount = ev.viewersCount || 0;
+    var viewersChip = el('span', { class: 'badge-chip ' + (viewersCount > 0 ? 'online' : '') }, [
+      viewersCount > 0 ? el('span', { class: 'pulse-dot online' }) : null,
+      '👥 ' + viewersCount + ' Viewer' + (viewersCount === 1 ? '' : 's') + (viewersCount > 0 ? ' (1 Stream)' : ' (Idle)')
+    ]);
+
     var top = el('div', { class: 'card-top' }, [
       el('div', { class: 'card-main-info' }, [
         rank,
@@ -2787,6 +3125,8 @@ const ADMIN_HTML = String.raw`<!doctype html>
         el('div', { class: 'card-badges' }, [
           el('span', { class: 'badge-chip', text: '🏆 ' + ev.sportType }),
           el('span', { class: 'badge-chip ' + statusClass }, [pulse, statusText]),
+          channelBadge,
+          viewersChip,
           originBadge,
           cloudBadge
         ])
@@ -2800,18 +3140,39 @@ const ADMIN_HTML = String.raw`<!doctype html>
     var streamUrl = ev.useForwarder ? ev.cloudPrimaryUrl : ev.primaryStreamUrl;
     var streamBoxClass = 'stream-box' + (isCloudDead ? ' stream-box-alert' : '');
 
+    var activeCandidate = ev.activeCandidate || (ev.candidates && ev.candidates[0]) || { maskedUrl: ev.primaryStreamUrl };
+
     var streamBoxChildren = [
       el('div', { class: 'stream-box-main' }, [
         el('div', { class: 'stream-url-info' }, [
-          el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS)' : 'Direct Encoder Stream URL' }),
+          el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS - Broadcast to All Users)' : 'Direct Encoder Stream URL' }),
           el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
-          ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: 'Origin Source: ' + ev.primaryStreamUrl }) : null
+          ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: '🔒 Active Xtream Source: ' + (activeCandidate.maskedUrl || activeCandidate.rawUrl || ev.primaryStreamUrl) }) : null
         ]),
         isCloudDead ? el('div', { style: 'display: flex; gap: 6px;' }, [
           el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ Fix Tunnel', onclick: function () { restartQuickTunnel(); } })
         ]) : null
       ])
     ];
+
+    // Channel Candidate Switcher Bar
+    if (ev.candidates && ev.candidates.length > 1) {
+      var channelButtons = ev.candidates.map(function (c, cIdx) {
+        var isCurrent = cIdx === activeIdx;
+        return el('button', {
+          class: 'btn btn-sm ' + (isCurrent ? 'btn-primary' : ''),
+          text: (isCurrent ? '🔒 ' : '') + c.label,
+          title: 'Switch to ' + c.label + ' (' + c.maskedUrl + ')',
+          disabled: isCurrent,
+          onclick: function () { switchChannel(ev, cIdx); }
+        });
+      });
+      streamBoxChildren.push(
+        el('div', { style: 'display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap;' }, [
+          el('span', { style: 'font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;', text: 'Switch Channel:' })
+        ].concat(channelButtons))
+      );
+    }
 
     if (isCloudDead) {
       streamBoxChildren.push(
@@ -2861,6 +3222,12 @@ const ADMIN_HTML = String.raw`<!doctype html>
     $('hbStat').textContent = hb.ok ? ('🟢 Live (' + ago(hb.lastAt) + ')') : (hb.error ? '🔴 Error' : '🟡 Initializing');
     $('proxyStat').textContent = 'Port ' + (s.publicPort || 5001);
 
+    if (state.xtream && $('xtreamStat')) {
+      var x = state.xtream;
+      var host = x.serverUrl ? x.serverUrl.replace(/^https?:\/\//, '') : 'play.dgix.top:8080';
+      $('xtreamStat').textContent = host + ' (' + (x.username || 'sulayman9991') + ')';
+    }
+
     if (s.publicStreamBaseUrl && $('inDomainUrl') && !$('inDomainUrl').value) {
       $('inDomainUrl').value = s.publicStreamBaseUrl;
     }
@@ -2878,9 +3245,14 @@ const ADMIN_HTML = String.raw`<!doctype html>
 
   async function refresh() {
     try {
-      var results = await Promise.all([api('GET', '/api/events'), api('GET', '/api/status')]);
+      var results = await Promise.all([
+        api('GET', '/api/events'),
+        api('GET', '/api/status'),
+        api('GET', '/api/xtream/status').catch(function () { return null; })
+      ]);
       state.events = results[0].events;
       state.status = results[1];
+      state.xtream = results[2];
       renderCards();
       renderStatus();
     } catch (e) {

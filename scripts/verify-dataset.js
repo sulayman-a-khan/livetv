@@ -1,7 +1,13 @@
+require("dotenv").config({ path: ".env.local" });
+require("dotenv").config();
 const mongoose = require("mongoose");
 
 async function verify() {
-  const uri = "mongodb+srv://livetvUser:freetv123456@cluster0.cslrfh8.mongodb.net/freetv?retryWrites=true&w=majority";
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    console.error("MONGODB_URI is not set. Add it to .env.local / .env (run from the repo root) or export it first.");
+    process.exit(1);
+  }
   await mongoose.connect(uri);
 
   const Channel = mongoose.models.Channel || mongoose.model("Channel", new mongoose.Schema({}, { strict: false }));

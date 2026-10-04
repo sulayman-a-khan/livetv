@@ -1,8 +1,6 @@
 import mongoose from "mongoose";
 
-const MONGODB_URI =
-  process.env.MONGODB_URI ||
-  "mongodb+srv://livetvUser:freetv123456@cluster0.cslrfh8.mongodb.net/freetv?retryWrites=true&w=majority";
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Skip retrying immediately after a failed connection attempt so a MongoDB
 // outage doesn't cost every single request its own full timeout — after a
@@ -47,6 +45,7 @@ export async function connectToDatabase(): Promise<typeof mongoose | null> {
     // mongoose.connect() for every concurrent request (previously every
     // simultaneous caller started its own redundant connection attempt).
     if (!cached.promise) {
+      if (!MONGODB_URI) return null;
       const opts: mongoose.ConnectOptions = {
         bufferCommands: false,
         // Vercel cold starts need a little extra time to resolve DNS and connect

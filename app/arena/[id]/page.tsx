@@ -1,7 +1,7 @@
 "use client";
 
 import "@/lib/tvPolyfills";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
@@ -22,16 +22,10 @@ import {
   RefreshCw,
   Trophy,
   Clock,
-  Radio,
-  Tv,
-  Signal,
-  Calendar,
-  Sparkles,
-  ChevronRight,
   Play,
 } from "lucide-react";
 
-export default function SportsArenaWatchPage() {
+function SportsArenaContent() {
   const params = useParams();
   const searchParams = useSearchParams();
 
@@ -289,7 +283,7 @@ export default function SportsArenaWatchPage() {
                             {ev.matchTitle}
                           </h4>
                           <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
+                            <Clock className="w-3 quasi h-3" />
                             {formatTime(ev.startTime)}
                           </span>
                         </div>
@@ -321,5 +315,20 @@ export default function SportsArenaWatchPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function SportsArenaWatchPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#030712] text-white flex flex-col items-center justify-center space-y-3">
+          <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin" />
+          <p className="text-xs font-bold text-slate-400">Loading Sports Arena...</p>
+        </div>
+      }
+    >
+      <SportsArenaContent />
+    </Suspense>
   );
 }

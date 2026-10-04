@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
 import LiveSportsArena from "@/components/LiveSportsArena";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
-import { RefreshCw, Tv, SearchX } from "lucide-react";
+import { RefreshCw, Tv } from "lucide-react";
 
 /** Friendly row headings for each category rail (overrides the raw category title). */
 const RAIL_TITLES: Record<string, string> = {
@@ -26,7 +26,6 @@ interface ApiChannel extends RailChannel {
 }
 
 export default function HomePage() {
-  const [searchQuery, setSearchQuery] = useState("");
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,26 +59,18 @@ export default function HomePage() {
     };
   }, []);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    // Search filters the rails live as you type — no navigation needed.
-    e.preventDefault();
-  };
-
-  const trimmedQuery = searchQuery.trim().toLowerCase();
-
   /** One rail per category, in the CATEGORIES order (Sports → Bangla → India → Pakistan → News → Global). */
   const rails = useMemo(() => {
-    const pool = trimmedQuery
-      ? channels.filter((ch) => ch.name.toLowerCase().includes(trimmedQuery))
-      : channels;
-    const catRails = CATEGORIES.map((category) => ({
-      category,
-      title: RAIL_TITLES[category.slug] || category.title,
-      channels: pool.filter((ch) => isChannelInCategory(ch, category)),
-    })).filter((rail) => rail.channels.length > 0);
+    const catRails = CATEGORIES.map((category) => {
+      return {
+        category,
+        title: RAIL_TITLES[category.slug] || category.title,
+        channels: channels.filter((ch) => isChannelInCategory(ch, category)),
+      };
+    }).filter((rail) => rail.channels.length > 0);
 
     // Fallback: If channels exist but didn't match any specific category rail, show them in a general rail
-    if (catRails.length === 0 && pool.length > 0) {
+    if (catRails.length === 0 && channels.length > 0) {
       return [
         {
           category: {
@@ -95,25 +86,21 @@ export default function HomePage() {
             filterValues: [],
           },
           title: "All Live Channels",
-          channels: pool,
+          channels,
         },
       ];
     }
 
     return catRails;
-  }, [channels, trimmedQuery]);
+  }, [channels]);
 
   return (
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
-      <Header
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        onSearchSubmit={handleSearchSubmit}
-      />
+      <Header />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
         {/* Live Sports Arena Feed */}
-        {!trimmedQuery && <LiveSportsArena />}
+        <LiveSportsArena />
 
         {/* Channel rails */}
         {loading ? (
@@ -138,23 +125,11 @@ export default function HomePage() {
           </div>
         ) : rails.length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
-            {trimmedQuery ? (
-              <>
-                <SearchX className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">No Channels Found</h3>
-                <p className="text-xs text-slate-400">
-                  Nothing matches &ldquo;{searchQuery.trim()}&rdquo;. Try a different name.
-                </p>
-              </>
-            ) : (
-              <>
-                <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
-                <p className="text-xs text-slate-400">
-                  There are no active streams right now. Please check back shortly.
-                </p>
-              </>
-            )}
+            <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
+            <p className="text-xs text-slate-400">
+              There are no active streams right now. Please check back shortly.
+            </p>
           </div>
         ) : (
           <div className="space-y-7 sm:space-y-10 animate-fade-in">

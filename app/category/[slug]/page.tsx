@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import {
   getCategoryBySlug,
@@ -13,7 +13,7 @@ import {
   matchesGenreFilter,
 } from "@/lib/categories";
 import { getChannelLogo } from "@/lib/utils";
-import { ArrowLeft, RefreshCw, AlertCircle, Tv, Play, Radio, Search } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertCircle, Tv } from "lucide-react";
 
 interface ChannelItem {
   _id: string;
@@ -27,14 +27,12 @@ interface ChannelItem {
 
 export default function CategoryPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
   const slug = (params?.slug as string) || "";
   const categoryConfig = getCategoryBySlug(slug);
 
   const [categoryChannels, setCategoryChannels] = useState<ChannelItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
   const [activeGenre, setActiveGenre] = useState<GenreFilter>("all");
 
   useEffect(() => {
@@ -90,28 +88,16 @@ export default function CategoryPage() {
     return counts;
   }, [categoryChannels]);
 
-  // Filter channels by active genre and search query
+  // Filter channels by active genre
   const displayedChannels = useMemo(() => {
     let result = categoryChannels;
 
-    // Filter by genre
     if (activeGenre !== "all") {
       result = result.filter((c) => matchesGenreFilter(c, activeGenre));
     }
 
-    // Filter by search query if present
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.category && c.category.toLowerCase().includes(q)) ||
-          (c.subCategory && c.subCategory.toLowerCase().includes(q))
-      );
-    }
-
     return result;
-  }, [categoryChannels, activeGenre, searchQuery]);
+  }, [categoryChannels, activeGenre]);
 
   if (!categoryConfig) {
     return (
@@ -139,10 +125,7 @@ export default function CategoryPage() {
 
   return (
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
-      <Header
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-      />
+      <Header />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Back button + category name + active channel count, unified bar */}
@@ -225,9 +208,7 @@ export default function CategoryPage() {
             <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="text-base font-bold text-white mb-1">No Channels Found</h3>
             <p className="text-xs text-slate-400 mt-1">
-              {searchQuery
-                ? `No channels matching "${searchQuery}" in this section.`
-                : `No channels found under "${activeGenre}" for this category.`}
+              {`No channels found under "${activeGenre}" for this category.`}
             </p>
             {activeGenre !== "all" && (
               <button

@@ -51,6 +51,14 @@ export default function DirectHlsPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Parent pages re-render often (sidebar health polls, category filter
+  // clicks) and hand us freshly-created callback props each time. Reading them
+  // through a ref keeps the stream-loader effect's deps stable — an identity
+  // change in a parent callback must never tear down the running player and
+  // reload the stream (that showed up as a flicker + restart on filter clicks).
+  const callbacksRef = useRef({ onStreamIndexChange, onAllServersFailed, onStreamFailed });
+  callbacksRef.current = { onStreamIndexChange, onAllServersFailed, onStreamFailed };
+
   // Playback & UI states
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -110,6 +118,7 @@ export default function DirectHlsPlayer({
   }, []);
 
   const handleNextServer = useCallback(() => {
+    const { onAllServersFailed, onStreamIndexChange } = callbacksRef.current;
     if (streams.length <= 1) {
       onAllServersFailed?.();
       return;
@@ -125,7 +134,7 @@ export default function DirectHlsPlayer({
       }
       onStreamIndexChange?.(nextIdx);
     }
-  }, [streams, activeIndex, controlledIndex, onStreamIndexChange, onAllServersFailed]);
+  }, [streams, activeIndex, controlledIndex]);
 
   // Main stream loader effect — re-runs on every channel or server-mirror
   // switch and synchronously tears the previous instance down first, so no
@@ -242,7 +251,7 @@ export default function DirectHlsPlayer({
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           console.warn("[DirectHlsPlayer] Fatal HLS error:", data.type, data.details);
-          onStreamFailed?.(activeStream._id);
+          callbacksRef.current.onStreamFailed?.(activeStream._id);
 
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
@@ -273,7 +282,7 @@ export default function DirectHlsPlayer({
         video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
       video.addEventListener("error", () => {
-        onStreamFailed?.(activeStream._id);
+        callbacksRef.current.onStreamFailed?.(activeStream._id);
         handleNextServer();
       });
     } else {
@@ -284,7 +293,9 @@ export default function DirectHlsPlayer({
     return () => {
       purgeAndDestroyPlayer();
     };
-  }, [channelId, activeIndex, activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, onStreamFailed, purgeAndDestroyPlayer]);
+    // onStreamIndexChange/onAllServersFailed/onStreamFailed intentionally read
+    // via callbacksRef — see comment above the ref declaration.
+  }, [channelId, activeIndex, activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, purgeAndDestroyPlayer]);
 
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {

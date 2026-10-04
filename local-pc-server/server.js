@@ -605,11 +605,12 @@ class StrictStreamManager {
       const targetIndex = ((candidateIndex % candidates.length) + candidates.length) % candidates.length;
       const target = candidates[targetIndex];
 
-      // If already connected to this target, keep it!
+      // If already connected to this target with exact same URL, keep it!
       if (
         this.activeStream &&
         this.activeStream.streamId === ev.streamId &&
         this.activeStream.candidateIndex === targetIndex &&
+        this.activeStream.resolvedUrl === target.resolvedUrl &&
         this.activeStream.status === "active"
       ) {
         return this.activeStream;
@@ -857,12 +858,12 @@ async function probeCloud(ev) {
   const cloudUrl = cloudPrimaryUrl(ev);
   const started = Date.now();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 4000);
+  const timer = setTimeout(() => controller.abort(), 6000);
   const state = { online: false, checkedAt: new Date().toISOString(), latencyMs: null, httpStatus: null, error: null, url: cloudUrl };
   try {
     const res = await fetch(cloudUrl, {
       method: "GET",
-      headers: { Range: "bytes=0-512", "User-Agent": "SoluPlayProbe/" + VERSION },
+      headers: { "User-Agent": "SoluPlayProbe/" + VERSION, Accept: "*/*" },
       signal: controller.signal,
     });
     state.httpStatus = res.status;
@@ -872,6 +873,7 @@ async function probeCloud(ev) {
     } else {
       state.error = "HTTP " + res.status;
     }
+    if (res.body && res.body.cancel) res.body.cancel().catch(() => {});
   } catch (e) {
     state.error = e.name === "AbortError" ? "Timed out (Tunnel Dead)" : (e.cause && e.cause.code) || e.message || "Unreachable";
   } finally {
@@ -2036,7 +2038,14 @@ function buildApiRouter() {
         value.primaryStreamUrl = value.primaryStreamUrl.replace(":5000", ":5001");
       }
       Object.assign(ev, value, { updatedAt: new Date().toISOString() });
-      if (value.primaryStreamUrl || value.headers || value.backupStreamUrls) originState.delete(ev.id);
+      if (value.primaryStreamUrl || value.headers || value.backupStreamUrls) {
+        originState.delete(ev.id);
+        cloudState.delete(ev.id);
+        if (strictStreamManager.activeStream && strictStreamManager.activeStream.streamId === ev.streamId) {
+          await strictStreamManager.closeActiveStream("Stream configuration updated via Admin UI");
+          strictStreamManager.flushCache(ev.streamId);
+        }
+      }
       await store.save();
       if (CONFIG.mongoUri) {
         syncToCloud({ mirror: true }).catch((e) => console.warn("[auto-sync] update sync failed: " + e.message));

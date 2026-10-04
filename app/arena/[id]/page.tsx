@@ -10,19 +10,9 @@ import {
   SportsEvent,
   fetchLiveSportsEvents,
   checkLocalPcBridgeStatus,
-  LocalServerStatus,
 } from "@/lib/sportsArenaService";
 import { resolveStreamUrl } from "@/lib/streamUrl";
-import {
-  ArrowLeft,
-  Flame,
-  ShieldCheck,
-  Server,
-  RefreshCw,
-  Trophy,
-  Clock,
-  Play,
-} from "lucide-react";
+import { RefreshCw, Trophy, Clock, Play } from "lucide-react";
 
 function SportsArenaContent() {
   const params = useParams();
@@ -35,10 +25,6 @@ function SportsArenaContent() {
   const [events, setEvents] = useState<SportsEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<SportsEvent | null>(null);
   const [loading, setLoading] = useState(true);
-  const [bridgeStatus, setBridgeStatus] = useState<LocalServerStatus>({
-    online: false,
-    activeEventsCount: 0,
-  });
 
   // Load sports events & PC bridge status
   useEffect(() => {
@@ -55,7 +41,6 @@ function SportsArenaContent() {
         if (!mounted) return;
 
         setEvents(fetchedEvents);
-        setBridgeStatus(pcStatus);
 
         // Find current match
         const found = fetchedEvents.find((e) => e.id === eventIdParam || e._id === eventIdParam);
@@ -88,13 +73,9 @@ function SportsArenaContent() {
     initArena();
 
     const interval = setInterval(async () => {
-      const [fetchedEvents, pcStatus] = await Promise.all([
-        fetchLiveSportsEvents(),
-        checkLocalPcBridgeStatus(),
-      ]);
+      const fetchedEvents = await fetchLiveSportsEvents();
       if (mounted) {
         setEvents(fetchedEvents);
-        setBridgeStatus(pcStatus);
 
         // Follow the server's currently published URL — picks up panel-side
         // source switches and tunnel rotations without a page refresh.
@@ -138,47 +119,6 @@ function SportsArenaContent() {
       <Header />
 
       <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-6">
-        {/* Top Breadcrumb & Status Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2 sm:gap-3">
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 text-xs font-bold text-slate-400 hover:text-emerald-400 transition-colors group"
-            >
-              <div className="w-8 h-8 rounded-xl bg-[#091322] border border-slate-800 flex items-center justify-center group-hover:border-emerald-500/50 transition-colors shadow-md">
-                <ArrowLeft className="w-4 h-4 text-slate-400 group-hover:text-emerald-400" />
-              </div>
-              <span>Back to Home</span>
-            </Link>
-
-            <span className="text-slate-600">/</span>
-
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-              <Flame className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Sports Arena Solo View</span>
-            </div>
-          </div>
-
-          {/* PC Bridge & AES Encryption Indicators */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-[#091322] px-3 py-1.5 rounded-xl border border-emerald-500/30 text-emerald-400 text-xs font-bold shadow-md">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">AES-256 Secured Stream</span>
-            </div>
-
-            <div
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-md ${
-                bridgeStatus.online
-                  ? "bg-emerald-950/70 border-emerald-500/40 text-emerald-400"
-                  : "bg-slate-900/80 border-slate-800 text-slate-400"
-              }`}
-            >
-              <Server className="w-3.5 h-3.5" />
-              <span>Port 5000: {bridgeStatus.online ? "Connected" : "Cloud Relay"}</span>
-            </div>
-          </div>
-        </div>
-
         {/* Solo Match Player Area */}
         {loading && !currentEvent ? (
           <div className="rounded-3xl border border-slate-800/80 bg-[#091322] p-16 text-center max-w-lg mx-auto my-12 shadow-2xl space-y-3">

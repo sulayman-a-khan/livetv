@@ -417,6 +417,17 @@ function validateEventInput(body, existing, takenStreamIds) {
     if (h !== null) v.headers = sanitizeHeaderMap(h, errors);
   }
 
+  if (has("stagedSource")) {
+    const s = typeof src.stagedSource === "string" ? src.stagedSource.trim() : "";
+    if (!s) {
+      v.stagedSource = null;
+    } else if (s.length <= 2048 && isValidStreamInput(s)) {
+      v.stagedSource = s;
+    } else {
+      errors.push("stagedSource must be a valid http(s) URL or Xtream Stream ID");
+    }
+  }
+
   if (creating) {
     if (has("streamId") && String(src.streamId).trim() !== "") {
       const sid = String(src.streamId).trim().toLowerCase();
@@ -716,6 +727,14 @@ class StrictStreamManager {
       headers,
       expiresAt: Date.now() + 30000, // 30s TTL
     });
+  }
+
+  // Flushes playlist and segment caches when switching/promoting sources
+  flushCache(streamId) {
+    if (streamId) this.playlistCache.delete(streamId);
+    else this.playlistCache.clear();
+    this.segmentCache.clear();
+    console.log(`[xtream:enforcer] 🧹 Flushed playlist & segment caches${streamId ? ` for "${streamId}"` : ""}`);
   }
 
   startIdleWatcher() {
@@ -1731,6 +1750,16 @@ async function sendHeartbeat(active) {
 function viewOf(ev) {
   const candidates = getEventCandidates(ev);
   const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
+  let stagedCandidate = null;
+  if (ev.stagedSource) {
+    const resolvedStaged = resolveXtreamUrl(ev.stagedSource);
+    stagedCandidate = {
+      rawUrl: ev.stagedSource,
+      resolvedUrl: resolvedStaged,
+      maskedUrl: maskCredentials(resolvedStaged),
+      format: resolvedStaged.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
+    };
+  }
   return Object.assign({}, ev, {
     forwarderPath: forwarderPath(ev),
     localForwarderUrl: localForwarderBase() + forwarderPath(ev),
@@ -1741,6 +1770,8 @@ function viewOf(ev) {
     activeCandidate: candidates[activeIdx] || candidates[0] || null,
     candidates: candidates,
     viewersCount: strictStreamManager.getViewersCount(ev.streamId),
+    stagedSource: ev.stagedSource || null,
+    stagedCandidate: stagedCandidate,
   });
 }
 
@@ -1774,6 +1805,89 @@ function buildApiRouter() {
         proxyUrl: localForwarderBase() + forwarderPath(ev),
         format: active.resolvedUrl.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
       });
+    })
+  );
+
+  // ── Test Staged Source: Returns raw credentialed URL for staged draft source (Admin-only) ──
+  api.get(
+    "/events/:id/test-staged-source",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      if (!ev.stagedSource) throw httpError(400, "No staged source configured for this event");
+      const resolved = resolveXtreamUrl(ev.stagedSource);
+      res.json({
+        rawUrl: resolved,
+        maskedUrl: maskCredentials(resolved),
+        format: resolved.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
+      });
+    })
+  );
+
+  // ── Stage Source: Sets or updates draft stream source without affecting live playback ──
+  api.post(
+    "/events/:id/stage-source",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      const src = req.body && typeof req.body.stagedSource === "string" ? req.body.stagedSource.trim() : "";
+      if (!src) throw httpError(400, "stagedSource is required");
+      if (!isValidStreamInput(src)) throw httpError(400, "stagedSource must be a valid http(s) URL or Xtream Stream ID");
+      ev.stagedSource = src;
+      ev.updatedAt = new Date().toISOString();
+      await store.save();
+      console.log(`[staging] 📝 Staged new source "${maskCredentials(resolveXtreamUrl(src))}" for "${ev.matchTitle}" (Live stream untouched)`);
+      res.json({ success: true, event: viewOf(ev) });
+    })
+  );
+
+  // ── Send to Live: Gracefully reset active session, flush caches, promote staged source ──
+  api.post(
+    "/events/:id/promote-staged",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      if (!ev.stagedSource) throw httpError(400, "No staged source to promote");
+
+      const newSource = ev.stagedSource;
+      console.log(`[staging:promote] 🚀 Promoting staged source "${maskCredentials(resolveXtreamUrl(newSource))}" to LIVE for "${ev.matchTitle}"`);
+
+      await strictStreamManager.withLock(async () => {
+        // 1. Gracefully terminate active upstream connection
+        await strictStreamManager.closeActiveStream(`Promote staged source to live for "${ev.matchTitle}"`);
+        // 2. Flush playlist and segment cache
+        strictStreamManager.flushCache(ev.streamId);
+        // 3. Atomically update event source
+        ev.primaryStreamUrl = newSource;
+        ev.stagedSource = null;
+        ev.activeStreamIndex = 0;
+        ev.updatedAt = new Date().toISOString();
+        originState.delete(ev.id);
+      });
+
+      await store.save();
+      if (CONFIG.mongoUri) {
+        syncToCloud({ mirror: true }).catch((e) => console.warn("[auto-sync] promote sync failed: " + e.message));
+      }
+
+      res.json({
+        success: true,
+        message: "Staged source promoted to LIVE! Active upstream session reset and caches flushed.",
+        event: viewOf(ev),
+      });
+    })
+  );
+
+  // ── Discard Staged: Clears staged source without touching live stream ──
+  api.post(
+    "/events/:id/discard-staged",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      ev.stagedSource = null;
+      ev.updatedAt = new Date().toISOString();
+      await store.save();
+      res.json({ success: true, event: viewOf(ev) });
     })
   );
 
@@ -2701,6 +2815,58 @@ const ADMIN_HTML = String.raw`<!doctype html>
     cursor: not-allowed;
     transform: none;
   }
+  .stream-box-staged {
+    border: 1px dashed rgba(245, 158, 11, 0.5);
+    background: rgba(245, 158, 11, 0.05);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+    transition: all 0.2s ease;
+  }
+  .stream-box-staged:hover {
+    border-color: rgba(245, 158, 11, 0.8);
+    background: rgba(245, 158, 11, 0.08);
+  }
+  .btn-stage-add {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: rgba(245, 158, 11, 0.12);
+    color: #fbbf24;
+  }
+  .btn-stage-add:hover {
+    background: rgba(245, 158, 11, 0.25);
+    border-color: rgba(245, 158, 11, 0.7);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+  }
+  .btn-send-live {
+    background: linear-gradient(135deg, #059669, #10b981);
+    border: 1px solid #10b981;
+    color: #ffffff;
+    box-shadow: 0 2px 8px var(--emerald-glow);
+    font-weight: 700;
+  }
+  .btn-send-live:hover {
+    background: linear-gradient(135deg, #047857, #059669);
+    border-color: #34d399;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.35);
+  }
+  .btn-stage-discard {
+    border-color: rgba(244, 63, 94, 0.4);
+    background: rgba(244, 63, 94, 0.12);
+    color: #fda4af;
+  }
+  .btn-stage-discard:hover {
+    background: rgba(244, 63, 94, 0.25);
+    border-color: rgba(244, 63, 94, 0.7);
+  }
+  .badge-chip.staged {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fbbf24;
+  }
   .test-result-modal {
     position: fixed;
     inset: 0;
@@ -3110,6 +3276,10 @@ const ADMIN_HTML = String.raw`<!doctype html>
       </label>
     </div>
     <div class="form-group">
+      <label>Staged Draft Source <span class="hint">(Optional: Xtream ID or URL to test before making Live)</span></label>
+      <input id="fStaged" placeholder="e.g. 98234 (Draft only — will NOT affect active viewers until promoted)">
+    </div>
+    <div class="form-group">
       <label>Backup Channels <span class="hint">(One Xtream Stream ID or URL per line for Auto-Failover)</span></label>
       <textarea id="fBackups" placeholder="98232&#10;98233&#10;https://backup-stream.com/live/ch2.m3u8"></textarea>
     </div>
@@ -3244,6 +3414,61 @@ const ADMIN_HTML = String.raw`<!doctype html>
     }
   }
 
+  // ── Test Staged Source: Opens raw credentialed staged URL in new tab (Admin-only) ──
+  async function testStagedSource(ev) {
+    try {
+      var res = await api('GET', '/api/events/' + encodeURIComponent(ev.id) + '/test-staged-source');
+      if (res && res.rawUrl) {
+        window.open(res.rawUrl, '_blank');
+        toast('Opened staged draft in new tab (' + (res.maskedUrl || 'Draft') + ')', 'success');
+      } else {
+        toast('No staged stream URL available', 'error');
+      }
+    } catch (err) {
+      toast('Test staged source failed: ' + err.message, 'error');
+    }
+  }
+
+  // ── Send to Live: Gracefully resets active session, flushes caches, promotes staged source ──
+  async function promoteStagedSource(ev) {
+    var ok = window.confirm('Promote Staged Source to LIVE for "' + ev.matchTitle + '"?\n\nThis will execute:\n1. Gracefully terminate active upstream connection\n2. Flush all playlist & segment caches\n3. Switch all viewers to the new source immediately.');
+    if (!ok) return;
+    toast('Promoting staged source & resetting stream session…', '');
+    try {
+      var res = await api('POST', '/api/events/' + encodeURIComponent(ev.id) + '/promote-staged');
+      toast(res.message || 'Staged source is now LIVE!', 'success');
+      await refresh();
+    } catch (err) {
+      toast('Failed to promote staged source: ' + err.message, 'error');
+    }
+  }
+
+  // ── Discard Staged Draft Source ──
+  async function discardStagedSource(ev) {
+    var ok = window.confirm('Discard the staged draft source for "' + ev.matchTitle + '"?');
+    if (!ok) return;
+    try {
+      await api('POST', '/api/events/' + encodeURIComponent(ev.id) + '/discard-staged');
+      toast('Staged source draft discarded', 'success');
+      await refresh();
+    } catch (err) {
+      toast('Failed to discard staged source: ' + err.message, 'error');
+    }
+  }
+
+  // ── Prompt to Stage a New Source without editing whole event ──
+  async function promptStageSource(ev) {
+    var newSrc = window.prompt('Enter Xtream Stream ID (e.g. 98234) or HLS URL to STAGE:\n\n(Live stream will continue playing uninterrupted until you click "Send to Live")', '');
+    if (!newSrc || !newSrc.trim()) return;
+    try {
+      await api('POST', '/api/events/' + encodeURIComponent(ev.id) + '/stage-source', { stagedSource: newSrc.trim() });
+      toast('Source staged as draft! Test it before sending live.', 'success');
+      await refresh();
+    } catch (err) {
+      toast('Failed to stage source: ' + err.message, 'error');
+    }
+  }
+
   // ── Test Proxy Pipe: Probes both raw source and local proxy, shows results modal ──
   async function testProxyPipe(ev) {
     toast('Testing stream pipes for "' + ev.matchTitle + '"…', '');
@@ -3357,18 +3582,24 @@ const ADMIN_HTML = String.raw`<!doctype html>
       '👥 ' + viewersCount + ' Viewer' + (viewersCount === 1 ? '' : 's') + (viewersCount > 0 ? ' (1 Stream)' : ' (Idle)')
     ]);
 
+    // 5. Staged Draft Indicator Chip
+    var stagedChip = ev.stagedSource ? el('span', { class: 'badge-chip staged', title: 'Draft staged source is ready for verification' }, ['📝 Staged Draft Ready']) : null;
+
+    var topBadges = [
+      el('span', { class: 'badge-chip', text: '🏆 ' + ev.sportType }),
+      el('span', { class: 'badge-chip ' + statusClass }, [pulse, statusText]),
+      channelBadge,
+      viewersChip,
+      stagedChip,
+      originBadge,
+      cloudBadge
+    ].filter(Boolean);
+
     var top = el('div', { class: 'card-top' }, [
       el('div', { class: 'card-main-info' }, [
         rank,
         el('span', { class: 'card-title', text: ev.matchTitle }),
-        el('div', { class: 'card-badges' }, [
-          el('span', { class: 'badge-chip', text: '🏆 ' + ev.sportType }),
-          el('span', { class: 'badge-chip ' + statusClass }, [pulse, statusText]),
-          channelBadge,
-          viewersChip,
-          originBadge,
-          cloudBadge
-        ])
+        el('div', { class: 'card-badges' }, topBadges)
       ]),
       el('div', { class: 'card-actions' }, [
         el('button', { class: 'btn btn-sm', text: '✏️ Edit', onclick: function () { openForm(ev); } }),
@@ -3389,7 +3620,8 @@ const ADMIN_HTML = String.raw`<!doctype html>
           ev.useForwarder ? el('div', { class: 'stream-source-row' }, [
             el('span', { class: 'stream-encoder-text', text: '🔒 Active Xtream Source: ' + (activeCandidate.maskedUrl || activeCandidate.rawUrl || ev.primaryStreamUrl) }),
             el('button', { class: 'btn-test-source', text: '🔗 Test Raw Source', title: 'Open the raw credentialed Xtream URL in a new tab (Admin-only)', onclick: function () { testRawSource(ev); } }),
-            el('button', { class: 'btn-test-source btn-test-proxy', text: '🔬 Test Proxy Pipe', title: 'Probe both raw source and local proxy pipe health', onclick: function () { testProxyPipe(ev); } })
+            el('button', { class: 'btn-test-source btn-test-proxy', text: '🔬 Test Proxy Pipe', title: 'Probe both raw source and local proxy pipe health', onclick: function () { testProxyPipe(ev); } }),
+            !ev.stagedSource ? el('button', { class: 'btn-test-source btn-stage-add', text: '➕ Stage New Source', title: 'Draft a new channel source without interrupting live stream', onclick: function () { promptStageSource(ev); } }) : null
           ]) : null
         ]),
         isCloudDead ? el('div', { style: 'display: flex; gap: 6px;' }, [
@@ -3415,6 +3647,28 @@ const ADMIN_HTML = String.raw`<!doctype html>
           el('span', { style: 'font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;', text: 'Switch Channel:' })
         ].concat(channelButtons))
       );
+    }
+
+    // Staged Draft Source Box (if present)
+    if (ev.stagedSource || ev.stagedCandidate) {
+      var sc = ev.stagedCandidate || { maskedUrl: ev.stagedSource, rawUrl: ev.stagedSource };
+      var stagedBox = el('div', { class: 'stream-box-staged' }, [
+        el('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;' }, [
+          el('div', { style: 'display: flex; align-items: center; gap: 6px;' }, [
+            el('span', { class: 'badge-chip staged', text: '📝 STAGED (DRAFT)' }),
+            el('span', { class: 'stream-label', text: 'Independent Test Verification — Not Live Yet' })
+          ]),
+          el('div', { style: 'display: flex; gap: 6px; align-items: center; flex-wrap: wrap;' }, [
+            el('button', { class: 'btn-test-source btn-stage-add', text: '🔗 Test Staged Source', title: 'Open staged credentialed stream URL in a new tab for testing', onclick: function () { testStagedSource(ev); } }),
+            el('button', { class: 'btn btn-sm btn-send-live', text: '🚀 Send to Live', title: 'Gracefully terminate active stream, flush cache, and make this source live for viewers', onclick: function () { promoteStagedSource(ev); } }),
+            el('button', { class: 'btn-test-source btn-stage-discard', text: '✕ Discard', title: 'Discard this draft source', onclick: function () { discardStagedSource(ev); } })
+          ])
+        ]),
+        el('div', { style: 'display: flex; align-items: center; gap: 8px; margin-top: 2px;' }, [
+          el('span', { class: 'stream-encoder-text', text: '🔒 Staged Xtream Source: ' + (sc.maskedUrl || sc.rawUrl || ev.stagedSource) })
+        ])
+      ]);
+      streamBoxChildren.push(stagedBox);
     }
 
     if (isCloudDead) {
@@ -3557,6 +3811,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
     $('fStart').value = ev ? toInputValue(ev.startTime) : toInputValue(now.toISOString());
     $('fEnd').value = ev ? toInputValue(ev.endTime) : toInputValue(later.toISOString());
     $('fPrimary').value = ev ? ev.primaryStreamUrl : '';
+    $('fStaged').value = ev && ev.stagedSource ? ev.stagedSource : '';
     $('fForward').checked = ev ? !!ev.useForwarder : true;
     $('fBackups').value = ev ? (ev.backupStreamUrls || []).join('\n') : '';
     $('fStreamId').value = ev ? ev.streamId : '';
@@ -3576,6 +3831,7 @@ const ADMIN_HTML = String.raw`<!doctype html>
       startTime: fromInputValue($('fStart').value),
       endTime: fromInputValue($('fEnd').value),
       primaryStreamUrl: $('fPrimary').value,
+      stagedSource: $('fStaged').value.trim() || null,
       useForwarder: $('fForward').checked,
       backupStreamUrls: $('fBackups').value,
       headers: $('fHeaders').value

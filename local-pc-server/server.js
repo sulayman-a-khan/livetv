@@ -112,6 +112,9 @@ function loadConfig(env) {
     mongoUri: (env.MONGODB_URI || "").trim(),
     cloudAppUrl: trimSlash(env.CLOUD_APP_URL),
     localServerSecret: (env.LOCAL_SERVER_SECRET || "").trim(),
+    streamTokenSecret: (env.STREAM_TOKEN_SECRET || env.LOCAL_SERVER_SECRET || crypto.randomBytes(32).toString("hex")).trim(),
+    streamTokenTtlSec: envInt(env, "STREAM_TOKEN_TTL_SEC", 55, 15, 300),
+    allowedOrigins: (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     autoHeartbeat: envBool(env, "AUTO_HEARTBEAT", true),
     heartbeatIntervalSec: envInt(env, "HEARTBEAT_INTERVAL_SEC", 30, 5, 3600),
 
@@ -863,7 +866,11 @@ async function probeCloud(ev) {
   try {
     const res = await fetch(cloudUrl, {
       method: "GET",
-      headers: { "User-Agent": "SoluPlayProbe/" + VERSION, Accept: "*/*" },
+      headers: {
+        "User-Agent": "SoluPlayProbe/" + VERSION,
+        Accept: "*/*",
+        "X-Local-Server-Secret": CONFIG.localServerSecret,
+      },
       signal: controller.signal,
     });
     state.httpStatus = res.status;
@@ -901,15 +908,204 @@ async function probeAll() {
 }
 
 /* ========================================================================== *
- * HLS forwarder
+ * Ultra-Short Dynamic Token & Domain-Agnostic Origin Guard
  * ========================================================================== */
 
 const SEGMENT_EXT_RE = /\.(ts|m4s|mp4|m4a|m4v|aac|ac3|ec3|cmfv|cmfa|cmft|webvtt|vtt)$/i;
+
+function generateStreamToken(streamId, ttlSec) {
+  const ttl = ttlSec || CONFIG.streamTokenTtlSec || 55;
+  const exp = Math.floor(Date.now() / 1000) + ttl;
+  const payload = `${streamId.toLowerCase()}:${exp}`;
+  const sig = crypto.createHmac("sha256", CONFIG.streamTokenSecret).update(payload).digest("hex");
+  return `${exp}.${sig}`;
+}
+
+function verifyStreamToken(streamId, tokenStr) {
+  if (!tokenStr || typeof tokenStr !== "string") return false;
+  const parts = tokenStr.split(".");
+  if (parts.length !== 2) return false;
+  const [expStr, sig] = parts;
+  const exp = Number.parseInt(expStr, 10);
+  if (!Number.isFinite(exp)) return false;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  // Allow max 5s clock skew tolerance, strictly expires after window
+  if (nowSec > exp + 5) return false;
+  // Reject tokens with timestamp claimed ridiculously far in future (>120s)
+  if (exp > nowSec + 120) return false;
+
+  const payload = `${streamId.toLowerCase()}:${exp}`;
+  const expectedSig = crypto.createHmac("sha256", CONFIG.streamTokenSecret).update(payload).digest("hex");
+
+  if (typeof sig !== "string" || sig.length !== expectedSig.length) return false;
+  const sigBuf = Buffer.from(sig, "hex");
+  const expBuf = Buffer.from(expectedSig, "hex");
+  if (sigBuf.length !== expBuf.length) return false;
+  return crypto.timingSafeEqual(sigBuf, expBuf);
+}
+
+function isAuthorizedOrigin(req) {
+  // 1. Shared secret for server-to-server or automated probe requests
+  const secretHeader = req.headers["x-local-server-secret"] || req.headers["x-server-secret"];
+  if (CONFIG.localServerSecret && secretHeader === CONFIG.localServerSecret) {
+    return true;
+  }
+
+  const origin = req.headers.origin || "";
+  const referer = req.headers.referer || "";
+  const candidate = origin || referer;
+  if (!candidate) return false;
+
+  try {
+    const u = new URL(candidate);
+    const hostname = u.hostname.toLowerCase();
+
+    // 2. Localhost & loopback dev
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") {
+      return true;
+    }
+    // 3. Vercel deployment domains (*.vercel.app)
+    if (hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+    // 4. Cloudflare Quick Tunnels
+    if (hostname.endsWith(".trycloudflare.com")) {
+      return true;
+    }
+    // 5. Configured cloud app URL
+    if (CONFIG.cloudAppUrl) {
+      try {
+        const cloudHost = new URL(CONFIG.cloudAppUrl).hostname.toLowerCase();
+        if (hostname === cloudHost || hostname.endsWith("." + cloudHost)) return true;
+      } catch (e) {}
+    }
+    // 6. Configured public stream base URL
+    if (CONFIG.publicStreamBaseUrl) {
+      try {
+        const pubHost = new URL(CONFIG.publicStreamBaseUrl).hostname.toLowerCase();
+        if (hostname === pubHost || hostname.endsWith("." + pubHost)) return true;
+      } catch (e) {}
+    }
+    // 7. Explicit allowed origins
+    for (const allowed of CONFIG.allowedOrigins) {
+      try {
+        const aHost = new URL(allowed.startsWith("http") ? allowed : "https://" + allowed).hostname.toLowerCase();
+        if (hostname === aHost || hostname.endsWith("." + aHost)) return true;
+      } catch (e) {}
+    }
+  } catch (e) {
+    return false;
+  }
+  return false;
+}
+
+function validateStreamAccess(req, streamId) {
+  const token = req.query.token || req.headers["x-stream-token"] || "";
+  if (token && verifyStreamToken(streamId, token)) {
+    return { authorized: true, reason: "valid_token" };
+  }
+  if (isAuthorizedOrigin(req)) {
+    return { authorized: true, reason: "authorized_origin" };
+  }
+  return {
+    authorized: false,
+    reason: token ? "token_expired_or_invalid" : "unauthorized_origin_and_missing_token",
+  };
+}
+
+/* ========================================================================== *
+ * HLS forwarder
+ * ========================================================================== */
+
+function trimToLatestSegments(lines, maxSegments = 3) {
+  const hasExtInf = lines.some((l) => l.trim().startsWith("#EXTINF:"));
+  if (!hasExtInf) return lines;
+
+  const headerLines = [];
+  const segmentBlocks = [];
+  let currentBlock = [];
+  let lastKeyTag = null;
+  let mediaSeqIndex = -1;
+  let originalMediaSeq = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line) continue;
+
+    if (line.startsWith("#EXT-X-MEDIA-SEQUENCE:")) {
+      mediaSeqIndex = headerLines.length;
+      originalMediaSeq = parseInt(line.split(":")[1], 10) || 0;
+      headerLines.push(raw);
+    } else if (line.startsWith("#EXT-X-KEY:")) {
+      lastKeyTag = raw;
+      if (segmentBlocks.length === 0 && currentBlock.length === 0) {
+        headerLines.push(raw);
+      } else {
+        currentBlock.push(raw);
+      }
+    } else if (line.startsWith("#EXTINF:")) {
+      currentBlock.push(raw);
+    } else if (line.startsWith("#")) {
+      if (segmentBlocks.length === 0 && currentBlock.length === 0) {
+        headerLines.push(raw);
+      } else {
+        currentBlock.push(raw);
+      }
+    } else {
+      // Segment URI line
+      currentBlock.push(raw);
+      segmentBlocks.push({ block: currentBlock, activeKey: lastKeyTag });
+      currentBlock = [];
+    }
+  }
+
+  if (segmentBlocks.length <= maxSegments) {
+    return lines;
+  }
+
+  const droppedCount = segmentBlocks.length - maxSegments;
+  const keptBlocks = segmentBlocks.slice(droppedCount);
+  const newMediaSeq = originalMediaSeq + droppedCount;
+
+  if (mediaSeqIndex >= 0) {
+    headerLines[mediaSeqIndex] = "#EXT-X-MEDIA-SEQUENCE:" + newMediaSeq;
+  } else {
+    const m3uIndex = headerLines.findIndex((l) => l.trim().startsWith("#EXTM3U"));
+    if (m3uIndex >= 0) {
+      headerLines.splice(m3uIndex + 1, 0, "#EXT-X-MEDIA-SEQUENCE:" + newMediaSeq);
+    } else {
+      headerLines.unshift("#EXT-X-MEDIA-SEQUENCE:" + newMediaSeq);
+    }
+  }
+
+  const resultLines = [...headerLines];
+  const firstBlock = keptBlocks[0];
+  const hasKeyInFirstKept = firstBlock.block.some((l) => l.trim().startsWith("#EXT-X-KEY:"));
+  if (!hasKeyInFirstKept && firstBlock.activeKey) {
+    const headerHasKey = headerLines.some((l) => l.trim() === firstBlock.activeKey.trim());
+    if (!headerHasKey) {
+      resultLines.push(firstBlock.activeKey);
+    }
+  }
+
+  for (const sb of keptBlocks) {
+    resultLines.push(...sb.block);
+  }
+
+  if (currentBlock.length > 0) {
+    resultLines.push(...currentBlock);
+  }
+
+  return resultLines;
+}
 
 function rewritePlaylist(text, playlistUrl, primaryHref, streamId, reqBaseUrl) {
   const primary = new URL(primaryHref);
   const baseDir = dirOf(primary.pathname);
   const publicBase = reqBaseUrl || "";
+  const freshToken = generateStreamToken(streamId);
 
   let playlistBase;
   try {
@@ -920,6 +1116,12 @@ function rewritePlaylist(text, playlistUrl, primaryHref, streamId, reqBaseUrl) {
   const playlistDir = dirOf(playlistBase.pathname);
   const sameOrigin = primary.origin;
   const redirectedOrigin = playlistBase.origin;
+
+  function attachToken(url) {
+    if (!freshToken) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return url + sep + "token=" + encodeURIComponent(freshToken);
+  }
 
   function proxify(uri) {
     if (!uri || uri.charCodeAt(0) === 35 /* '#' */ || uri.startsWith("data:")) return uri;
@@ -939,13 +1141,27 @@ function rewritePlaylist(text, playlistUrl, primaryHref, streamId, reqBaseUrl) {
     }
 
     if (rest === null || rest === "") {
-      return publicBase + "/live/" + streamId + "/__ext/" + encodeURIComponent(abs.href);
+      return attachToken(publicBase + "/live/" + streamId + "/__ext/" + encodeURIComponent(abs.href));
     }
 
-    return publicBase + "/live/" + streamId + "/" + rest + (abs.search || "");
+    return attachToken(publicBase + "/live/" + streamId + "/" + rest + (abs.search || ""));
   }
 
-  const lines = text.split(/\r?\n/);
+  function proxifyKey(uri) {
+    if (!uri || uri.startsWith("data:")) return uri;
+    let abs;
+    try {
+      abs = new URL(uri, playlistUrl);
+    } catch (e) {
+      return uri;
+    }
+    return attachToken(publicBase + "/live/" + streamId + "/__key/" + encodeURIComponent(abs.href));
+  }
+
+  // 1. Trim long historical segments to only the latest 2-3 live edge target segments
+  const rawLines = text.split(/\r?\n/);
+  const lines = trimToLatestSegments(rawLines, 3);
+
   const out = new Array(lines.length);
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -955,7 +1171,9 @@ function rewritePlaylist(text, playlistUrl, primaryHref, streamId, reqBaseUrl) {
       continue;
     }
     if (line.charCodeAt(0) === 35 /* '#' */) {
-      if (line.includes('URI="')) {
+      if (line.startsWith("#EXT-X-KEY")) {
+        out[i] = raw.replace(/URI="([^"]*)"/g, (m, u) => 'URI="' + proxifyKey(u) + '"');
+      } else if (line.includes('URI="')) {
         out[i] = raw.replace(/URI="([^"]*)"/g, (m, u) => 'URI="' + proxify(u) + '"');
       } else {
         out[i] = raw;
@@ -973,11 +1191,17 @@ function sendJson(res, status, body) {
 }
 
 function corsMiddleware(req, res, next) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (origin && isAuthorizedOrigin(req)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Range, Origin, Accept, Content-Type, X-Requested-With, Cache-Control");
-  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges, X-Origin-Status, Cache-Control");
+  res.setHeader("Access-Control-Allow-Headers", "Range, Origin, Accept, Content-Type, X-Requested-With, Cache-Control, X-Stream-Token, X-Local-Server-Secret");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges, X-Origin-Status, Cache-Control, X-Stream-Token");
   res.setHeader("Access-Control-Max-Age", "86400");
+  res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Connection", "keep-alive");
   Object.keys(CONFIG.responseHeaders).forEach((k) => res.setHeader(k, CONFIG.responseHeaders[k]));
   if (req.method === "OPTIONS") {
@@ -992,6 +1216,16 @@ function corsMiddleware(req, res, next) {
 async function forward(req, res, streamId, rawRest) {
   const ev = store.byStreamId(streamId);
   if (!ev) return sendJson(res, 404, { error: "Unknown stream" });
+
+  // ── Ultra-Short Dynamic Token & Origin Guard ──
+  const auth = validateStreamAccess(req, streamId);
+  if (!auth.authorized) {
+    return sendJson(res, 403, {
+      error: "Access Denied: Ultra-Short Token Expired or Unauthorized Origin",
+      reason: auth.reason,
+      code: "STREAM_ACCESS_FORBIDDEN",
+    });
+  }
 
   const clientId = req.ip || req.headers["x-forwarded-for"] || "client-" + req.socket.remotePort;
   strictStreamManager.registerViewer(streamId, clientId);
@@ -1009,6 +1243,53 @@ async function forward(req, res, streamId, rawRest) {
     return sendJson(res, 500, { error: "Event has an invalid upstream URL" });
   }
   const baseDir = dirOf(primary.pathname);
+
+  /* ──────────────── HLS AES-128 Key Proxying ──────────────── */
+  if (rawRest && rawRest.startsWith("__key/")) {
+    const encoded = rawRest.slice(6);
+    let keyTarget;
+    try {
+      keyTarget = new URL(decodeURIComponent(encoded));
+    } catch (e) {
+      return sendJson(res, 400, { error: "Bad encoded key URL" });
+    }
+    keyTarget.username = "";
+    keyTarget.password = "";
+    if (keyTarget.searchParams && keyTarget.searchParams.has("token")) {
+      keyTarget.searchParams.delete("token");
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    res.on("close", () => controller.abort());
+
+    let upstream;
+    try {
+      upstream = await fetch(keyTarget, {
+        headers: buildUpstreamHeaders(ev, req, primary),
+        signal: controller.signal,
+        redirect: "follow",
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      return sendJson(res, 502, { error: "Decryption key fetch error: " + e.message });
+    }
+    clearTimeout(timer);
+
+    if (!upstream.ok) {
+      try { await upstream.body.cancel(); } catch (e) {}
+      return sendJson(res, 502, { error: "Decryption key HTTP " + upstream.status });
+    }
+
+    const keyBuffer = Buffer.from(await upstream.arrayBuffer());
+    res.status(200);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.setHeader("Connection", "keep-alive");
+    res.send(keyBuffer);
+    return;
+  }
 
   let target;
   if (rawRest && rawRest.startsWith("__ext/")) {
@@ -1034,6 +1315,9 @@ async function forward(req, res, streamId, rawRest) {
   }
   target.username = "";
   target.password = "";
+  if (target.searchParams && target.searchParams.has("token")) {
+    target.searchParams.delete("token");
+  }
 
   const isPlaylist = rawRest === null || /\.m3u8$/i.test(target.pathname);
 
@@ -1114,18 +1398,7 @@ async function forward(req, res, streamId, rawRest) {
     return;
   }
 
-  /* ---------------- 2. Media Segment Handler: Shared In-Memory Cache ---------------- */
-  const cachedSeg = strictStreamManager.getCachedSegment(target.href);
-  if (cachedSeg) {
-    res.status(200);
-    if (cachedSeg.contentType) res.setHeader("Content-Type", cachedSeg.contentType);
-    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600, immutable");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.setHeader("Connection", "keep-alive");
-    res.send(cachedSeg.buffer);
-    return;
-  }
-
+  /* ---------------- 2. Media Segment Handler: Zero-Delay Stream Piping ---------------- */
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CONFIG.upstreamTimeoutMs);
   res.on("close", () => controller.abort());
@@ -1147,17 +1420,22 @@ async function forward(req, res, streamId, rawRest) {
   const contentType = upstream.headers.get("content-type") || "video/mp2t";
   res.status(upstream.status);
   res.setHeader("Content-Type", contentType);
-  res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=3600, immutable");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
   res.setHeader("X-Accel-Buffering", "no");
   res.setHeader("Connection", "keep-alive");
 
-  try {
-    const arrayBuffer = await upstream.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    strictStreamManager.setCachedSegment(target.href, buffer, contentType, {});
-    res.send(buffer);
-  } catch (err) {
-    if (!res.destroyed) res.destroy();
+  if (upstream.body) {
+    if (typeof Readable.fromWeb === "function" && upstream.body instanceof Object && typeof upstream.body.getReader === "function") {
+      Readable.fromWeb(upstream.body).pipe(res);
+    } else if (typeof upstream.body.pipe === "function") {
+      upstream.body.pipe(res);
+    } else {
+      const arrayBuffer = await upstream.arrayBuffer();
+      res.send(Buffer.from(arrayBuffer));
+    }
+  } else {
+    res.end();
   }
 }
 
@@ -1173,14 +1451,31 @@ function wrapAsync(fn) {
 function buildForwarderRouter() {
   const router = express.Router();
 
-  // CORS is handled globally by the public app – no need for a scoped middleware here.
-  // But we DO need an explicit OPTIONS handler so Express doesn't 404 preflight requests
-  // before they reach the global middleware.  (The global corsMiddleware already sends 200
-  // for OPTIONS, but if the router has no matching OPTIONS route Express may short-circuit.)
+  // CORS preflight handler
   router.options(/^\/live\//, (req, res) => {
-    // Headers already set by the global corsMiddleware; just end the response.
     res.sendStatus(200);
   });
+
+  // GET /live/:streamId/token -> dynamic short-lived token generation for authorized clients
+  router.get(
+    /^\/live\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/token$/,
+    (req, res) => {
+      const streamId = req.params[0].toLowerCase();
+      if (!isAuthorizedOrigin(req)) {
+        return sendJson(res, 403, { error: "Unauthorized origin for token minting" });
+      }
+      const ttl = CONFIG.streamTokenTtlSec || 55;
+      const token = generateStreamToken(streamId, ttl);
+      const expiresAt = Math.floor(Date.now() / 1000) + ttl;
+      return res.json({
+        ok: true,
+        streamId,
+        token,
+        expiresAt,
+        expiresInSec: ttl,
+      });
+    }
+  );
 
   // /live/<streamId>.m3u8
   router.get(
@@ -4111,6 +4406,10 @@ module.exports = {
   loadConfig,
   slugify,
   validateEventInput,
+  generateStreamToken,
+  verifyStreamToken,
+  isAuthorizedOrigin,
+  validateStreamAccess,
   rewritePlaylist,
   forward,
   EventStore,

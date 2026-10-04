@@ -592,9 +592,20 @@ export default function HlsPlayer({
 
         const hls = new Hls({
           enableWorker: true,
-          // Low-latency mode keeps the buffer tiny, which is great on fast Wi-Fi
-          // but causes constant stalls on mobile data. Enable it only when fast.
-          lowLatencyMode: !isSlow,
+          lowLatencyMode: true,
+
+          // ---- Aggressive Real-Time Live Sync & Low Latency ----
+          liveSyncDurationCount: 1, // always snap to the latest available live edge chunk
+          liveMaxLatencyDurationCount: 2, // force fast-forward/skip if drifting >2 segments behind live
+          maxBufferLength: 3, // keep player buffer at max 3 seconds
+          maxMaxBufferLength: 6, // cap max buffer to 6 seconds
+          backBufferLength: 0, // don't store historical playback buffer in live mode
+          liveBackBufferLength: 0,
+          liveDurationInfinity: true,
+          highBufferWatchdogPeriod: 1,
+          maxBufferHole: 0.3,
+          nudgeMaxRetry: 6,
+          startFragPrefetch: true,
 
           // ---- Adaptive bitrate (auto resolution by network speed) ----
           startLevel: -1, // let ABR pick the opening quality
@@ -603,30 +614,19 @@ export default function HlsPlayer({
           abrEwmaDefaultEstimate: net.bandwidth, // seed with the real connection speed
           abrEwmaFastVoD: 2.0,
           abrEwmaSlowVoD: 8.0,
-          abrEwmaFastLive: 2.0,
-          abrEwmaSlowLive: 6.0,
-          abrBandWidthFactor: 0.9, // only use 90% of measured bandwidth
-          abrBandWidthUpFactor: 0.65, // be conservative before upgrading quality
+          abrEwmaFastLive: 1.0,
+          abrEwmaSlowLive: 3.0,
+          abrBandWidthFactor: 0.95, // use 95% of measured bandwidth
+          abrBandWidthUpFactor: 0.7,
           abrMaxWithRealBitrate: true,
 
-          // ---- Buffer strategy: bigger cushion on slow links ----
-          maxBufferLength: isSlow ? 45 : 20,
-          maxMaxBufferLength: isSlow ? 90 : 60,
-          backBufferLength: 30,
-          maxBufferHole: 0.5,
-          highBufferWatchdogPeriod: 2,
-          nudgeMaxRetry: 6,
-          // Start fetching the next fragment before the current one finishes
-          // decoding, so a fragment boundary doesn't cause a visible micro-stall.
-          startFragPrefetch: true,
-
-          // ---- Loader timeouts / retries ----
-          manifestLoadingTimeOut: 12000,
+          // ---- Fast Loader timeouts / retries ----
+          manifestLoadingTimeOut: 8000,
           manifestLoadingMaxRetry: 4,
-          levelLoadingTimeOut: 12000,
+          levelLoadingTimeOut: 8000,
           levelLoadingMaxRetry: 4,
-          fragLoadingTimeOut: isSlow ? 30000 : 20000,
-          fragLoadingMaxRetry: 6,
+          fragLoadingTimeOut: 12000,
+          fragLoadingMaxRetry: 4,
 
           // ---- CORS & credentials handling for Cloudflare Tunnel & Forwarder ----
           xhrSetup: (xhr: XMLHttpRequest) => {

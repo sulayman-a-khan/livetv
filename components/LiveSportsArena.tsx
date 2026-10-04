@@ -2,20 +2,8 @@
 
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import {
-  Trophy,
-  Tv,
-  Radio,
-  Play,
-  Clock,
-  Flame,
-  ChevronRight,
-  RefreshCw,
-  Sparkles,
-  Signal,
-  Calendar,
-} from "lucide-react";
-import { resolveStreamUrl } from "@/lib/streamUrl";
+import { Tv, Flame, RefreshCw, Calendar } from "lucide-react";
+import MatchCard from "@/components/MatchCard";
 
 export interface SportsEventCard {
   id: string;
@@ -60,28 +48,6 @@ function getSportIcon(sportType?: string): string {
     if (clean.includes(key)) return icon;
   }
   return "🏆";
-}
-
-function formatMatchTime(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return "Live Soon";
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
-  } catch {
-    return "Live Soon";
-  }
-}
-
-function formatMatchDate(isoString: string): string {
-  try {
-    const d = new Date(isoString);
-    if (Number.isNaN(d.getTime())) return "Today";
-    const today = new Date();
-    if (d.toDateString() === today.toDateString()) return "Today";
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  } catch {
-    return "Today";
-  }
 }
 
 export default function LiveSportsArena() {
@@ -232,18 +198,7 @@ export default function LiveSportsArena() {
       {loading && events.length === 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 relative z-10">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-2xl border border-slate-800 bg-[#0a1322] p-5 space-y-3 animate-pulse">
-              <div className="flex justify-between items-center">
-                <div className="h-5 w-24 bg-[#111e33] rounded-xl" />
-                <div className="h-5 w-20 bg-[#111e33] rounded-xl" />
-              </div>
-              <div className="h-6 w-3/4 bg-[#111e33] rounded-lg" />
-              <div className="h-4 w-1/2 bg-[#111e33] rounded-lg" />
-              <div className="pt-3 border-t border-slate-800/80 flex justify-between items-center">
-                <div className="h-4 w-28 bg-[#111e33] rounded" />
-                <div className="h-8 w-24 bg-[#111e33] rounded-xl" />
-              </div>
-            </div>
+            <div key={i} className="rounded-2xl border border-slate-800 bg-[#0a1322] aspect-video animate-pulse" />
           ))}
         </div>
       ) : filteredEvents.length === 0 ? (
@@ -269,73 +224,13 @@ export default function LiveSportsArena() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 relative z-10">
-          {filteredEvents.map((ev) => {
-            const isLive = ev.status === "live";
-            const icon = getSportIcon(ev.sportType);
-            const matchId = ev.id || ev._id || "event";
-            const rawStreamUrl = ev.primaryStreamUrl || ev.streamUrl || "";
-            const streamUrl = resolveStreamUrl(rawStreamUrl);
-            const targetHref = `/arena/${matchId}?stream=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(ev.matchTitle)}`;
-
-            return (
-              <div
-                key={matchId}
-                className="group relative rounded-2xl border border-slate-800/90 bg-[#0a1322] hover:border-emerald-500/50 hover:shadow-xl hover:shadow-emerald-500/10 transition-all duration-300 p-4 flex flex-col justify-between overflow-hidden"
-              >
-                {/* Match Header: Sport + Status badge */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#111e33] border border-slate-800 text-xs font-extrabold text-slate-300">
-                    <span>{icon}</span>
-                    <span className="truncate max-w-[120px]">{ev.sportType || "Sports"}</span>
-                  </span>
-
-                  {isLive ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-black uppercase tracking-wider">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      LIVE NOW
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-800/80 text-slate-400 text-xs font-bold">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{formatMatchDate(ev.startTime)} • {formatMatchTime(ev.startTime)}</span>
-                    </span>
-                  )}
-                </div>
-
-                {/* Match Title */}
-                <div className="my-2">
-                  <h3 className="text-sm sm:text-base font-black text-white group-hover:text-emerald-300 transition-colors line-clamp-2 leading-snug">
-                    {ev.matchTitle}
-                  </h3>
-                </div>
-
-                {/* Footer row: stream server status + watch button */}
-                <div className="pt-3 mt-1 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-400">
-                    {ev.isLocalServerActive ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-400">
-                        <Signal className="w-3.5 h-3.5 text-emerald-400" />
-                        HD Server Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-400">
-                        <Radio className="w-3.5 h-3.5 text-slate-500" />
-                        Cloud Mirror Ready
-                      </span>
-                    )}
-                  </div>
-
-                  <Link
-                    href={targetHref}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#00c978] hover:bg-[#00db84] text-slate-950 font-black text-xs shadow-md shadow-emerald-500/20 hover:scale-[1.03] active:scale-[0.98] transition-all"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Watch Stream</span>
-                  </Link>
-                </div>
-              </div>
-            );
-          })}
+          {filteredEvents.map((ev) => (
+            <MatchCard
+              key={ev.id || ev._id || "event"}
+              event={ev}
+              icon={getSportIcon(ev.sportType)}
+            />
+          ))}
         </div>
       )}
     </section>

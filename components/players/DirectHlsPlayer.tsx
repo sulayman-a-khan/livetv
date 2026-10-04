@@ -129,13 +129,28 @@ export default function DirectHlsPlayer({
 
   // Main stream loader effect
   useEffect(() => {
+    // Synchronous hard buffer purge & previous HLS teardown
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute("src");
+        videoRef.current.load();
+      } catch {}
+    }
+    if (hlsRef.current) {
+      try {
+        hlsRef.current.stopLoad();
+        hlsRef.current.detachMedia();
+        hlsRef.current.destroy();
+      } catch {}
+      hlsRef.current = null;
+    }
+
     if (!activeStream || isYouTube) {
-      purgeAndDestroyPlayer();
       setIsLoading(false);
       return;
     }
 
-    purgeAndDestroyPlayer();
     setIsLoading(true);
     setErrorMsg(null);
     setLevels([]);

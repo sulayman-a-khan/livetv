@@ -686,6 +686,7 @@ export default function WatchPage() {
                     />
                   ) : (
                     <DirectHlsPlayer
+                      key={channel._id}
                       channelName={channel.name}
                       channelId={channel._id}
                       streams={channel.streams}
@@ -811,9 +812,13 @@ export default function WatchPage() {
 
                         return (
                           <button
+                            type="button"
                             key={ch._id}
                             ref={isActive ? activeItemRef : undefined}
-                            onClick={() => handleSelectChannel(ch._id)}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleSelectChannel(ch._id);
+                            }}
                             className={`group w-full min-w-0 flex flex-col items-center gap-1 p-1.5 rounded-xl transition-all text-center border ${
                               isActive
                                 ? "bg-[#0d1f33] border-emerald-500 shadow-md shadow-emerald-500/10"

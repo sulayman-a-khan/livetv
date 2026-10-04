@@ -8,12 +8,11 @@ import Header from "@/components/Header";
 import { SecuredHlsPlayer } from "@/components/players";
 import {
   SportsEvent,
-  SecuredStreamCandidate,
-  buildSecuredSportsCandidates,
   fetchLiveSportsEvents,
   checkLocalPcBridgeStatus,
   LocalServerStatus,
 } from "@/lib/sportsArenaService";
+import { resolveStreamUrl } from "@/lib/streamUrl";
 import {
   ArrowLeft,
   Flame,
@@ -35,7 +34,6 @@ function SportsArenaContent() {
 
   const [events, setEvents] = useState<SportsEvent[]>([]);
   const [currentEvent, setCurrentEvent] = useState<SportsEvent | null>(null);
-  const [currentStreamIndex, setCurrentStreamIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [bridgeStatus, setBridgeStatus] = useState<LocalServerStatus>({
     online: false,
@@ -97,6 +95,11 @@ function SportsArenaContent() {
       if (mounted) {
         setEvents(fetchedEvents);
         setBridgeStatus(pcStatus);
+
+        // Follow the server's currently published URL — picks up panel-side
+        // source switches and tunnel rotations without a page refresh.
+        const found = fetchedEvents.find((e) => e.id === eventIdParam || e._id === eventIdParam);
+        if (found) setCurrentEvent(found);
       }
     }, 20_000);
 
@@ -106,13 +109,12 @@ function SportsArenaContent() {
     };
   }, [eventIdParam, streamParam, titleParam]);
 
-  // Build secured stream candidates with AES proxies and local PC bridge support
-  const securedCandidates: SecuredStreamCandidate[] = useMemo(() => {
-    if (!currentEvent) return [];
-    const primary = currentEvent.primaryStreamUrl || currentEvent.streamUrl || "";
-    const backups = currentEvent.backupStreamUrls || [];
-    return buildSecuredSportsCandidates(primary, backups, currentEvent.id || "event");
-  }, [currentEvent]);
+  // Single server-controlled feed: the panel owns the source and switches it
+  // automatically; viewers just follow whatever URL the sync publishes.
+  const rawStreamUrl = currentEvent
+    ? currentEvent.primaryStreamUrl || currentEvent.streamUrl || ""
+    : "";
+  const streamUrl = useMemo(() => resolveStreamUrl(rawStreamUrl), [rawStreamUrl]);
 
   // Format date and time
   const formatTime = (iso: string) => {
@@ -191,14 +193,11 @@ function SportsArenaContent() {
               <SecuredHlsPlayer
                 matchTitle={currentEvent.matchTitle}
                 sportType={currentEvent.sportType}
-                eventId={currentEvent.id}
-                streams={securedCandidates}
-                currentStreamIndex={currentStreamIndex}
-                onStreamIndexChange={setCurrentStreamIndex}
+                streamUrl={streamUrl}
               />
             </div>
 
-            {/* Match Information & CDN Selector Card */}
+            {/* Match Information Card */}
             <div className="rounded-2xl border border-slate-800/90 bg-gradient-to-r from-[#091523] via-[#07101d] to-[#050b14] p-5 sm:p-6 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -220,34 +219,9 @@ function SportsArenaContent() {
                 </h1>
 
                 <p className="text-xs text-slate-400">
-                  Dedicated High-Definition Stadium Feed • Encrypted Stream Relay
+                  Dedicated High-Definition Stadium Feed • Server-Controlled Live Relay
                 </p>
               </div>
-
-              {/* Server Mirror Pills */}
-              {securedCandidates.length > 1 && (
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 shrink-0">
-                  <span className="text-xs font-bold text-slate-400">Stream Relay:</span>
-                  <div className="flex items-center gap-1.5 bg-[#0d1b30] p-1.5 rounded-xl border border-slate-700/60">
-                    {securedCandidates.map((cand, idx) => {
-                      const active = idx === currentStreamIndex;
-                      return (
-                        <button
-                          key={cand._id}
-                          onClick={() => setCurrentStreamIndex(idx)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                            active
-                              ? "bg-emerald-500 text-slate-950 shadow-md font-black"
-                              : "text-slate-300 hover:bg-slate-800"
-                          }`}
-                        >
-                          {cand.isProxied ? `Secure CDN ${idx + 1}` : `Direct Relay ${idx + 1}`}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Other Live Matches in Arena Hub */}
@@ -283,7 +257,7 @@ function SportsArenaContent() {
                             {ev.matchTitle}
                           </h4>
                           <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 quasi h-3" />
+                            <Clock className="w-3.5 h-3.5" />
                             {formatTime(ev.startTime)}
                           </span>
                         </div>

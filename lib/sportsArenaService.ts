@@ -1,15 +1,13 @@
 /**
  * Sports Arena Service (lib/sportsArenaService.ts)
  *
- * Dedicated service strictly for Paid/Xtream CDN streams and Local PC Server (Port 5000/5001) forwarded feeds.
+ * Dedicated service for Live Sports Arena events fed by the Local PC Server (Port 5000/5001).
  *
  * Key Architectural Rules:
- * 1. 100% Secured: Retains AES encryption, proxy wrapping (/api/stream), and dynamic token authentication.
- * 2. PC Bridge Server Integration: Handles dynamic control signals and status check from local encoder (Port 5000).
- * 3. Dynamic Token Re-handshakes: Automatically refreshes secured stream candidate tokens upon failovers.
+ * 1. Server-Controlled Feed: The panel (Local PC Server) owns the upstream source and
+ *    switches it automatically or manually; viewers receive one live URL and have no control.
+ * 2. PC Bridge Integration: Polls control signals and status from the local encoder (Port 5000).
  */
-
-import { resolveStreamUrl } from "@/lib/streamUrl";
 
 export interface SportsEvent {
   id: string;
@@ -26,113 +24,12 @@ export interface SportsEvent {
   priorityOrder?: number;
 }
 
-export interface SecuredStreamCandidate {
-  _id: string;
-  url: string;
-  rawTargetUrl: string;
-  priority: number;
-  status: "active" | "degraded" | "broken";
-  latency: number;
-  isProxied: boolean;
-  token?: string;
-}
-
 export interface LocalServerStatus {
   online: boolean;
   nodeId?: string;
   activeEventsCount: number;
   uptimeSeconds?: number;
   lastHeartbeat?: string;
-}
-
-/**
- * Builds a secure candidate mirror list with AES proxy wrapping (/api/stream)
- * and token authentication for Sports Arena events.
- */
-export function buildSecuredSportsCandidates(
-  primaryUrl: string,
-  backupUrls: string[] = [],
-  eventId: string = "sports_event",
-  customBaseUrl?: string
-): SecuredStreamCandidate[] {
-  const candidates: SecuredStreamCandidate[] = [];
-  const resolvedPrimary = resolveStreamUrl(primaryUrl, customBaseUrl);
-
-  if (resolvedPrimary) {
-    // 1. Direct Forwarder / Tunnel Connection
-    candidates.push({
-      _id: `sports_${eventId}_direct`,
-      url: resolvedPrimary,
-      rawTargetUrl: resolvedPrimary,
-      priority: 1,
-      status: "active",
-      latency: 25,
-      isProxied: false,
-    });
-
-    // 2. AES-Proxied /api/stream Fallback
-    if (!resolvedPrimary.startsWith("/") && !resolvedPrimary.includes("/api/stream")) {
-      const proxyUrl = `/api/stream?url=${encodeURIComponent(resolvedPrimary)}&ts=${Date.now()}`;
-      candidates.push({
-        _id: `sports_${eventId}_proxy`,
-        url: proxyUrl,
-        rawTargetUrl: resolvedPrimary,
-        priority: 2,
-        status: "active",
-        latency: 55,
-        isProxied: true,
-      });
-    }
-  }
-
-  // Backup links
-  backupUrls.forEach((bUrl, idx) => {
-    const resolvedBackup = resolveStreamUrl(bUrl, customBaseUrl);
-    if (resolvedBackup && resolvedBackup !== resolvedPrimary) {
-      candidates.push({
-        _id: `sports_${eventId}_backup_${idx + 1}`,
-        url: resolvedBackup,
-        rawTargetUrl: resolvedBackup,
-        priority: candidates.length + 1,
-        status: "active",
-        latency: 40 + idx * 15,
-        isProxied: false,
-      });
-
-      // Also generate secure proxy fallback for backup links
-      if (!resolvedBackup.startsWith("/") && !resolvedBackup.includes("/api/stream")) {
-        candidates.push({
-          _id: `sports_${eventId}_backup_${idx + 1}_proxy`,
-          url: `/api/stream?url=${encodeURIComponent(resolvedBackup)}&ts=${Date.now()}`,
-          rawTargetUrl: resolvedBackup,
-          priority: candidates.length + 1,
-          status: "active",
-          latency: 70 + idx * 15,
-          isProxied: true,
-        });
-      }
-    }
-  });
-
-  return candidates;
-}
-
-/**
- * Re-handshakes with the backend/proxy to generate a fresh secure token/session URL.
- */
-export async function refreshSecuredStreamToken(
-  candidate: SecuredStreamCandidate
-): Promise<string> {
-  if (!candidate.rawTargetUrl) return candidate.url;
-
-  try {
-    const timestamp = Date.now();
-    const refreshedProxyUrl = `/api/stream?url=${encodeURIComponent(candidate.rawTargetUrl)}&_t=${timestamp}`;
-    return refreshedProxyUrl;
-  } catch (err) {
-    console.error("[SportsArenaService] Token re-handshake failed:", err);
-    return candidate.url;
-  }
 }
 
 /**

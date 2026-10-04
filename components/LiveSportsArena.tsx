@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import MatchCard from "@/components/MatchCard";
 
 export interface SportsEventCard {
@@ -48,12 +49,16 @@ function getSportIcon(sportType?: string): string {
   return "🏆";
 }
 
-/** Card width: full on mobile, halves on sm, thirds on lg — rows stay centered via flex wrap. */
+/** Card width: full on mobile, halves on sm, thirds on lg — extra cards scroll in the rail. */
 const CARD_WIDTH = "w-full sm:w-[calc((100%-0.875rem)/2)] lg:w-[calc((100%-1.75rem)/3)]";
 
 export default function LiveSportsArena() {
   const [events, setEvents] = useState<SportsEventCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
 
   const loadSportsEvents = async () => {
     try {
@@ -116,7 +121,46 @@ export default function LiveSportsArena() {
     return () => clearInterval(interval);
   }, []);
 
-  if (!loading && events.length === 0) return null;
+  const updateArrows = useCallback(() => {
+    const el = railRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setIsOverflowing(scrollWidth > clientWidth + 2);
+    setCanLeft(scrollLeft > 4);
+    setCanRight(scrollLeft + clientWidth < scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    updateArrows();
+    const el = railRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateArrows);
+      return () => window.removeEventListener("resize", updateArrows);
+    }
+    const ro = new ResizeObserver(updateArrows);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [updateArrows, loading, events.length]);
+
+  const scrollByPage = (dir: 1 | -1) => {
+    const el = railRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.max(el.clientWidth * 0.8, 200), behavior: "smooth" });
+  };
+
+  if (!loading && events.length === 0) {
+    return (
+      <section className="animate-fade-in">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/images/arena-promo-banner.png"
+          alt="SoluPlay — লাইভ খেলা ৩ টিভি দেখুন"
+          className="w-full h-auto rounded-3xl border border-emerald-500/20 shadow-2xl"
+        />
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-3xl border border-emerald-500/20 bg-gradient-to-b from-[#091523] via-[#060e1a] to-[#040810] p-4 sm:p-6 shadow-2xl animate-fade-in">
@@ -127,12 +171,41 @@ export default function LiveSportsArena() {
           ))}
         </div>
       ) : (
-        <div className="flex flex-wrap justify-center gap-3.5">
-          {events.map((ev) => (
-            <div key={ev.id || ev._id || "event"} className={CARD_WIDTH}>
-              <MatchCard event={ev} icon={getSportIcon(ev.sportType)} />
-            </div>
-          ))}
+        <div className="relative">
+          <div
+            ref={railRef}
+            onScroll={updateArrows}
+            className={`flex gap-3.5 overflow-x-auto scrollbar-none scroll-smooth snap-x snap-mandatory pt-1 pb-2 ${
+              isOverflowing ? "justify-start" : "justify-center"
+            }`}
+          >
+            {events.map((ev) => (
+              <div key={ev.id || ev._id || "event"} className={`${CARD_WIDTH} shrink-0 snap-start`}>
+                <MatchCard event={ev} icon={getSportIcon(ev.sportType)} />
+              </div>
+            ))}
+          </div>
+
+          {isOverflowing && canLeft && (
+            <button
+              type="button"
+              aria-label="Scroll match cards left"
+              onClick={() => scrollByPage(-1)}
+              className="hidden sm:flex absolute left-1 top-1/2 -translate-y-1/2 z-20 w-8 h-8 items-center justify-center rounded-lg border border-slate-700 bg-[#0d1628]/95 text-slate-300 shadow-lg hover:border-emerald-500/60 hover:text-white transition-all cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
+          {isOverflowing && canRight && (
+            <button
+              type="button"
+              aria-label="Scroll match cards right"
+              onClick={() => scrollByPage(1)}
+              className="hidden sm:flex absolute right-1 top-1/2 -translate-y-1/2 z-20 w-8 h-8 items-center justify-center rounded-lg border border-slate-700 bg-[#0d1628]/95 text-slate-300 shadow-lg hover:border-emerald-500/60 hover:text-white transition-all cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       )}
     </section>

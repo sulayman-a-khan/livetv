@@ -1756,6 +1756,72 @@ function buildApiRouter() {
     });
   });
 
+  // ── Test Source: Returns raw credentialed URL (Admin-only, NEVER exposed to public/Vercel) ──
+  api.get(
+    "/events/:id/test-source",
+    wrapAsync(async (req, res) => {
+      const ev = store.byId(req.params.id);
+      if (!ev) throw httpError(404, "Event not found");
+      const candidates = getEventCandidates(ev);
+      const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
+      const active = candidates[activeIdx] || candidates[0];
+      if (!active) throw httpError(404, "No stream candidates configured");
+      // Return the REAL resolved URL with credentials for direct browser testing
+      res.json({
+        rawUrl: active.resolvedUrl,
+        maskedUrl: active.maskedUrl,
+        label: active.label,
+        proxyUrl: localForwarderBase() + forwarderPath(ev),
+        format: active.resolvedUrl.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
+      });
+    })
+  );
+
+  // ── Test Proxy Pipe: Probes local forwarder to verify stream is flowing ──
+  api.get(
+    "/stream/test/:streamId",
+    wrapAsync(async (req, res) => {
+      const streamId = req.params.streamId;
+      const ev = store.events.find((e) => e.streamId === streamId);
+      if (!ev) throw httpError(404, "No event with streamId: " + streamId);
+      const proxyUrl = localForwarderBase() + forwarderPath(ev);
+      const candidates = getEventCandidates(ev);
+      const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
+      const active = candidates[activeIdx] || candidates[0];
+      const results = { proxyUrl, rawSourceOk: false, proxyOk: false, rawStatus: null, proxyStatus: null, rawError: null, proxyError: null, activeChannel: active ? active.label : "none" };
+
+      // Test raw upstream source
+      if (active && active.resolvedUrl) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 6000);
+          const resp = await fetch(active.resolvedUrl, { method: "GET", signal: controller.signal, headers: { Range: "bytes=0-1024" } });
+          clearTimeout(timer);
+          results.rawStatus = resp.status;
+          results.rawSourceOk = resp.status >= 200 && resp.status < 400;
+          resp.body && resp.body.cancel && resp.body.cancel().catch(() => {});
+        } catch (e) {
+          results.rawError = e.name === "AbortError" ? "Timeout (>6s)" : e.message;
+        }
+      }
+
+      // Test local proxy pipe
+      try {
+        const controller2 = new AbortController();
+        const timer2 = setTimeout(() => controller2.abort(), 6000);
+        const resp2 = await fetch(proxyUrl, { method: "GET", signal: controller2.signal });
+        clearTimeout(timer2);
+        results.proxyStatus = resp2.status;
+        results.proxyOk = resp2.status >= 200 && resp2.status < 400;
+        resp2.body && resp2.body.cancel && resp2.body.cancel().catch(() => {});
+      } catch (e) {
+        results.proxyError = e.name === "AbortError" ? "Timeout (>6s)" : e.message;
+      }
+
+      res.json(results);
+    })
+  );
+
   api.get(
     "/events",
     wrapAsync(async (req, res) => {
@@ -2590,6 +2656,99 @@ const ADMIN_HTML = String.raw`<!doctype html>
     font-size: 11.5px;
     color: var(--text-faint);
   }
+  .stream-source-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .btn-test-source {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 5px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+  .btn-test-source:hover {
+    background: rgba(56, 189, 248, 0.25);
+    border-color: rgba(56, 189, 248, 0.6);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(56, 189, 248, 0.15);
+  }
+  .btn-test-proxy {
+    border-color: rgba(74, 222, 128, 0.35);
+    background: rgba(74, 222, 128, 0.12);
+    color: #4ade80;
+  }
+  .btn-test-proxy:hover {
+    background: rgba(74, 222, 128, 0.25);
+    border-color: rgba(74, 222, 128, 0.6);
+    box-shadow: 0 2px 8px rgba(74, 222, 128, 0.15);
+  }
+  .btn-test-source:disabled, .btn-test-proxy:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .test-result-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(6px);
+    animation: fadeIn 0.15s ease;
+  }
+  .test-result-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    min-width: 380px;
+    max-width: 520px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  }
+  .test-result-panel h3 {
+    margin: 0 0 16px 0;
+    font-size: 15px;
+    color: var(--text);
+  }
+  .test-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .test-row:last-child {
+    border-bottom: none;
+  }
+  .test-row-label {
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+  .test-ok {
+    color: #4ade80;
+    font-weight: 700;
+  }
+  .test-fail {
+    color: #f87171;
+    font-weight: 700;
+  }
   .stream-alert-banner {
     display: flex;
     align-items: center;
@@ -3070,6 +3229,65 @@ const ADMIN_HTML = String.raw`<!doctype html>
     }
   }
 
+  // ── Test Source: Opens raw credentialed Xtream URL in new tab (Admin-only) ──
+  async function testRawSource(ev) {
+    try {
+      var res = await api('GET', '/api/events/' + encodeURIComponent(ev.id) + '/test-source');
+      if (res && res.rawUrl) {
+        window.open(res.rawUrl, '_blank');
+        toast('Opened raw source in new tab (' + res.label + ')', 'success');
+      } else {
+        toast('No stream URL available', 'error');
+      }
+    } catch (err) {
+      toast('Test source failed: ' + err.message, 'error');
+    }
+  }
+
+  // ── Test Proxy Pipe: Probes both raw source and local proxy, shows results modal ──
+  async function testProxyPipe(ev) {
+    toast('Testing stream pipes for "' + ev.matchTitle + '"…', '');
+    try {
+      var res = await api('GET', '/api/stream/test/' + encodeURIComponent(ev.streamId));
+      showTestResultModal(ev, res);
+    } catch (err) {
+      toast('Proxy test failed: ' + err.message, 'error');
+    }
+  }
+
+  function showTestResultModal(ev, result) {
+    // Remove any existing test modal
+    var existing = document.querySelector('.test-result-modal');
+    if (existing) existing.remove();
+
+    var overlay = el('div', { class: 'test-result-modal', onclick: function (e) { if (e.target === overlay) overlay.remove(); } }, [
+      el('div', { class: 'test-result-panel' }, [
+        el('h3', { text: '🔬 Stream Test Results — ' + ev.matchTitle }),
+        el('div', { class: 'test-row' }, [
+          el('span', { class: 'test-row-label', text: 'Active Channel' }),
+          el('span', { text: result.activeChannel || '—' })
+        ]),
+        el('div', { class: 'test-row' }, [
+          el('span', { class: 'test-row-label', text: 'Raw Source' }),
+          el('span', { class: result.rawSourceOk ? 'test-ok' : 'test-fail', text: result.rawSourceOk ? '✅ Online (HTTP ' + result.rawStatus + ')' : '❌ ' + (result.rawError || 'HTTP ' + result.rawStatus) })
+        ]),
+        el('div', { class: 'test-row' }, [
+          el('span', { class: 'test-row-label', text: 'Proxy Pipe (localhost:5001)' }),
+          el('span', { class: result.proxyOk ? 'test-ok' : 'test-fail', text: result.proxyOk ? '✅ Online (HTTP ' + result.proxyStatus + ')' : '❌ ' + (result.proxyError || 'HTTP ' + result.proxyStatus) })
+        ]),
+        el('div', { class: 'test-row' }, [
+          el('span', { class: 'test-row-label', text: 'Proxy URL' }),
+          el('span', { style: 'font-family: var(--font-mono); font-size: 11px; color: #38bdf8; word-break: break-all;', text: result.proxyUrl || '—' })
+        ]),
+        el('div', { style: 'display: flex; justify-content: flex-end; margin-top: 16px; gap: 8px;' }, [
+          result.proxyOk ? el('button', { class: 'btn btn-sm btn-test-proxy', text: '▶️ Open Proxy in Tab', onclick: function () { window.open(result.proxyUrl, '_blank'); } }) : null,
+          el('button', { class: 'btn btn-sm', text: 'Close', onclick: function () { overlay.remove(); } })
+        ])
+      ])
+    ]);
+    document.body.appendChild(overlay);
+  }
+
   function renderCard(ev, index) {
     var card = el('div', { class: 'event-card', draggable: 'true', 'data-id': ev.id });
 
@@ -3168,7 +3386,11 @@ const ADMIN_HTML = String.raw`<!doctype html>
         el('div', { class: 'stream-url-info' }, [
           el('span', { class: 'stream-label', text: ev.useForwarder ? '📡 Cloud Proxy Stream URL (HLS - Broadcast to All Users)' : 'Direct Encoder Stream URL' }),
           el('span', { class: 'stream-url-text', text: streamUrl || 'Generating URL…' }),
-          ev.useForwarder ? el('span', { class: 'stream-encoder-text', text: '🔒 Active Xtream Source: ' + (activeCandidate.maskedUrl || activeCandidate.rawUrl || ev.primaryStreamUrl) }) : null
+          ev.useForwarder ? el('div', { class: 'stream-source-row' }, [
+            el('span', { class: 'stream-encoder-text', text: '🔒 Active Xtream Source: ' + (activeCandidate.maskedUrl || activeCandidate.rawUrl || ev.primaryStreamUrl) }),
+            el('button', { class: 'btn-test-source', text: '🔗 Test Raw Source', title: 'Open the raw credentialed Xtream URL in a new tab (Admin-only)', onclick: function () { testRawSource(ev); } }),
+            el('button', { class: 'btn-test-source btn-test-proxy', text: '🔬 Test Proxy Pipe', title: 'Probe both raw source and local proxy pipe health', onclick: function () { testProxyPipe(ev); } })
+          ]) : null
         ]),
         isCloudDead ? el('div', { style: 'display: flex; gap: 6px;' }, [
           el('button', { class: 'btn btn-sm btn-emerald', text: '⚡ Fix Tunnel', onclick: function () { restartQuickTunnel(); } })

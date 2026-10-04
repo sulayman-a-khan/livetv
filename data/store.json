@@ -1021,21 +1021,6 @@
       "updatedAt": "2026-09-25T18:35:56.259Z"
     },
     {
-      "_id": "6aae506092777412c508425d",
-      "name": "T Sports",
-      "normalizedName": "tsports",
-      "logo": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4c/T_Sports_logo.svg/1280px-T_Sports_logo.svg.png?utm_source=en.wikipedia.org&utm_campaign=index&utm_content=thumbnail",
-      "category": "Live Sports",
-      "subCategory": "Bangladrshi",
-      "country": "Bangladesh",
-      "isPinned": true,
-      "priorityOrder": 1,
-      "tags": [],
-      "isManuallyEdited": true,
-      "createdAt": "2026-09-19T09:05:36.317Z",
-      "updatedAt": "2026-10-02T04:07:42.715Z"
-    },
-    {
       "_id": "6aae506192777412c5084269",
       "name": "Star Sports 1",
       "normalizedName": "starsports1",
@@ -23546,32 +23531,6 @@
       }
     },
     {
-      "_id": "6abf288ee496f08c9a935032",
-      "channelId": "6aae511092777412c508446b",
-      "url": "https://soluplay.vercel.app/api/stream?id=98865",
-      "priority": 1,
-      "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T03:44:14.416Z",
-      "latency": 1703,
-      "createdAt": "2026-10-02T03:44:14.438Z",
-      "updatedAt": "2026-10-02T03:44:14.459Z"
-    },
-    {
-      "_id": "6abf295cc919854b9a18a856",
-      "channelId": "6aae511392777412c508448a",
-      "url": "https://soluplay.vercel.app/api/stream?id=31314",
-      "priority": 1,
-      "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T03:47:40.254Z",
-      "latency": 891,
-      "createdAt": "2026-10-02T03:47:40.266Z",
-      "updatedAt": "2026-10-02T03:47:40.286Z"
-    },
-    {
       "_id": "6abf2cf31966b9a1bf497858",
       "channelId": "6aae50fa92777412c5084371",
       "url": "https://static.wikia.nocookie.net/logopedia/images/f/ff/Sony_Sports_Ten_3.png/revision/latest/scale-to-width-down/340?cb=20260818053736",
@@ -23583,45 +23542,6 @@
       "latency": 36,
       "createdAt": "2026-10-02T04:02:59.358Z",
       "updatedAt": "2026-10-02T04:02:59.358Z"
-    },
-    {
-      "_id": "6abf2e011ef4ef57b726829e",
-      "channelId": "6aae506992777412c5084277",
-      "url": "https://soluplay.vercel.app/api/stream?id=89",
-      "priority": 1,
-      "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T04:07:29.732Z",
-      "latency": 774,
-      "createdAt": "2026-10-02T04:07:29.745Z",
-      "updatedAt": "2026-10-02T04:07:29.762Z"
-    },
-    {
-      "_id": "6abf86bddf888fa5f2bfe808",
-      "channelId": "6aae506092777412c508425d",
-      "url": "https://soluplay.vercel.app/api/stream?provider=p1&id=661238",
-      "priority": 1,
-      "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T10:26:05.991Z",
-      "latency": 381,
-      "createdAt": "2026-10-02T10:26:05.997Z",
-      "updatedAt": "2026-10-02T10:26:05.997Z"
-    },
-    {
-      "_id": "6abf8730df888fa5f2bfe859",
-      "channelId": "6aae506092777412c508425d",
-      "url": "https://soluplay.vercel.app/api/stream?provider=p2&id=71",
-      "priority": 2,
-      "status": "broken",
-      "failedAttempts": 1,
-      "firstFailedAt": "2026-10-02T10:28:00.254Z",
-      "lastCheckedAt": "2026-10-02T10:28:00.254Z",
-      "latency": 657,
-      "createdAt": "2026-10-02T10:28:00.259Z",
-      "updatedAt": "2026-10-02T10:28:00.259Z"
     }
   ]
 }

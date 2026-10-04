@@ -1,45 +1,31 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
-import {
-  PROVIDERS,
-  parseProviderKey,
-  resolveChannel,
-  resolveProviderStreamUrl,
-  type ProviderFormat,
-} from "@/lib/providers";
 import { STREAM_PROXY_PATH } from "@/lib/streamType";
 
 /**
- * Multi-provider IPTV passthrough proxy.
+ * Direct-feed IPTV passthrough proxy.
  *
- * The browser can't hit the providers directly: they block non-IPTV user agents
- * and send no CORS headers. This route adds those two things and hands the media
- * to the client WITHOUT ever exposing provider credentials.
+ * Some stream hosts block non-player user agents or send no CORS headers, so
+ * the browser can't play them directly. This route adds those two things and
+ * hands the media to the client. Xtream-codes providers are NOT handled here
+ * anymore — they live in the separate Live Sports Arena area.
  *
- * Entry points (all resolve to one upstream target):
- *   ?channel=<normalizedName>  generic routing via lib/providers (preferred)
- *   ?provider=<p1|p2>&id=<id>  pick a provider explicitly (bare ?id= uses p1)
- *   ?ref=<opaque token>        an encrypted absolute URL — used for the child
- *                              links inside a rewritten .m3u8 (see below)
- *   ?url=<absolute feed>       legacy direct feed (still supported)
- *
- * The two providers do NOT share a URL scheme (see lib/providers.ts):
- *   p1 (toxicplay)  -> classic Xtream `.ts`:  /live/<user>/<pass>/<id>.ts
- *   p2 (BanglaView) -> XUI-One tokenized URL resolved at request time from the
- *                      panel's get.php playlist (xui-id -> /play/<token>/ts)
- * Both resolve to a transport stream and are piped through as video/mp2t.
+ * Entry points (both resolve to one upstream target):
+ *   ?url=<absolute feed>  a direct stream/playlist URL (players wrap it like this)
+ *   ?ref=<opaque token>   an encrypted absolute URL — used for the child
+ *                         links inside a rewritten .m3u8 (see below)
  *
  * Delivery depends on the resolved container:
  *   - `.m3u8` -> the playlist is fetched, and every child URI (variant
  *     playlists, media segments, key/map URIs) is rewritten to
  *     `${STREAM_PROXY_PATH}?ref=<encrypted absolute url>`. Those opaque tokens
- *     keep the credentialed provider URLs on the server, so hls.js only ever
- *     sees our origin. Child requests re-enter here via `?ref=` and recurse.
+ *     keep the raw upstream URLs (which may embed tokens/credentials) on the
+ *     server, so hls.js only ever sees our origin. Child requests re-enter
+ *     here via `?ref=` and recurse.
  *   - `.ts`   -> piped straight through as video/mp2t.
  *
- * There is NO retry loop, NO session recovery, and NO cross-provider fallback:
- * the active provider for a channel is used, and whatever it does — buffer,
- * drop, 404, or end — is passed straight to the client.
+ * There is NO retry loop and NO session recovery: whatever the upstream does —
+ * buffer, drop, 404, or end — is passed straight to the client.
  */
 
 export const runtime = "nodejs";
@@ -48,7 +34,7 @@ export const dynamic = "force-dynamic";
 // full window instead of the default short cap, then end naturally.
 export const maxDuration = 60;
 
-/** Headers the providers expect from an IPTV player. */
+/** Headers typical IPTV stream hosts expect from a player. */
 const UPSTREAM_HEADERS: Record<string, string> = {
   "User-Agent": "IPTVSmartersPlayer",
   Accept: "*/*",
@@ -78,8 +64,8 @@ const NO_STORE_HEADERS: Record<string, string> = {
 };
 
 /* ------------------------------------------------------------------ *
- * Opaque target tokens (AES-256-GCM) — hide credentialed provider URLs
- * from the client inside rewritten .m3u8 playlists.
+ * Opaque target tokens (AES-256-GCM) — keep raw upstream URLs out of
+ * the client inside rewritten .m3u8 playlists.
  * ------------------------------------------------------------------ */
 const CIPHER_KEY = crypto
   .createHash("sha256")
@@ -121,13 +107,15 @@ function decryptTarget(token: string): string | null {
  * Target resolution
  * ------------------------------------------------------------------ */
 
+type StreamFormat = "ts" | "m3u8";
+
 interface ResolvedTarget {
   url: string;
-  format: ProviderFormat;
+  format: StreamFormat;
 }
 
 /** `.m3u8` -> HLS playlist; anything else (`.ts`, segments) -> transport stream. */
-function formatFromUrl(url: string): ProviderFormat {
+function formatFromUrl(url: string): StreamFormat {
   try {
     const path = new URL(url, "http://_local.invalid").pathname.toLowerCase();
     if (path.endsWith(".m3u8")) return "m3u8";
@@ -137,69 +125,22 @@ function formatFromUrl(url: string): ProviderFormat {
   return "ts";
 }
 
-/**
- * If someone stored a provider link WITHOUT credentials
- * (e.g. http://toxicplay1.com/live/1234.ts), inject the matching provider's
- * creds so it still plays. Any other URL is returned untouched.
- */
-function applyProviderDefaults(rawUrl: string): string {
-  try {
-    const u = new URL(rawUrl);
-    for (const p of Object.values(PROVIDERS)) {
-      const host = new URL(p.baseUrl).host;
-      if (u.host.toLowerCase() !== host.toLowerCase()) continue;
-      const parts = u.pathname.split("/").filter(Boolean); // e.g. ["live","1234.ts"]
-      if (parts.length === 2 && parts[0].toLowerCase() === "live") {
-        return `${p.baseUrl.replace(/\/+$/, "")}/live/${p.username}/${p.password}/${parts[1]}`;
-      }
-    }
-    return rawUrl;
-  } catch {
-    return rawUrl;
-  }
-}
-
-/** Resolves the request to a single upstream target (url + container format).
- *  Async because p2 (XUI-One) has to look its tokenized URL up via get.php. */
-async function resolveTarget(req: NextRequest): Promise<ResolvedTarget | null> {
+/** Resolves the request to a single upstream target (url + container format). */
+function resolveTarget(req: NextRequest): ResolvedTarget | null {
   const params = req.nextUrl.searchParams;
-  const refParam = (params.get("ref") || "").trim();
-  const channelParam = (params.get("channel") || "").trim();
-  const urlParam = (params.get("url") || "").trim();
-  const idParam = (params.get("id") || "").trim();
 
-  // 1) Opaque token from a rewritten playlist (already an absolute provider URL).
+  // 1) Opaque token from a rewritten playlist (already an absolute URL).
+  const refParam = (params.get("ref") || "").trim();
   if (refParam) {
     const abs = decryptTarget(refParam);
     if (abs && /^https?:\/\//i.test(abs)) return { url: abs, format: formatFromUrl(abs) };
     return null;
   }
 
-  // 2) Generic per-channel routing (the preferred entry point).
-  if (channelParam) {
-    const resolved = resolveChannel(channelParam);
-    if (!resolved) return null; // unknown channel, no active provider, or placeholder id
-    const stream = await resolveProviderStreamUrl(resolved.providerKey, resolved.provider, resolved.streamId);
-    return stream ? { url: stream.url, format: stream.format } : null;
-  }
-
-  // 3) Legacy absolute feed URL.
+  // 2) Direct absolute feed URL.
+  const urlParam = (params.get("url") || "").trim();
   if (urlParam && /^https?:\/\//i.test(urlParam)) {
-    const abs = applyProviderDefaults(urlParam);
-    return { url: abs, format: formatFromUrl(abs) };
-  }
-
-  // 4) Provider + stream id. `?provider=` selects p1 (default) or p2; a bare
-  //    `?id=` uses the default. p1 builds a classic Xtream `.ts`; p2 resolves
-  //    its xui-id to a tokenized `/play/<token>/ts` URL via get.php.
-  if (idParam) {
-    if (/^https?:\/\//i.test(idParam)) {
-      const abs = applyProviderDefaults(idParam);
-      return { url: abs, format: formatFromUrl(abs) };
-    }
-    const providerKey = parseProviderKey(params.get("provider"));
-    const stream = await resolveProviderStreamUrl(providerKey, PROVIDERS[providerKey], idParam);
-    if (stream) return { url: stream.url, format: stream.format };
+    return { url: urlParam, format: formatFromUrl(urlParam) };
   }
 
   return null;
@@ -222,7 +163,7 @@ function proxify(uri: string, baseUrl: string): string {
 /**
  * Rewrites every URI in an HLS playlist — bare media/variant lines plus any
  * `URI="…"` attribute (EXT-X-KEY, EXT-X-MAP, EXT-X-MEDIA) — so all children are
- * fetched back through this proxy. Credentials stay server-side inside `?ref=`.
+ * fetched back through this proxy. Raw upstream URLs stay server-side inside `?ref=`.
  */
 function rewritePlaylist(text: string, baseUrl: string): string {
   return text
@@ -246,7 +187,7 @@ function badRequest(message: string) {
 }
 
 const MISSING_TARGET_MSG =
-  "A valid `channel`, `ref`, `provider`+`id`, or `url` query parameter is required";
+  "A valid `url` or `ref` query parameter is required";
 
 /** Preflight for cross-origin players. */
 export async function OPTIONS() {
@@ -254,7 +195,7 @@ export async function OPTIONS() {
 }
 
 export async function HEAD(req: NextRequest) {
-  const target = await resolveTarget(req);
+  const target = resolveTarget(req);
   if (!target) return badRequest(MISSING_TARGET_MSG);
   const contentType =
     target.format === "m3u8" ? "application/vnd.apple.mpegurl" : "video/mp2t";
@@ -265,7 +206,7 @@ export async function HEAD(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const target = await resolveTarget(req);
+  const target = resolveTarget(req);
   if (!target) return badRequest(MISSING_TARGET_MSG);
 
   let upstream: Response;
@@ -277,7 +218,7 @@ export async function GET(req: NextRequest) {
       cache: "no-store",
     });
   } catch (err) {
-    // The client left (abort) or the provider is unreachable — pass it through
+    // The client left (abort) or the upstream is unreachable — pass it through
     // as a gateway error rather than retrying.
     if (req.signal.aborted) {
       return new Response(null, { status: 499, headers: corsHeaders(NO_STORE_HEADERS) });
@@ -290,7 +231,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (!upstream.ok) {
-    // 401/403/404/etc. — surface the provider's status directly, no recovery.
+    // 401/403/404/etc. — surface the upstream status directly, no recovery.
     try {
       await upstream.body?.cancel();
     } catch {
@@ -333,7 +274,7 @@ export async function GET(req: NextRequest) {
   }
   // A brief upstream delay simply means no bytes flow for a moment — we do NOT
   // abort or close on it, so playback stays smooth. The response only ends when
-  // the upstream body ends (provider drop / session expiry), which cleanly
+  // the upstream body ends (upstream drop / session expiry), which cleanly
   // signals end-of-feed to mpegts.js.
   return new Response(upstream.body, {
     status: 200,

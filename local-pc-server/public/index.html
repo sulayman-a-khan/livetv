@@ -1,0 +1,1510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b13">
+<title>SoluPlay • Origin Control</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%234d8dff'/%3E%3Ccircle cx='32' cy='32' r='5' fill='white'/%3E%3Cpath d='M45 19a18.4 18.4 0 0 1 0 26M19 19a18.4 18.4 0 0 0 0 26' stroke='white' stroke-width='5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<style>
+/* ==========================================================================
+   SoluPlay Origin Control — design system
+   ========================================================================== */
+:root{
+  color-scheme: dark;
+  --bg:#070b13;
+  --bg-2:#0a111f;
+  --panel:#0e1626;
+  --panel-2:#141f37;
+  --line:#1c2a45;
+  --line-soft:#16233c;
+  --line-2:#26375a;
+  --text:#e9f1ff;
+  --muted:#93a7c6;
+  --faint:#5f7395;
+  --blue:#4d8dff;
+  --green:#22c98a;
+  --amber:#f5a524;
+  --rose:#f2555f;
+  --violet:#8b7bff;
+  --sky:#38bdf8;
+  --r-lg:16px;
+  --r-md:12px;
+  --r-sm:9px;
+  --shadow-1:0 1px 2px rgba(0,0,0,.35);
+  --shadow-2:0 18px 44px -18px rgba(0,0,0,.7);
+  --font:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono:ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(1100px 500px at 88% -12%, rgba(77,141,255,.10), transparent 60%),
+    radial-gradient(900px 420px at -12% 2%, rgba(139,123,255,.08), transparent 55%),
+    var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.hidden{display:none !important}
+.muted{color:var(--faint)}
+.mono{font-family:var(--mono)}
+
+/* ---------- top bar ---------- */
+.topbar{
+  position:sticky;top:0;z-index:40;
+  background:rgba(7,11,19,.8);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.topbar-inner{max-width:1180px;margin:0 auto;padding:12px 22px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand-tile{
+  width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(135deg,#4d8dff,#8b7bff);
+  box-shadow:0 8px 20px -8px rgba(77,141,255,.65);
+}
+.brand-tile .ic{width:22px;height:22px}
+.brand-name{font-weight:700;font-size:15px;letter-spacing:.2px;white-space:nowrap}
+.brand-name em{font-style:normal;color:var(--muted);font-weight:500}
+.brand-sub{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.brand-sub .ic{width:12px;height:12px;color:var(--green)}
+.topbar-actions{display:flex;align-items:center;gap:9px;margin-left:auto;flex-wrap:wrap}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:1px solid var(--line-2);border-radius:10px;
+  padding:9px 14px;font:inherit;font-size:13px;font-weight:600;
+  color:var(--text);background:var(--panel-2);cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s,box-shadow .15s,transform .05s;
+  text-decoration:none;white-space:nowrap;
+}
+.btn:hover{border-color:#33507f;background:#182645}
+.btn:active{transform:translateY(1px)}
+.btn .ic{width:15px;height:15px}
+.btn.primary{
+  background:linear-gradient(180deg,#4d8dff,#3b76e8);
+  border-color:#3b76e8;color:#fff;
+  box-shadow:0 8px 18px -10px rgba(77,141,255,.9);
+}
+.btn.primary:hover{background:linear-gradient(180deg,#5c98ff,#4480f0);border-color:#4480f0}
+.btn.ghost{background:transparent;border-color:var(--line-2);color:var(--muted)}
+.btn.ghost:hover{background:var(--panel-2);color:var(--text)}
+.btn.danger-ghost{background:transparent;border-color:rgba(242,85,95,.35);color:#ff8a92}
+.btn.danger-ghost:hover{background:rgba(242,85,95,.12);border-color:rgba(242,85,95,.55)}
+.btn.sm{padding:7px 11px;font-size:12.5px}
+.btn.sm .ic{width:14px;height:14px}
+.btn.tiny{padding:5px 9px;font-size:12px;border-radius:8px;gap:6px}
+.btn.tiny .ic{width:13px;height:13px}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.btn.busy .ic{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.icon-btn{
+  width:32px;height:32px;display:grid;place-items:center;flex:none;
+  border:1px solid transparent;border-radius:9px;background:transparent;
+  color:var(--muted);cursor:pointer;transition:background .15s,color .15s,border-color .15s;
+}
+.icon-btn:hover{background:var(--panel-2);color:var(--text);border-color:var(--line-2)}
+.icon-btn.danger:hover{background:rgba(242,85,95,.12);color:#ff8a92;border-color:rgba(242,85,95,.4)}
+.icon-btn .ic{width:16px;height:16px}
+
+/* ---------- layout ---------- */
+.wrap{max-width:1180px;margin:0 auto;padding:22px 22px 40px}
+.section-gap{margin-top:20px}
+
+/* ---------- stat cards ---------- */
+.stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.stat-card{
+  --st:#3b4c6e;
+  position:relative;display:flex;gap:12px;align-items:center;
+  background:linear-gradient(180deg,var(--panel),var(--bg-2));
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:14px 16px;box-shadow:var(--shadow-1);min-width:0;
+  transition:border-color .2s;
+}
+.stat-card[data-state="ok"]{--st:var(--green)}
+.stat-card[data-state="bad"]{--st:var(--rose)}
+.stat-card[data-state="warn"]{--st:var(--amber)}
+.stat-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex:none}
+.stat-icon .ic{width:19px;height:19px}
+.tint-blue{color:#8fb7ff;background:rgba(77,141,255,.13)}
+.tint-green{color:#5fe3ab;background:rgba(34,201,138,.12)}
+.tint-amber{color:#ffc45e;background:rgba(245,165,36,.12)}
+.tint-violet{color:#b3a8ff;background:rgba(139,123,255,.13)}
+.tint-sky{color:#7dd3fc;background:rgba(56,189,248,.12)}
+.stat-body{min-width:0;flex:1}
+.stat-label{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--faint)}
+.stat-value{font-size:13.5px;font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-dot{width:8px;height:8px;border-radius:50%;background:var(--st);box-shadow:0 0 9px var(--st);flex:none;margin-left:auto}
+
+/* ---------- panels ---------- */
+.panel{
+  background:linear-gradient(180deg,var(--panel),var(--bg-2));
+  border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--shadow-1);overflow:hidden;
+}
+.panel-head{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line-soft);flex-wrap:wrap}
+.panel-title{display:flex;align-items:center;gap:9px;font-weight:650;font-size:13.5px}
+.panel-title .ic{color:var(--sky)}
+.panel-head .spacer{margin-left:auto}
+.panel-body{padding:16px 18px}
+.domain-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.domain-hint{margin:0;padding:0 18px 15px;font-size:12.5px;line-height:1.55}
+.input-wrap{position:relative;flex:1;min-width:220px}
+.input-wrap .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--faint);width:16px;height:16px;pointer-events:none}
+.input-wrap input{padding-left:36px}
+
+/* ---------- chips ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:4px 11px;border-radius:999px;font-size:11.5px;font-weight:650;
+  border:1px solid var(--line-2);color:var(--muted);background:transparent;
+  white-space:nowrap;
+}
+.chip-ok{color:#5fe3ab;border-color:rgba(34,201,138,.4);background:rgba(34,201,138,.09)}
+.chip-bad{color:#ff8a92;border-color:rgba(242,85,95,.4);background:rgba(242,85,95,.09)}
+.chip-warn{color:#ffc45e;border-color:rgba(245,165,36,.4);background:rgba(245,165,36,.09)}
+
+/* ---------- inputs ---------- */
+input,select,textarea{
+  width:100%;background:#0a1220;border:1px solid var(--line-2);
+  border-radius:10px;color:var(--text);font:inherit;font-size:13.5px;
+  padding:9px 12px;outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+input::placeholder,textarea::placeholder{color:#4c5f80}
+input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,141,255,.16)}
+input:disabled{opacity:.55;cursor:not-allowed}
+textarea{resize:vertical;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+select{
+  appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2393a7c6' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 11px center;
+  padding-right:34px;cursor:pointer;
+}
+label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
+.check{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--muted);cursor:pointer;user-select:none;margin-top:2px}
+.check input{width:16px;height:16px;accent-color:var(--blue);flex:none}
+
+/* ---------- events ---------- */
+.section-head{display:flex;align-items:center;gap:10px;margin:0 2px 6px}
+.section-head h2{margin:0;font-size:15px;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:9px}
+.count-badge{
+  font-size:11.5px;font-weight:700;font-family:var(--mono);
+  color:#9cc1ff;background:rgba(77,141,255,.13);border:1px solid rgba(77,141,255,.35);
+  padding:2px 9px;border-radius:999px;
+}
+.cards{display:flex;flex-direction:column;gap:16px;margin-top:12px}
+.skel{
+  height:186px;border-radius:var(--r-lg);border:1px solid var(--line);
+  background:linear-gradient(100deg,var(--panel) 40%, #16233c 50%, var(--panel) 60%);
+  background-size:200% 100%;animation:shimmer 1.4s infinite linear;
+}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+.card{
+  --accent:var(--line-2);
+  position:relative;overflow:hidden;
+  background:linear-gradient(180deg,var(--panel),var(--bg-2));
+  border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-1);
+  transition:border-color .2s, box-shadow .2s;
+}
+.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+.card[data-status="live"]{--accent:var(--rose)}
+.card[data-status="scheduled"]{--accent:var(--sky)}
+.card[data-status="ended"]{--accent:#46587c}
+.card:hover{border-color:var(--line-2)}
+.card.dragging{opacity:.5;border-style:dashed}
+.card.dragover{outline:2px dashed var(--blue);outline-offset:3px}
+
+.card-head{display:flex;align-items:center;gap:12px;padding:15px 18px 13px 20px;border-bottom:1px solid var(--line-soft)}
+.drag-handle{cursor:grab;color:var(--faint);display:grid;place-items:center;width:26px;height:30px;border-radius:8px;flex:none}
+.drag-handle:hover{color:var(--muted);background:var(--panel-2)}
+.drag-handle:active{cursor:grabbing}
+.drag-handle .ic{width:16px;height:16px}
+.rank{font:600 11.5px var(--mono);color:var(--faint);border:1px solid var(--line-2);padding:2px 7px;border-radius:7px;flex:none}
+.card-title-wrap{flex:1;min-width:0}
+.card-title{margin:0;font-size:16px;font-weight:700;letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-sub{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.card-actions{display:flex;gap:4px;margin-left:auto;flex:none}
+
+.pill{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:11px;font-weight:650;padding:3px 9px;border-radius:999px;
+  border:1px solid var(--line-2);color:var(--muted);background:rgba(255,255,255,.02);
+  white-space:nowrap;
+}
+.pill .ic{width:11px;height:11px;stroke-width:2.6}
+.pill-live{color:#ff8a92;border-color:rgba(242,85,95,.45);background:rgba(242,85,95,.1)}
+.pill-live .dot{width:6px;height:6px;border-radius:50%;background:var(--rose);animation:pulse 1.6s ease-out infinite}
+.pill-scheduled{color:#7dd3fc;border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.08)}
+.pill-ended{color:var(--faint)}
+.pill-forwarder{color:#ffc45e;border-color:rgba(245,165,36,.35);background:rgba(245,165,36,.07)}
+.pill-mono{font-family:var(--mono);font-size:10.5px}
+@keyframes pulse{
+  0%{box-shadow:0 0 0 0 rgba(242,85,95,.55)}
+  70%{box-shadow:0 0 0 6px rgba(242,85,95,0)}
+  100%{box-shadow:0 0 0 0 rgba(242,85,95,0)}
+}
+
+.status-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:13px 18px 4px 20px}
+.tile{background:#0a1220;border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+.tile-label{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--faint)}
+.tile-label .ic{width:12px;height:12px}
+.tile-value{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:12.5px;font-weight:600;min-width:0}
+.tile-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile-dot{width:7px;height:7px;border-radius:50%;background:#3b4c6e;flex:none}
+.tile[data-state="ok"] .tile-dot{background:var(--green);box-shadow:0 0 7px var(--green)}
+.tile[data-state="bad"] .tile-dot{background:var(--rose);box-shadow:0 0 7px var(--rose)}
+.tile[data-state="warn"] .tile-dot{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+
+.alert{
+  margin:12px 18px 0 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  border:1px solid rgba(242,85,95,.4);background:rgba(242,85,95,.08);
+  border-radius:12px;padding:10px 14px;color:#ffb3b9;font-size:13px;
+}
+.alert .ic{color:var(--rose)}
+.alert span{flex:1;min-width:180px}
+
+.stream-box{margin:12px 18px 0 20px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#0a1220}
+.srow{display:flex;align-items:center;gap:10px;padding:10px 13px;flex-wrap:wrap}
+.srow + .srow{border-top:1px solid var(--line-soft)}
+.srow-label{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--faint);width:84px;flex:none}
+.srow code{font:12.5px var(--mono);color:#bcd0ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:120px}
+.srow-actions{display:flex;gap:7px;flex:none;margin-left:auto;flex-wrap:wrap}
+.seg{display:flex;gap:6px;flex-wrap:wrap;flex:1;min-width:0}
+.seg-btn{
+  display:inline-flex;align-items:center;gap:5px;
+  font:inherit;font-size:12px;font-weight:600;color:var(--muted);
+  background:var(--panel);border:1px solid var(--line-2);border-radius:999px;
+  padding:5px 11px;cursor:pointer;transition:all .15s;
+}
+.seg-btn:hover{color:var(--text);border-color:#33507f}
+.seg-btn.active{color:#9cc1ff;border-color:var(--blue);background:rgba(77,141,255,.14)}
+.seg-btn .ic{width:12px;height:12px}
+
+.staged{margin:12px 18px 0 20px;border:1px solid rgba(245,165,36,.38);background:rgba(245,165,36,.06);border-radius:12px;padding:12px 14px}
+.staged-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#ffc45e;letter-spacing:.2px}
+.staged-head .ic{width:14px;height:14px}
+.staged code{display:block;margin:8px 0 10px;font:12.5px var(--mono);color:#e8c78d;word-break:break-all}
+.staged-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.card-foot{display:flex;align-items:center;gap:12px;padding:13px 18px 15px 20px;flex-wrap:wrap}
+.times{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12.5px;min-width:0;flex-wrap:wrap}
+.times .ic{width:14px;height:14px;color:var(--faint)}
+.foot-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* ---------- empty state ---------- */
+.empty{
+  margin-top:12px;border:1.5px dashed var(--line-2);border-radius:var(--r-lg);
+  padding:48px 20px;text-align:center;background:rgba(255,255,255,.012);
+}
+.empty-icon{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;display:grid;place-items:center;background:var(--panel-2);color:var(--faint)}
+.empty-icon .ic{width:26px;height:26px}
+.empty h3{margin:0 0 6px;font-size:16px}
+.empty p{margin:0 0 18px;color:var(--muted)}
+
+/* ---------- modals ---------- */
+.modal{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:22px}
+.modal-backdrop{position:absolute;inset:0;background:rgba(3,6,12,.74);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+.modal-card{
+  position:relative;width:100%;max-width:640px;max-height:calc(100vh - 44px);
+  overflow:auto;border-radius:18px;
+  background:linear-gradient(180deg,#111c31,#0b1322);
+  border:1px solid var(--line-2);box-shadow:var(--shadow-2);
+  animation:pop .18s ease-out;
+}
+.modal-card.narrow{max-width:520px}
+@keyframes pop{from{transform:translateY(10px) scale(.985);opacity:0}}
+.modal-head{
+  position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;
+  padding:15px 20px;border-bottom:1px solid var(--line);
+  background:rgba(17,28,49,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.modal-head h3{margin:0;font-size:15px;font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal-head .ic.title-ic{color:var(--blue)}
+.modal-foot{
+  position:sticky;bottom:0;z-index:2;display:flex;justify-content:flex-end;gap:10px;
+  padding:14px 20px 16px;border-top:1px solid var(--line);
+  background:rgba(17,28,49,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+#form fieldset{border:none;margin:0;padding:16px 20px 2px}
+#form fieldset + fieldset{border-top:1px solid var(--line-soft)}
+#form legend{
+  font-size:10.5px;font-weight:750;letter-spacing:.9px;text-transform:uppercase;
+  color:var(--sky);padding:0 0 12px;
+}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.span-2{grid-column:span 2}
+.form-error{
+  margin:14px 20px 0;border:1px solid rgba(242,85,95,.45);background:rgba(242,85,95,.1);
+  color:#ffb3b9;border-radius:10px;padding:10px 13px;font-size:13px;white-space:pre-wrap;
+}
+.form-hint{padding:0 20px 16px;font-size:12px;color:var(--faint)}
+
+/* ---------- test result modal ---------- */
+.res{display:flex;align-items:flex-start;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.res:last-child{border-bottom:none}
+.res-label{width:132px;flex:none;font-size:12px;font-weight:650;color:var(--muted);padding-top:3px}
+.res-value{flex:1;min-width:0;font-size:13.5px;line-height:1.55}
+.res-value code{font:12.5px var(--mono);color:#bcd0ef;word-break:break-all}
+.res-body{padding:8px 20px 16px}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;border:1px solid;
+}
+.badge .ic{width:12px;height:12px;stroke-width:2.8}
+.badge-ok{color:#5fe3ab;border-color:rgba(34,201,138,.4);background:rgba(34,201,138,.09)}
+.badge-bad{color:#ff8a92;border-color:rgba(242,85,95,.4);background:rgba(242,85,95,.09)}
+.badge-warn{color:#ffc45e;border-color:rgba(245,165,36,.4);background:rgba(245,165,36,.09)}
+
+/* ---------- toasts ---------- */
+.toasts{position:fixed;right:18px;bottom:18px;z-index:120;display:flex;flex-direction:column;gap:10px;max-width:390px;pointer-events:none}
+.toast{
+  pointer-events:auto;display:flex;align-items:flex-start;gap:10px;
+  background:#101a2e;border:1px solid var(--line-2);border-left:3px solid var(--blue);
+  border-radius:12px;padding:11px 13px;box-shadow:var(--shadow-2);
+  font-size:13px;color:var(--text);animation:toast-in .22s ease-out;
+}
+.toast .ic{width:16px;height:16px;margin-top:1px;color:var(--blue)}
+.toast.error{border-left-color:var(--rose)}
+.toast.error .ic{color:var(--rose)}
+.toast.success{border-left-color:var(--green)}
+.toast.success .ic{color:var(--green)}
+.toast.warn{border-left-color:var(--amber)}
+.toast.warn .ic{color:var(--amber)}
+.toast span{flex:1;min-width:0;word-break:break-word}
+.toast-x{background:none;border:none;color:var(--faint);cursor:pointer;padding:1px;flex:none}
+.toast-x:hover{color:var(--text)}
+.toast-x .ic{width:13px;height:13px}
+.toast.out{opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s}
+@keyframes toast-in{from{transform:translateY(10px);opacity:0}}
+
+/* ---------- footer ---------- */
+.foot-note{display:flex;align-items:center;gap:8px;margin-top:26px;color:var(--faint);font-size:12px;flex-wrap:wrap}
+.foot-note .ic{width:13px;height:13px}
+
+/* ---------- responsive ---------- */
+@media (max-width:1020px){
+  .stats-grid{grid-template-columns:repeat(3,1fr)}
+}
+@media (max-width:860px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .status-strip{grid-template-columns:repeat(2,1fr)}
+  .wrap{padding:16px}
+  .topbar-inner{padding:11px 16px}
+}
+@media (max-width:640px){
+  .topbar-actions{width:100%;margin-left:0}
+  .topbar-actions .btn{flex:1;justify-content:center}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .grid-2{grid-template-columns:1fr}
+  .span-2{grid-column:auto}
+  .card-head{flex-wrap:wrap}
+  .card-actions{margin-left:0;width:100%}
+  .srow-label{width:auto}
+  .foot-actions{margin-left:0;width:100%}
+  .toasts{left:14px;right:14px;max-width:none}
+  .res{flex-direction:column;gap:4px}
+  .res-label{width:auto}
+}
+</style>
+</head>
+<body>
+
+<!-- ============================ icon sprite ============================ -->
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.36-8.99 6 6 0 1 0-11.13 2.9A3.5 3.5 0 0 0 6.5 19z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M10 2v6.5L4.5 18a1.8 1.8 0 0 0 1.6 2.7h11.8a1.8 1.8 0 0 0 1.6-2.7L14 8.5V2"/><path d="M8.5 2h7"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6M14 11v6"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></symbol>
+</svg>
+
+<!-- ============================ top bar ============================ -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-tile"><svg class="ic"><use href="#i-logo"/></svg></div>
+      <div>
+        <div class="brand-name">SoluPlay <em>Origin Control</em></div>
+        <div class="brand-sub"><svg class="ic"><use href="#i-server"/></svg><span id="nodeChip">connecting…</span></div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="btnProbe" class="btn ghost" title="Re-check upstream encoders and cloud URLs for every card"><svg class="ic"><use href="#i-refresh"/></svg><span class="btn-label">Probe All</span></button>
+      <button id="btnSync" class="btn ghost" title="Upsert all cards into the cloud database and fix isLocalServerActive"><svg class="ic"><use href="#i-cloud"/></svg><span class="btn-label">Sync Cloud</span></button>
+      <button id="btnNew" class="btn primary" title="Create a new event card"><svg class="ic"><use href="#i-plus"/></svg><span class="btn-label">New Event</span></button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============================ stat cards ============================ -->
+  <section class="stats-grid" aria-label="Server status">
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-sky"><svg class="ic"><use href="#i-server"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Upstream Encoder</div>
+        <div class="stat-value" id="xtreamStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-violet"><svg class="ic"><use href="#i-database"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Database</div>
+        <div class="stat-value" id="dbStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-green"><svg class="ic"><use href="#i-activity"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Heartbeat</div>
+        <div class="stat-value" id="hbStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-amber"><svg class="ic"><use href="#i-cloud"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Public Stream</div>
+        <div class="stat-value" id="proxyStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-blue"><svg class="ic"><use href="#i-trophy"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Event Cards</div>
+        <div class="stat-value" id="eventsStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+  </section>
+
+  <!-- ============================ domain panel ============================ -->
+  <section class="panel section-gap" aria-label="Public domain">
+    <div class="panel-head">
+      <div class="panel-title"><svg class="ic"><use href="#i-globe"/></svg>Public Domain</div>
+      <span id="tunnelStatusChip" class="chip">checking…</span>
+      <div class="spacer"></div>
+      <button id="btnNewTunnel" class="btn ghost sm" title="Generate a brand-new Quick Tunnel URL"><svg class="ic"><use href="#i-refresh"/></svg><span class="btn-label">New Tunnel</span></button>
+    </div>
+    <div class="panel-body domain-row">
+      <div class="input-wrap">
+        <svg class="ic"><use href="#i-link"/></svg>
+        <input id="inDomainUrl" placeholder="https://your-domain.example" spellcheck="false" autocomplete="off">
+      </div>
+      <button id="btnTestDomain" class="btn ghost" title="Fetch /healthz through this domain to verify it reaches this server"><svg class="ic"><use href="#i-search"/></svg><span class="btn-label">Test</span></button>
+      <button id="btnSaveDomain" class="btn primary" title="Publish this domain to the cloud and re-sync all cards"><svg class="ic"><use href="#i-upload"/></svg><span class="btn-label">Save &amp; Apply</span></button>
+    </div>
+    <p class="domain-hint muted">Each card's Viewer URL is this domain plus <span class="mono">/live/&lt;streamId&gt;.m3u8</span>. Quick-Tunnel URLs change on every restart and update here automatically — use the box only for a stable custom domain (then Save &amp; Apply).</p>
+  </section>
+
+  <!-- ============================ event cards ============================ -->
+  <section class="section-gap" aria-label="Event cards">
+    <div class="section-head">
+      <h2>Event Cards <span id="eventsCountBadge" class="count-badge">0</span></h2>
+    </div>
+    <div id="cards" class="cards"></div>
+    <div id="empty" class="empty hidden">
+      <div class="empty-icon"><svg class="ic"><use href="#i-trophy"/></svg></div>
+      <h3>No event cards yet</h3>
+      <p>Create your first card to start forwarding a stream to your viewers.</p>
+      <button id="btnEmptyNew" class="btn primary"><svg class="ic"><use href="#i-plus"/></svg><span class="btn-label">Create Event</span></button>
+    </div>
+  </section>
+
+  <footer class="foot-note">
+    <svg class="ic"><use href="#i-server"/></svg>
+    <span id="footNote">SoluPlay Origin Control · admin UI is local-only · public port serves /live and /healthz</span>
+  </footer>
+</main>
+
+<!-- ============================ toasts ============================ -->
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<!-- ============================ event form dialog ============================ -->
+<div id="dlg" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="formTitle">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <svg class="ic title-ic"><use href="#i-trophy"/></svg>
+      <h3 id="formTitle">New Event</h3>
+      <button id="btnDialogClose" class="icon-btn" type="button" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <form id="form" novalidate>
+      <div id="formError" class="form-error hidden"></div>
+
+      <fieldset>
+        <legend>Match Details</legend>
+        <div class="grid-2">
+          <label class="field span-2">Match Title
+            <input id="fTitle" maxlength="200" placeholder="e.g. BD vs PAK" required>
+          </label>
+          <label class="field">Sport
+            <input id="fSport" list="sports" maxlength="60" placeholder="Cricket">
+          </label>
+          <label class="field">Status
+            <select id="fStatus">
+              <option value="scheduled">Scheduled</option>
+              <option value="live">Live</option>
+              <option value="ended">Ended</option>
+            </select>
+          </label>
+          <label class="field">Start Time
+            <input id="fStart" type="datetime-local">
+          </label>
+          <label class="field">End Time
+            <input id="fEnd" type="datetime-local">
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Stream Sources</legend>
+        <label class="field">Primary Stream URL / Channel #
+          <input id="fPrimary" maxlength="2048" placeholder="e.g. 206 or https://…/live/…m3u8" required>
+        </label>
+        <label class="check"><input id="fForward" type="checkbox" checked> Route viewers through the forwarder (/live/&lt;id&gt;.m3u8)</label>
+        <div class="grid-2" style="margin-top:12px">
+          <label class="field">Backup Channels
+            <textarea id="fBackups" rows="3" placeholder="One per line or comma separated&#10;e.g. 69, 64"></textarea>
+          </label>
+          <label class="field">Staged Source (draft)
+            <textarea id="fStaged" rows="3" placeholder="Optional — stays in draft until &quot;Send to Live&quot;"></textarea>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Advanced</legend>
+        <div class="grid-2">
+          <label class="field">Stream ID
+            <input id="fStreamId" placeholder="auto-generated on create" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field">Custom Upstream Headers (JSON)
+            <textarea id="fHeaders" rows="3" placeholder='{"Referer": "https://example.com"}'></textarea>
+          </label>
+        </div>
+      </fieldset>
+
+      <div class="form-hint">Changes sync to the cloud automatically. Stream ID cannot be changed after creation.</div>
+
+      <div class="modal-foot">
+        <button type="button" id="btnCancel" class="btn ghost">Cancel</button>
+        <button type="submit" id="btnSave" class="btn primary"><svg class="ic"><use href="#i-check"/></svg><span class="btn-label">Create Event</span></button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================ test results dialog ============================ -->
+<div id="testDlg" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="testTitle">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card narrow">
+    <div class="modal-head">
+      <svg class="ic title-ic"><use href="#i-flask"/></svg>
+      <h3 id="testTitle">Test Results</h3>
+      <button id="btnTestClose" class="icon-btn" type="button" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="testBody" class="res-body"></div>
+    <div class="modal-foot">
+      <button id="btnTestDone" class="btn ghost" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<datalist id="sports">
+  <option value="Cricket"></option>
+  <option value="Football"></option>
+  <option value="Soccer"></option>
+  <option value="Tennis"></option>
+  <option value="Basketball"></option>
+  <option value="Hockey"></option>
+  <option value="Baseball"></option>
+  <option value="NFL"></option>
+  <option value="Formula 1"></option>
+  <option value="WWE"></option>
+  <option value="Kabaddi"></option>
+  <option value="Badminton"></option>
+  <option value="Table Tennis"></option>
+  <option value="Volleyball"></option>
+  <option value="Rugby"></option>
+  <option value="Boxing"></option>
+  <option value="MMA"></option>
+  <option value="Esports"></option>
+  <option value="Other"></option>
+</datalist>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ======================= tiny DOM helpers ======================= */
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, attrs) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        var v = attrs[k];
+        if (v === null || v === undefined || v === false) return;
+        if (k === "class") node.className = v;
+        else if (k === "text") node.textContent = v;
+        else if (k === "html") node.innerHTML = v;
+        else if (k.indexOf("on") === 0 && typeof v === "function") node.addEventListener(k.slice(2), v);
+        else if (v === true) node.setAttribute(k, "");
+        else node.setAttribute(k, String(v));
+      });
+    }
+    var kids = Array.prototype.slice.call(arguments, 2);
+    (function add(list) {
+      list.forEach(function (kid) {
+        if (kid === null || kid === undefined || kid === false) return;
+        if (Array.isArray(kid)) return add(kid);
+        node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+      });
+    })(kids);
+    return node;
+  }
+
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  function icon(name) {
+    var s = document.createElementNS(SVG_NS, "svg");
+    s.setAttribute("class", "ic");
+    s.setAttribute("aria-hidden", "true");
+    var u = document.createElementNS(SVG_NS, "use");
+    u.setAttribute("href", "#i-" + name);
+    s.append(u);
+    return s;
+  }
+
+  function iconButton(name, title, onclick, extraClass) {
+    return el("button", { class: "icon-btn" + (extraClass ? " " + extraClass : ""), title: title, type: "button", onclick: onclick }, icon(name));
+  }
+
+  /* ======================= state ======================= */
+  var eventsCache = [];
+  var statusCache = {};
+  var editingId = null;
+  var draggingId = null;
+  var lastAutoFilled = "";
+
+  /* ======================= toast ======================= */
+  function toast(msg, kind) {
+    var box = $("toasts");
+    var icName = kind === "error" ? "alert" : kind === "success" ? "check" : kind === "warn" ? "alert" : "zap";
+    var t = el("div", { class: "toast " + (kind || "") },
+      icon(icName),
+      el("span", { text: String(msg) }),
+      el("button", { class: "toast-x", type: "button", title: "Dismiss", onclick: function () { t.remove(); } }, icon("x"))
+    );
+    box.append(t);
+    while (box.children.length > 5) box.firstChild.remove();
+    setTimeout(function () {
+      t.classList.add("out");
+      setTimeout(function () { t.remove(); }, 350);
+    }, kind === "error" ? 6000 : 3200);
+  }
+
+  /* ======================= api ======================= */
+  function api(method, url, body) {
+    var opts = {
+      method: method,
+      headers: { "X-Admin-UI": "1" },
+      credentials: "same-origin"
+    };
+    if (body !== undefined) {
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(url, opts).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (data) {
+        if (!res.ok) {
+          var e = new Error((data && (data.error || data.message)) || (res.status + " " + res.statusText));
+          if (data && data.details) e.details = data.details;
+          throw e;
+        }
+        return data;
+      });
+    });
+  }
+
+  /* ======================= format helpers ======================= */
+  function pad(n) { return String(n).padStart(2, "0"); }
+
+  function toInputValue(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  function fromInputValue(v) {
+    if (!v) return "";
+    var d = new Date(v);
+    return isNaN(d.getTime()) ? "" : d.toISOString();
+  }
+
+  function fmt(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function ago(iso) {
+    if (!iso) return "—";
+    var s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return s + "s ago";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + "m ago";
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + "h ago";
+    return Math.floor(h / 24) + "d ago";
+  }
+
+  function fmtUptime(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    if (sec < 60) return sec + "s";
+    var m = Math.floor(sec / 60);
+    if (m < 60) return m + "m";
+    var h = Math.floor(m / 60);
+    return h + "h " + (m % 60) + "m";
+  }
+
+  function maskUrl(u) {
+    return String(u || "").replace(/\/live\/([^/]+)\/([^/]+)\//g, "/live/$1/••••••••/");
+  }
+
+  function compactLabel(label) {
+    return String(label || "—").replace(/^Channel /, "Ch ");
+  }
+
+  /* ======================= async button helper ======================= */
+  function busy(btn, label, fn) {
+    if (!btn) return fn();
+    var lbl = btn.querySelector(".btn-label") || btn;
+    var prev = lbl.textContent;
+    btn.disabled = true;
+    btn.classList.add("busy");
+    lbl.textContent = label;
+    return Promise.resolve()
+      .then(fn)
+      .finally(function () {
+        btn.disabled = false;
+        btn.classList.remove("busy");
+        lbl.textContent = prev;
+      });
+  }
+
+  /* ======================= modal plumbing ======================= */
+  function anyDlgOpen() {
+    return !$("dlg").classList.contains("hidden") || !$("testDlg").classList.contains("hidden");
+  }
+  function syncOverflow() {
+    document.body.style.overflow = anyDlgOpen() ? "hidden" : "";
+  }
+  function openModal(node) { node.classList.remove("hidden"); syncOverflow(); }
+  function closeModal(node) { node.classList.add("hidden"); syncOverflow(); }
+  function closeForm() { closeModal($("dlg")); editingId = null; }
+  function closeTest() { closeModal($("testDlg")); }
+
+  /* ======================= status rendering ======================= */
+  function setStat(id, state, text, title) {
+    var n = $(id);
+    if (!n) return;
+    n.textContent = text;
+    if (title) n.title = title;
+    var card = n.closest(".stat-card");
+    if (card) card.dataset.state = state || "idle";
+  }
+
+  function renderStatus(st, xt) {
+    st = st || {};
+    statusCache = st;
+    xt = xt || {};
+
+    var node = $("nodeChip");
+    if (st.nodeId) {
+      node.textContent = "Node " + String(st.nodeId) + (st.version ? " · v" + st.version : "");
+      node.title = "Uptime " + fmtUptime(st.uptimeSec) + " · Admin " + (st.adminUrl || "");
+    } else {
+      node.textContent = "Node offline";
+    }
+
+    if (xt.serverUrl) {
+      var host = String(xt.serverUrl).replace(/^https?:\/\//, "");
+      var label = host + (xt.username ? " (" + xt.username + ")" : "");
+      var active = xt.activeStream;
+      if (active) label += " · live: " + compactLabel(active.label);
+      setStat("xtreamStat", xt.passwordSet ? "ok" : "warn", label, xt.serverUrl);
+    } else {
+      setStat("xtreamStat", "bad", "Not configured", "XTREAM_* env vars are missing");
+    }
+
+    var db = st.cloud || {};
+    setStat("dbStat",
+      db.mongoConfigured ? "ok" : "bad",
+      db.mongoConfigured ? ("Mongo · " + (db.mongoState || "configured")) : "Not configured",
+      db.mongoTarget || "");
+
+    var hb = st.heartbeat || {};
+    if (hb.ok) setStat("hbStat", "ok", "Healthy · " + ago(hb.lastAt), hb.error || "");
+    else setStat("hbStat", "bad", hb.lastAt ? "Failing · last ok " + ago(hb.lastAt) : "No heartbeat yet", hb.error || "");
+
+    var tun = st.tunnel || {};
+    var pub = st.publicStreamBaseUrl || "";
+    setStat("proxyStat",
+      pub ? (tun.running ? "ok" : "warn") : "bad",
+      pub ? String(pub).replace(/^https?:\/\//, "") : ("port " + st.publicPort + " · no domain set"),
+      pub || ("Public port " + st.publicPort));
+
+    var inp = $("inDomainUrl");
+    if (pub && document.activeElement !== inp) {
+      var typed = inp.value.trim();
+      if (!typed) {
+        inp.value = pub;
+        lastAutoFilled = pub;
+      } else if (typed !== pub && (typed === lastAutoFilled || isQuickTunnelUrl(typed))) {
+        inp.value = pub;
+        lastAutoFilled = pub;
+        toast("Old Quick-Tunnel URL expired — box updated to the live URL", "success");
+      }
+    }
+
+    $("footNote").textContent = "SoluPlay Origin Control v" + (st.version || "1.0.0") +
+      " · admin UI is local-only · public port " + (st.publicPort || 5001) + " serves /live and /healthz";
+  }
+
+  function updateTunnelChip() {
+    var chip = $("tunnelStatusChip");
+    return api("GET", "/api/tunnel/status").then(function (t) {
+      t = t || {};
+      if (t.running) {
+        chip.className = "chip chip-ok";
+        chip.textContent = "Tunnel live · up " + fmtUptime(t.uptimeSec) + (t.healCount ? " · healed " + t.healCount + "×" : "");
+        chip.title = t.url || "";
+      } else {
+        chip.className = "chip chip-bad";
+        chip.textContent = t.lastError ? "Tunnel stopped — " + t.lastError : "Tunnel stopped";
+        chip.title = t.lastError || "";
+      }
+    }).catch(function () {
+      chip.className = "chip chip-bad";
+      chip.textContent = "Tunnel status unavailable";
+    });
+  }
+
+  /* ======================= cards ======================= */
+  function statusPill(status) {
+    if (status === "live") return el("span", { class: "pill pill-live" }, el("span", { class: "dot" }), el("span", { text: "LIVE" }));
+    if (status === "scheduled") return el("span", { class: "pill pill-scheduled", text: "Scheduled" });
+    return el("span", { class: "pill pill-ended", text: "Ended" });
+  }
+
+  function buildTile(label, iconName, state, value, title) {
+    return el("div", { class: "tile", "data-state": state || "idle", title: title || "" },
+      el("div", { class: "tile-label" }, icon(iconName), el("span", { text: label })),
+      el("div", { class: "tile-value" }, el("span", { class: "tile-dot" }), el("span", { class: "tile-text", text: value }))
+    );
+  }
+
+  function renderCards(events) {
+    eventsCache = Array.isArray(events) ? events : [];
+    var wrap = $("cards");
+    wrap.textContent = "";
+    $("empty").classList.toggle("hidden", eventsCache.length > 0);
+    $("eventsCountBadge").textContent = String(eventsCache.length);
+    eventsCache.forEach(function (ev, i) { wrap.append(renderCard(ev, i)); });
+
+    var live = eventsCache.filter(function (e) { return e.status === "live"; }).length;
+    setStat("eventsStat",
+      live ? "ok" : (eventsCache.length ? "warn" : "idle"),
+      eventsCache.length + (eventsCache.length === 1 ? " card" : " cards") + (live ? " · " + live + " live" : " · none live"));
+  }
+
+  function renderCard(ev, idx) {
+    var card = el("article", { class: "card", draggable: "true", "data-id": ev.id, "data-status": ev.status });
+
+    /* head */
+    card.append(el("header", { class: "card-head" },
+      el("div", { class: "drag-handle", title: "Drag to reorder" }, icon("grip")),
+      el("span", { class: "rank", text: "#" + (idx + 1) }),
+      el("div", { class: "card-title-wrap" },
+        el("h3", { class: "card-title", text: ev.matchTitle, title: ev.matchTitle }),
+        el("div", { class: "card-sub" },
+          el("span", { class: "pill" }, icon("trophy"), el("span", { text: ev.sportType || "Other" })),
+          statusPill(ev.status),
+          ev.useForwarder ? el("span", { class: "pill pill-forwarder", title: "Viewers use the public forwarder URL" }, icon("zap"), el("span", { text: "Forwarder" })) : null,
+          el("span", { class: "pill pill-mono", title: "Stream ID", text: ev.streamId })
+        )
+      ),
+      el("div", { class: "card-actions" },
+        iconButton("edit", "Edit event", function () { openForm(ev); }),
+        iconButton("trash", "Delete event", function () { removeEvent(ev); }, "danger")
+      )
+    ));
+
+    /* status strip */
+    var o = ev.origin;
+    var c = ev.cloudHealth;
+    var active = ev.activeCandidate;
+    card.append(el("div", { class: "status-strip" },
+      buildTile("Upstream", "server",
+        o ? (o.online ? "ok" : "bad") : "idle",
+        o ? (o.online ? (o.latencyMs != null ? o.latencyMs + " ms" : "online") : (o.error || "offline")) : "not probed",
+        o ? (o.error || ("Checked " + ago(o.checkedAt))) : "Use Probe All to check the upstream source"),
+      buildTile("Cloud Edge", "cloud",
+        c ? (c.online ? "ok" : "bad") : "idle",
+        c ? (c.direct ? "direct (no proxy)" : (c.online ? (c.latencyMs != null ? c.latencyMs + " ms" : "reachable") : (c.error || "down"))) : "not probed",
+        c && c.url ? "URL " + c.url : "Cloud URL health for this card"),
+      buildTile("Channel Lock", "shuffle",
+        active ? "ok" : "idle",
+        active ? compactLabel(active.label) : "none",
+        active ? maskUrl(active.maskedUrl) : "No stream candidates configured"),
+      buildTile("Viewers", "eye",
+        ev.viewersCount > 0 ? "ok" : "idle",
+        String(ev.viewersCount || 0),
+        "Active HLS viewers on the forwarder")
+    ));
+
+    /* cloud dead alert */
+    if (ev.status !== "ended" && c && !c.online && ev.useForwarder) {
+      card.append(el("div", { class: "alert" },
+        icon("alert"),
+        el("span", { text: "Cloud edge unreachable for this card" + (c.error ? " — " + c.error : "") + "." }),
+        el("button", { class: "btn tiny ghost", type: "button", onclick: function () { probeAll(); } }, icon("refresh"), el("span", { class: "btn-label", text: "Re-probe" }))
+      ));
+    }
+
+    /* stream box */
+    var box = el("div", { class: "stream-box" });
+    var viewerUrl = ev.cloudPrimaryUrl || ev.localForwarderUrl || "";
+    box.append(el("div", { class: "srow" },
+      el("span", { class: "srow-label", text: "Viewer URL" }),
+      el("code", { text: ev.useForwarder ? viewerUrl : maskUrl(viewerUrl), title: maskUrl(viewerUrl) }),
+      el("div", { class: "srow-actions" },
+        el("button", { class: "btn tiny ghost", type: "button", title: "Copy the viewer URL", onclick: function () { copyText(viewerUrl, "Viewer URL copied"); } }, icon("copy"), el("span", { class: "btn-label", text: "Copy" })),
+        el("a", { class: "btn tiny ghost", href: viewerUrl, target: "_blank", rel: "noopener", title: "Open in a new tab" }, icon("external"), el("span", { class: "btn-label", text: "Open" }))
+      )
+    ));
+    box.append(el("div", { class: "srow" },
+      el("span", { class: "srow-label", text: "Source" }),
+      el("code", { text: active ? maskUrl(active.maskedUrl) : "—", title: active ? maskUrl(active.maskedUrl) : "" }),
+      el("div", { class: "srow-actions" },
+        el("button", { class: "btn tiny ghost", type: "button", title: "Reveal the raw upstream URL (credentials included — admin only)", onclick: function () { testRawSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Raw" })),
+        el("button", { class: "btn tiny ghost", type: "button", title: "Probe the upstream source and the local forwarder pipe", onclick: function () { testProxyPipe(ev); } }, icon("activity"), el("span", { class: "btn-label", text: "Test Pipe" })),
+        el("button", { class: "btn tiny ghost", type: "button", title: "Stage a new source as a draft (live stream untouched)", onclick: function () { promptStageSource(ev); } }, icon("upload"), el("span", { class: "btn-label", text: "Stage New" }))
+      )
+    ));
+
+    /* channel switcher */
+    if (ev.candidates && ev.candidates.length > 1) {
+      var seg = el("div", { class: "seg" });
+      ev.candidates.forEach(function (cand, i) {
+        var isActive = i === (ev.activeStreamIndex || 0);
+        seg.append(el("button", {
+          class: "seg-btn" + (isActive ? " active" : ""),
+          type: "button",
+          title: isActive ? "Currently locked on this channel" : "Switch & lock on " + cand.label,
+          onclick: function () { if (!isActive) switchChannel(ev, i); }
+        },
+          isActive ? icon("check") : null,
+          el("span", { text: compactLabel(cand.label) })
+        ));
+      });
+      box.append(el("div", { class: "srow" }, el("span", { class: "srow-label", text: "Channel" }), seg));
+    }
+    card.append(box);
+
+    /* staged draft */
+    if (ev.stagedSource) {
+      var stagedDisplay = ev.stagedCandidate ? ev.stagedCandidate.maskedUrl : maskUrl(ev.stagedSource);
+      card.append(el("div", { class: "staged" },
+        el("div", { class: "staged-head" }, icon("flask"), el("span", { text: "STAGED DRAFT — not live until you promote it" })),
+        el("code", { text: stagedDisplay }),
+        el("div", { class: "staged-actions" },
+          el("button", { class: "btn tiny ghost", type: "button", onclick: function () { testStagedSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Staged" })),
+          el("button", { class: "btn tiny primary", type: "button", onclick: function () { promoteStaged(ev); } }, icon("send"), el("span", { class: "btn-label", text: "Send to Live" })),
+          el("button", { class: "btn tiny danger-ghost", type: "button", onclick: function () { discardStaged(ev); } }, icon("x"), el("span", { class: "btn-label", text: "Discard" }))
+        )
+      ));
+    }
+
+    /* foot */
+    card.append(el("footer", { class: "card-foot" },
+      el("div", { class: "times" }, icon("clock"),
+        el("span", { text: fmt(ev.startTime) + " → " + fmt(ev.endTime) }),
+        el("span", { class: "muted", text: ev.updatedAt ? "· updated " + ago(ev.updatedAt) : "" })
+      ),
+      el("div", { class: "foot-actions" },
+        iconButton("arrow-up", "Move up", function () { moveEvent(ev, -1); }),
+        iconButton("arrow-down", "Move down", function () { moveEvent(ev, 1); }),
+        ev.status === "live"
+          ? el("button", { class: "btn sm", type: "button", title: "Mark this event as ended", onclick: function () { quickStatus(ev, "ended"); } }, icon("stop"), el("span", { class: "btn-label", text: "End" }))
+          : el("button", { class: "btn sm primary", type: "button", title: "Mark this event as live and sync to cloud", onclick: function () { quickStatus(ev, "live"); } }, icon("play"), el("span", { class: "btn-label", text: "Go Live" })),
+        el("button", { class: "btn sm ghost", type: "button", onclick: function () { openForm(ev); } }, icon("edit"), el("span", { class: "btn-label", text: "Edit" })),
+        el("button", { class: "btn sm danger-ghost", type: "button", onclick: function () { removeEvent(ev); } }, icon("trash"), el("span", { class: "btn-label", text: "Delete" }))
+      )
+    ));
+
+    attachDnD(card, ev);
+    return card;
+  }
+
+  /* ======================= drag & drop reorder ======================= */
+  function attachDnD(card, ev) {
+    card.addEventListener("dragstart", function (e) {
+      draggingId = ev.id;
+      card.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", ev.id); } catch (err) { /* IE quirk */ }
+    });
+    card.addEventListener("dragend", function () {
+      draggingId = null;
+      document.querySelectorAll(".card.dragging, .card.dragover").forEach(function (n) {
+        n.classList.remove("dragging", "dragover");
+      });
+    });
+    card.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      if (ev.id !== draggingId) card.classList.add("dragover");
+      e.dataTransfer.dropEffect = "move";
+    });
+    card.addEventListener("dragleave", function () { card.classList.remove("dragover"); });
+    card.addEventListener("drop", function (e) {
+      e.preventDefault();
+      card.classList.remove("dragover");
+      if (!draggingId || draggingId === ev.id) return;
+      var ids = eventsCache.map(function (x) { return x.id; });
+      var from = ids.indexOf(draggingId);
+      var to = ids.indexOf(ev.id);
+      if (from < 0 || to < 0) return;
+      ids.splice(to, 0, ids.splice(from, 1)[0]);
+      reorderTo(ids);
+    });
+  }
+
+  function reorderTo(ids) {
+    return api("POST", "/api/events/reorder", { ids: ids })
+      .then(function () { return refresh(); })
+      .catch(function (err) { toast("Reorder failed: " + err.message, "error"); return refresh(); });
+  }
+
+  function moveEvent(ev, dir) {
+    var ids = eventsCache.map(function (x) { return x.id; });
+    var i = ids.indexOf(ev.id);
+    var j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    ids.splice(j, 0, ids.splice(i, 1)[0]);
+    reorderTo(ids);
+  }
+
+  /* ======================= actions ======================= */
+  function refresh() {
+    return Promise.all([
+      api("GET", "/api/events"),
+      api("GET", "/api/status"),
+      api("GET", "/api/xtream/status")
+    ]).then(function (out) {
+      renderStatus(out[1], out[2]);
+      renderCards(out[0] && out[0].events);
+    }).catch(function (err) {
+      toast("Refresh failed: " + err.message, "error");
+    });
+  }
+
+  function quickStatus(ev, status) {
+    return busy(null, null, function () {
+      return api("PUT", "/api/events/" + encodeURIComponent(ev.id), { status: status })
+        .then(function () {
+          toast('"' + ev.matchTitle + '" marked as ' + status.toUpperCase(), "success");
+          return refresh();
+        })
+        .catch(function (err) { toast("Status change failed: " + err.message, "error"); });
+    });
+  }
+
+  function removeEvent(ev) {
+    if (!confirm('Delete event "' + ev.matchTitle + '"?\n\nThis removes the card and its cloud entry. This cannot be undone.')) return;
+    api("DELETE", "/api/events/" + encodeURIComponent(ev.id))
+      .then(function () {
+        toast('Deleted "' + ev.matchTitle + '"', "success");
+        return refresh();
+      })
+      .catch(function (err) { toast("Delete failed: " + err.message, "error"); });
+  }
+
+  function switchChannel(ev, idx) {
+    toast('Switching channel for "' + ev.matchTitle + '"…', "");
+    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/switch-channel", { channelIndex: idx })
+      .then(function () {
+        var cand = ev.candidates && ev.candidates[idx];
+        toast("Switched and locked on " + compactLabel(cand ? cand.label : "channel #" + (idx + 1)), "success");
+        return refresh();
+      })
+      .catch(function (err) { toast("Channel switch failed: " + err.message, "error"); });
+  }
+
+  function testRawSource(ev) {
+    api("GET", "/api/events/" + encodeURIComponent(ev.id) + "/test-source")
+      .then(function (r) {
+        showTestModal("Raw Source — " + ev.matchTitle, [
+          { label: "Active channel", text: compactLabel(r.label) },
+          { label: "Format", text: r.format },
+          { label: "Raw upstream URL", mono: true, text: r.rawUrl, copy: r.rawUrl },
+          { label: "Masked URL", mono: true, text: r.maskedUrl },
+          { label: "Local pipe URL", mono: true, text: r.proxyUrl, copy: r.proxyUrl }
+        ]);
+      })
+      .catch(function (err) { toast("Test failed: " + err.message, "error"); });
+  }
+
+  function testStagedSource(ev) {
+    api("GET", "/api/events/" + encodeURIComponent(ev.id) + "/test-staged-source")
+      .then(function (r) {
+        showTestModal("Staged Source — " + ev.matchTitle, [
+          { label: "Format", text: r.format },
+          { label: "Staged URL", mono: true, text: r.rawUrl, copy: r.rawUrl },
+          { label: "Masked URL", mono: true, text: r.maskedUrl }
+        ]);
+      })
+      .catch(function (err) { toast("Staged test failed: " + err.message, "error"); });
+  }
+
+  function testProxyPipe(ev) {
+    api("GET", "/api/stream/test/" + encodeURIComponent(ev.streamId))
+      .then(function (r) {
+        showTestModal("Pipe Test — " + ev.matchTitle, [
+          { label: "Active channel", text: compactLabel(r.activeChannel) },
+          { label: "Raw source", state: r.rawSourceOk ? "ok" : "bad", text: r.rawSourceOk ? ("Reachable · HTTP " + r.rawStatus) : (r.rawError || ("HTTP " + (r.rawStatus || "no response"))) },
+          { label: "Proxy pipe", state: r.proxyOk ? "ok" : "bad", text: r.proxyOk ? ("Flowing · HTTP " + r.proxyStatus) : (r.proxyError || ("HTTP " + (r.proxyStatus || "no response"))) },
+          { label: "Pipe URL", mono: true, text: r.proxyUrl, copy: r.proxyUrl }
+        ]);
+      })
+      .catch(function (err) { toast("Pipe test failed: " + err.message, "error"); });
+  }
+
+  function promoteStaged(ev) {
+    if (!confirm('Send the staged source to LIVE for "' + ev.matchTitle + '"?\n\nThe active upstream session is reset and viewers are reconnected to the new source.')) return;
+    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/promote-staged")
+      .then(function (r) { toast((r && r.message) || "Staged source promoted to live", "success"); return refresh(); })
+      .catch(function (err) { toast("Promote failed: " + err.message, "error"); });
+  }
+
+  function discardStaged(ev) {
+    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/discard-staged")
+      .then(function () { toast("Staged source discarded", "success"); return refresh(); })
+      .catch(function (err) { toast("Discard failed: " + err.message, "error"); });
+  }
+
+  function promptStageSource(ev) {
+    var val = prompt('Stage a new source for "' + ev.matchTitle + '"\n\nEnter an http(s) URL or Xtream Stream ID. It stays in draft until you press "Send to Live":', "");
+    if (val === null) return;
+    val = val.trim();
+    if (!val) { toast("Nothing staged — empty input", ""); return; }
+    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/stage-source", { stagedSource: val })
+      .then(function () { toast("Source staged as draft — test it, then Send to Live", "success"); return refresh(); })
+      .catch(function (err) { toast("Staging failed: " + err.message, "error"); });
+  }
+
+  /* ======================= test results modal ======================= */
+  function showTestModal(title, rows) {
+    $("testTitle").textContent = title;
+    var body = $("testBody");
+    body.textContent = "";
+    rows.forEach(function (r) {
+      var val = el("div", { class: "res-value" });
+      if (r.state === "ok") val.append(el("span", { class: "badge badge-ok" }, icon("check"), el("span", { text: r.text || "OK" })));
+      else if (r.state === "bad") val.append(el("span", { class: "badge badge-bad" }, icon("x"), el("span", { text: r.text || "FAILED" })));
+      else if (r.state === "warn") val.append(el("span", { class: "badge badge-warn" }, icon("alert"), el("span", { text: r.text || "WARN" })));
+      else if (r.mono) val.append(el("code", { text: r.text || "—" }));
+      else val.append(el("span", { text: r.text || "—" }));
+      if (r.copy) {
+        val.append(el("button", {
+          class: "btn tiny ghost", type: "button", style: "margin-left:10px;vertical-align:middle",
+          onclick: function () { copyText(r.copy, "Copied to clipboard"); }
+        }, icon("copy"), el("span", { class: "btn-label", text: "Copy" })));
+      }
+      body.append(el("div", { class: "res" },
+        el("div", { class: "res-label", text: r.label }),
+        val
+      ));
+    });
+    openModal($("testDlg"));
+  }
+
+  /* ======================= clipboard ======================= */
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch (e) { return false; }
+  }
+  function copyText(text, okMsg) {
+    if (!text) { toast("Nothing to copy", "warn"); return; }
+    function done() { toast(okMsg || "Copied to clipboard", "success"); }
+    function fail() { toast("Copy failed — select and copy manually", "error"); }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { legacyCopy(text) ? done() : fail(); });
+    } else {
+      legacyCopy(text) ? done() : fail();
+    }
+  }
+
+  /* ======================= event form ======================= */
+  function showFormError(msg) {
+    var box = $("formError");
+    box.textContent = msg;
+    box.classList.remove("hidden");
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function openForm(ev) {
+    editingId = ev ? ev.id : null;
+    $("formTitle").textContent = ev ? "Edit Event" : "New Event";
+    $("fTitle").value = ev ? ev.matchTitle : "";
+    $("fSport").value = ev ? (ev.sportType || "") : "";
+    $("fStatus").value = ev ? ev.status : "scheduled";
+    $("fStart").value = toInputValue(ev && ev.startTime);
+    $("fEnd").value = toInputValue(ev && ev.endTime);
+    $("fPrimary").value = ev ? ev.primaryStreamUrl : "";
+    $("fForward").checked = ev ? !!ev.useForwarder : true;
+    $("fStaged").value = ev && ev.stagedSource ? ev.stagedSource : "";
+    $("fBackups").value = ev && ev.backupStreamUrls && ev.backupStreamUrls.length ? ev.backupStreamUrls.join("\n") : "";
+    $("fStreamId").value = ev ? ev.streamId : "";
+    $("fStreamId").disabled = !!ev;
+    $("fHeaders").value = ev && ev.headers && Object.keys(ev.headers).length ? JSON.stringify(ev.headers, null, 2) : "";
+    $("formError").classList.add("hidden");
+    $("btnSave").querySelector(".btn-label").textContent = ev ? "Save Changes" : "Create Event";
+    openModal($("dlg"));
+    setTimeout(function () { $("fTitle").focus(); }, 40);
+  }
+
+  function submitForm(evt) {
+    evt.preventDefault();
+    var wasEdit = !!editingId;
+
+    var headers = {};
+    var rawHeaders = $("fHeaders").value.trim();
+    if (rawHeaders) {
+      try {
+        headers = JSON.parse(rawHeaders);
+        if (!headers || typeof headers !== "object" || Array.isArray(headers)) throw new Error("not an object");
+      } catch (e) {
+        return showFormError('Custom headers must be a JSON object, e.g. {"Referer": "https://example.com"}');
+      }
+    }
+
+    var payload = {
+      matchTitle: $("fTitle").value.trim(),
+      sportType: $("fSport").value.trim(),
+      status: $("fStatus").value,
+      startTime: fromInputValue($("fStart").value),
+      endTime: fromInputValue($("fEnd").value),
+      primaryStreamUrl: $("fPrimary").value.trim(),
+      stagedSource: $("fStaged").value.trim(),
+      useForwarder: $("fForward").checked,
+      backupStreamUrls: $("fBackups").value.split(/[\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean),
+      headers: headers
+    };
+
+    if (!payload.matchTitle) return showFormError("Match title is required.");
+    if (!payload.sportType) return showFormError("Sport type is required.");
+    if (!payload.startTime || !payload.endTime) return showFormError("Start and end times are required.");
+    if (new Date(payload.endTime).getTime() <= new Date(payload.startTime).getTime()) return showFormError("End time must be later than start time.");
+    if (!payload.primaryStreamUrl) return showFormError("Primary stream URL or channel is required.");
+
+    busy($("btnSave"), "Saving…", function () {
+      var request;
+      if (wasEdit) {
+        request = api("PUT", "/api/events/" + encodeURIComponent(editingId), payload);
+      } else {
+        var sid = $("fStreamId").value.trim();
+        if (sid) payload.streamId = sid;
+        request = api("POST", "/api/events", payload);
+      }
+      return request.then(function () {
+        closeForm();
+        toast(wasEdit ? "Event updated & synced" : "Event created & synced", "success");
+        return refresh();
+      }).catch(function (err) {
+        showFormError(err.message + (err.details && err.details.length ? "\n— " + err.details.join("\n— ") : ""));
+      });
+    });
+  }
+
+  /* ======================= global actions ======================= */
+  function probeAll() {
+    return busy($("btnProbe"), "Probing…", function () {
+      return api("POST", "/api/probe")
+        .then(function (r) {
+          toast("Probe finished · " + (r && r.checked != null ? r.checked + " card(s) checked" : "done"), "success");
+          return refresh();
+        })
+        .catch(function (err) { toast("Probe failed: " + err.message, "error"); });
+    });
+  }
+
+  function syncCloud() {
+    return busy($("btnSync"), "Syncing…", function () {
+      return api("POST", "/api/sync", { mirror: true })
+        .then(function (r) {
+          var s = (r && r.summary) || {};
+          var bits = [];
+          if (s.created) bits.push(s.created + " created");
+          if (s.updated) bits.push(s.updated + " updated");
+          if (s.removed) bits.push(s.removed + " removed");
+          toast("Cloud sync done · " + (bits.length ? bits.join(", ") : "already up to date") +
+            (s.cards != null ? " · " + s.cards + " card(s)" : "") + (s.durationMs != null ? " in " + s.durationMs + " ms" : ""), "success");
+          if (s.warnings && s.warnings.length) toast("Sync warnings: " + s.warnings.join("; "), "warn");
+          return refresh();
+        })
+        .catch(function (err) { toast("Sync failed: " + err.message, "error"); });
+    });
+  }
+
+  function isQuickTunnelUrl(u) {
+    return /^(https?:\/\/)?[a-z0-9-]+\.trycloudflare\.com\/?$/i.test(String(u || "").trim());
+  }
+
+  function restartQuickTunnel() {
+    if (!confirm("Generate a brand-new Quick Tunnel URL?\n\nThe current public URL will change and viewers may need a reload.")) return;
+    return busy($("btnNewTunnel"), "Generating…", function () {
+      return api("POST", "/api/tunnel/restart")
+        .then(function (r) {
+          toast("New tunnel live: " + (r && r.url ? r.url : "(URL pending)"), "success");
+          return updateTunnelChip().then(refresh);
+        })
+        .catch(function (err) { toast("Tunnel restart failed: " + err.message, "error"); });
+    });
+  }
+
+  function saveDomain() {
+    var url = $("inDomainUrl").value.trim();
+    if (!url) { toast("Enter a domain URL first", "error"); return; }
+    if (!/^https?:\/\//i.test(url)) { toast("Domain must start with http:// or https://", "error"); return; }
+    var live = (statusCache && statusCache.publicStreamBaseUrl) || "";
+    if (isQuickTunnelUrl(url) && live && url.replace(/\/+$/, "") !== live.replace(/\/+$/, "")) {
+      if (!confirm("This is an old Quick-Tunnel URL — Quick-Tunnel links expire when the tunnel restarts.\n\nLive tunnel: " + live + "\n\nSave the live tunnel URL instead?")) return;
+      url = live;
+      $("inDomainUrl").value = live;
+    }
+    return busy($("btnSaveDomain"), "Applying…", function () {
+      return api("POST", "/api/tunnel/set-domain", { url: url })
+        .then(function (r) {
+          toast("Domain saved · " + ((r && r.url) || url) + " published to cloud", "success");
+          return updateTunnelChip().then(refresh);
+        })
+        .catch(function (err) { toast("Save failed: " + err.message, "error"); });
+    });
+  }
+
+  function testDomain() {
+    var url = $("inDomainUrl").value.trim();
+    return busy($("btnTestDomain"), "Testing…", function () {
+      return api("POST", "/api/tunnel/test", url ? { url: url } : {})
+        .then(function (r) {
+          showTestModal("Domain Test", [
+            { label: "Target", mono: true, text: r.targetUrl },
+            { label: "Health URL", mono: true, text: r.healthUrl },
+            { label: "Reachable", state: r.ok ? "ok" : "bad", text: r.ok ? ("HTTP " + r.status) : (r.error || "unreachable") },
+            { label: "Latency", text: r.latencyMs != null ? r.latencyMs + " ms" : "—" },
+            { label: "CORS header", mono: true, text: r.cors || "(none)" }
+          ]);
+        })
+        .catch(function (err) { toast("Domain test failed: " + err.message, "error"); });
+    });
+  }
+
+  /* ======================= wiring ======================= */
+  $("btnProbe").addEventListener("click", function () { probeAll(); });
+  $("btnSync").addEventListener("click", function () { syncCloud(); });
+  $("btnSaveDomain").addEventListener("click", function () { saveDomain(); });
+  $("btnTestDomain").addEventListener("click", function () { testDomain(); });
+  $("btnNewTunnel").addEventListener("click", function () { restartQuickTunnel(); });
+  $("btnNew").addEventListener("click", function () { openForm(null); });
+  $("btnEmptyNew").addEventListener("click", function () { openForm(null); });
+  $("btnDialogClose").addEventListener("click", closeForm);
+  $("btnCancel").addEventListener("click", closeForm);
+  $("btnTestClose").addEventListener("click", closeTest);
+  $("btnTestDone").addEventListener("click", closeTest);
+
+  $("dlg").querySelector(".modal-backdrop").addEventListener("click", closeForm);
+  $("testDlg").querySelector(".modal-backdrop").addEventListener("click", closeTest);
+
+  $("form").addEventListener("submit", submitForm);
+  $("form").addEventListener("input", function () { $("formError").classList.add("hidden"); });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Escape") return;
+    if (!$("testDlg").classList.contains("hidden")) closeTest();
+    else if (!$("dlg").classList.contains("hidden")) closeForm();
+  });
+
+  function skeleton() {
+    var wrap = $("cards");
+    wrap.textContent = "";
+    for (var i = 0; i < 2; i++) wrap.append(el("div", { class: "skel" }));
+  }
+
+  /* ======================= init ======================= */
+  skeleton();
+  updateTunnelChip();
+  refresh();
+  setInterval(function () {
+    if (!anyDlgOpen()) {
+      refresh();
+      updateTunnelChip();
+    }
+  }, 10000);
+})();
+</script>
+</body>
+</html>

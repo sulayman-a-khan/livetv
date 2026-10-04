@@ -2,20 +2,65 @@
   "name": "local-pc-server",
   "version": "1.0.0",
   "description": "Local origin control server: multi-event manager, HLS stream forwarder and one-click MongoDB cloud sync.",
-  "main": "server.js",
+  "main": "main.js",
   "private": true,
   "license": "UNLICENSED",
+  "author": "SoluPlay",
   "engines": {
     "node": ">=18.17.0"
   },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js",
+    "app": "electron .",
+    "build:exe": "electron-builder"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "mongoose": "^8.6.1"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.soluplay.origincontrol",
+    "productName": "SoluPlay Origin Control",
+    "asar": false,
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "splash.html",
+      "server.js",
+      "README.md",
+      "nginx.conf",
+      "package.json",
+      ".env",
+      "data/**/*",
+      "public/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.png",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}"
+    }
   }
 }

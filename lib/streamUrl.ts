@@ -84,7 +84,8 @@ export function resolveStreamUrl(rawUrl?: string, customBaseUrl?: string): strin
     (!url.includes("localhost") && !url.includes("127.0.0.1") && !url.includes("192.168.") && !url.includes("10."));
 
   if (url.startsWith("http://")) {
-    if (isBrowserHttps || isVercel || isPublicDomain) {
+    const isRawIP = /^http:\/\/\d+\.\d+\.\d+\.\d+/.test(url);
+    if (!isRawIP && (isBrowserHttps || isVercel || isPublicDomain)) {
       url = "https://" + url.slice(7);
     }
   }

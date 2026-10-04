@@ -101,6 +101,12 @@ function readNetworkInfo(): NetworkInfo {
       label = "AUTO";
   }
 
+  // Device-specific hard caps: Mobile -> 480p, Desktop -> 720p
+  if (typeof window !== "undefined") {
+    const isMobile = window.innerWidth < 1024;
+    maxHeight = Math.min(maxHeight, isMobile ? 480 : 720);
+  }
+
   if (saveData) {
     maxHeight = Math.min(maxHeight, 360);
     bandwidth = Math.min(bandwidth, 600_000);
@@ -149,7 +155,7 @@ interface HlsPlayerProps {
  * ------------------------------------------------------------------ */
 
 /** Step 1 — instant in-place retry of the SAME link. */
-const INSTANT_RETRY_MS = 1000;
+const INSTANT_RETRY_MS = 2500;
 /** Step 2 — cool-off before moving to the next server link. */
 const SERVER_SWITCH_MS = 5000;
 /** Step 3 — how long the Bangla banner shows before auto-advancing channels. */
@@ -597,8 +603,8 @@ export default function HlsPlayer({
           // ---- Aggressive Real-Time Live Sync & Low Latency ----
           liveSyncDurationCount: 1, // always snap to the latest available live edge chunk
           liveMaxLatencyDurationCount: 2, // force fast-forward/skip if drifting >2 segments behind live
-          maxBufferLength: 3, // keep player buffer at max 3 seconds
-          maxMaxBufferLength: 6, // cap max buffer to 6 seconds
+          maxBufferLength: isSlow ? 8 : 5,
+          maxMaxBufferLength: isSlow ? 15 : 10,
           backBufferLength: 0, // don't store historical playback buffer in live mode
           liveBackBufferLength: 0,
           liveDurationInfinity: true,
@@ -1175,6 +1181,17 @@ export default function HlsPlayer({
       window.removeEventListener("orientationchange", update);
     };
   }, []);
+
+  // Periodic live-edge resync to prevent memory accumulation
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const hls = getHlsRefObj(frontSlotRef.current).current;
+      if (hls && isPlaying) {
+        hls.startLoad(-1); // re-sync to live edge, flushing stale buffer
+      }
+    }, 30 * 60 * 1000); // every 30 minutes
+    return () => clearInterval(interval);
+  }, [isPlaying, getHlsRefObj]);
 
   const toggleFullscreen = () => {
     // Fullscreen the whole frame (not just the <video>) so the custom

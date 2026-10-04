@@ -141,8 +141,8 @@ function loadConfig(env) {
     autoHeartbeat: envBool(env, "AUTO_HEARTBEAT", true),
     heartbeatIntervalSec: envInt(env, "HEARTBEAT_INTERVAL_SEC", 30, 5, 3600),
 
-    xtreamServerUrl: trimSlash(env.XTREAM_SERVER_URL || "http://play.dgix.top:8080"),
-    xtreamUsername: (env.XTREAM_USERNAME || "sulayman9991").trim(),
+    xtreamServerUrl: trimSlash(env.XTREAM_SERVER_URL || ""),
+    xtreamUsername: (env.XTREAM_USERNAME || "").trim(),
     xtreamPassword: (env.XTREAM_PASSWORD || "").trim(),
 
     corsOrigins: (env.CORS_ORIGINS || "*").split(",").map((s) => s.trim()).filter(Boolean),

@@ -25,7 +25,7 @@ export type HealthCheckScope = "pinned" | "full";
 
 const PINNED_INTERVAL_MS = 60 * 60 * 1000;         // 1 hour
 const FULL_INTERVAL_MS = 24 * 60 * 60 * 1000;      // 24 hours
-const PROBE_TIMEOUT_MS = 5000;                     // 5 seconds per stream probe
+const PROBE_TIMEOUT_MS = 12000;
 const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parallel for speed
 
 declare global {

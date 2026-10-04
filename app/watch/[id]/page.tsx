@@ -3,8 +3,8 @@
 import "@/lib/tvPolyfills";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
-import HlsPlayer, { StreamMirror } from "@/components/HlsPlayer";
-import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
+import { DirectHlsPlayer } from "@/components/players";
+import { FreeStreamMirror, buildFreeStreamLadder } from "@/lib/freeChannelService";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
@@ -26,7 +26,6 @@ import {
   Radio,
   CheckCircle2,
 } from "lucide-react";
-import { buildStreamCandidates, resolveStreamUrl } from "@/lib/streamUrl";
 
 interface ChannelDetails {
   _id: string;
@@ -35,7 +34,7 @@ interface ChannelDetails {
   category: string;
   subCategory?: string;
   country: string;
-  streams: StreamMirror[];
+  streams: FreeStreamMirror[];
 }
 
 interface SidebarChannel {
@@ -229,7 +228,18 @@ export default function WatchPage() {
       if (requestId !== latestRequestIdRef.current) return;
 
       if (data.success && data.channel) {
-        setChannel(data.channel);
+        const rawCh = data.channel;
+        const primary = rawCh.streamUrl || (rawCh.streams && rawCh.streams[0]?.url) || "";
+        const backups = Array.isArray(rawCh.backupStreamUrls)
+          ? rawCh.backupStreamUrls
+          : Array.isArray(rawCh.streams)
+          ? rawCh.streams.slice(1).map((s: any) => s.url)
+          : [];
+        const ladder = buildFreeStreamLadder(primary, backups, channelId);
+        setChannel({
+          ...rawCh,
+          streams: ladder.length > 0 ? ladder : (rawCh.streams as FreeStreamMirror[]),
+        });
         setCurrentStreamIndex(0);
       } else {
         // Fallback 1: check /api/events for a sports event match
@@ -244,21 +254,14 @@ export default function WatchPage() {
               sportsFound = true;
               const pUrl = evMatch.primaryStreamUrl || evMatch.streamUrl || "";
               const bUrls = evMatch.backupStreamUrls || [];
-              const candidates = buildStreamCandidates(
-                pUrl,
-                bUrls,
-                channelId,
-                undefined,
-                evMatch.sportType || "Live Sports",
-                true
-              );
+              const candidates = buildFreeStreamLadder(pUrl, bUrls, channelId);
               setChannel({
                 _id: channelId,
                 name: evMatch.matchTitle || "Live Sports Match",
                 logo: "",
                 category: evMatch.sportType || "Live Sports",
                 country: "Global",
-                streams: candidates as StreamMirror[],
+                streams: candidates,
               });
               setCurrentStreamIndex(0);
             }
@@ -272,21 +275,14 @@ export default function WatchPage() {
           const streamParam = searchParams.get("stream");
           const titleParam = searchParams.get("title");
           if (streamParam) {
-            const candidates = buildStreamCandidates(
-              streamParam,
-              [],
-              channelId,
-              undefined,
-              "Live Sports",
-              true
-            );
+            const candidates = buildFreeStreamLadder(streamParam, [], channelId);
             setChannel({
               _id: channelId,
               name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
               logo: "",
               category: "Live Sports",
               country: "Global",
-              streams: candidates as StreamMirror[],
+              streams: candidates,
             });
             setCurrentStreamIndex(0);
           } else if (!isInitial) {
@@ -302,21 +298,14 @@ export default function WatchPage() {
       const streamParam = searchParams.get("stream");
       const titleParam = searchParams.get("title");
       if (streamParam) {
-        const candidates = buildStreamCandidates(
-          streamParam,
-          [],
-          channelId,
-          undefined,
-          "Live Sports",
-          true
-        );
+        const candidates = buildFreeStreamLadder(streamParam, [], channelId);
         setChannel({
           _id: channelId,
           name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
           logo: "",
           category: "Live Sports",
           country: "Global",
-          streams: candidates as StreamMirror[],
+          streams: candidates,
         });
       } else if (!isInitial) {
         revertFailedSwitch();
@@ -364,13 +353,10 @@ export default function WatchPage() {
 
     if (streamParam) {
       setActiveChannelId(channelIdParam || "live-sports-event");
-      const candidates = buildStreamCandidates(
+      const candidates = buildFreeStreamLadder(
         streamParam,
         [],
-        channelIdParam || "direct",
-        undefined,
-        "Live Sports",
-        true
+        channelIdParam || "direct"
       );
       setChannel({
         _id: channelIdParam || "live-sports-event",
@@ -378,7 +364,7 @@ export default function WatchPage() {
         logo: "",
         category: "Live Sports",
         country: "Global",
-        streams: candidates as StreamMirror[],
+        streams: candidates,
       });
       setInitialLoading(false);
     } else if (channelIdParam) {
@@ -688,13 +674,7 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  {isActiveStreamYouTube ? (
-                    <YouTubeLivePlayer
-                      channelName={channel.name}
-                      youtubeUrl={activeStreamUrl}
-                      onUnavailable={handleAllServersFailed}
-                    />
-                  ) : isActiveStreamMpegTs ? (
+                  {isActiveStreamMpegTs ? (
                     <MpegTsPlayer
                       channelName={channel.name}
                       streams={channel.streams}
@@ -705,15 +685,13 @@ export default function WatchPage() {
                       onSwitchFailed={handleSwitchFailed}
                     />
                   ) : (
-                    <HlsPlayer
+                    <DirectHlsPlayer
                       channelName={channel.name}
                       channelId={channel._id}
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
                       onAllServersFailed={handleAllServersFailed}
-                      onSwitchingChange={handleSwitchingChange}
-                      onSwitchFailed={handleSwitchFailed}
                     />
                   )}
                 </div>

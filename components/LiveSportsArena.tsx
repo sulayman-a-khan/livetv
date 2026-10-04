@@ -275,7 +275,7 @@ export default function LiveSportsArena() {
             const matchId = ev.id || ev._id || "event";
             const rawStreamUrl = ev.primaryStreamUrl || ev.streamUrl || "";
             const streamUrl = resolveStreamUrl(rawStreamUrl);
-            const targetHref = `/watch/${matchId}?stream=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(ev.matchTitle)}`;
+            const targetHref = `/arena/${matchId}?stream=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(ev.matchTitle)}`;
 
             return (
               <div

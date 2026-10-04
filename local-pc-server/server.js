@@ -108,7 +108,6 @@ function loadConfig(env) {
 
     nodeId: slugify(env.LOCAL_NODE_ID || os.hostname(), 60) || "local-pc",
     publicStreamBaseUrl: trimSlash(env.PUBLIC_STREAM_BASE_URL),
-    tunnelToken: (env.CLOUDFLARE_TUNNEL_TOKEN || "").trim(),
 
     mongoUri: (env.MONGODB_URI || "").trim(),
     cloudAppUrl: trimSlash(env.CLOUD_APP_URL),
@@ -940,24 +939,29 @@ async function setStreamBaseUrlInMongo(url) {
 }
 
 /* ========================================================================== *
- * Cloudflare Tunnel Manager (Named Tunnel & Quick Tunnel Support)
+ * Auto-Healing Cloudflare Quick Tunnel Manager (*.trycloudflare.com)
  * ========================================================================== */
 
-class TunnelManager {
+class AutoHealingQuickTunnelManager {
   constructor() {
     this.process = null;
     this.url = null;
-    this.mode = CONFIG.tunnelToken ? "named" : "quick";
-    this.status = "stopped";
+    this.status = "stopped"; // "stopped" | "starting" | "running" | "healing" | "error"
     this.lastError = null;
     this.startedAt = null;
+    this.healCount = 0;
+    this.lastHealedAt = null;
+    this.isShuttingDown = false;
+    this.consecutiveEdgeFailures = 0;
+    this.healTimeout = null;
+    this.edgePingInterval = null;
+    this.restarting = false;
   }
 
   async start() {
-    if (this.process && this.url) return this.url;
+    if (this.process && this.url && this.status === "running") return this.url;
     this.status = "starting";
     this.lastError = null;
-    this.mode = CONFIG.tunnelToken ? "named" : "quick";
 
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -970,34 +974,22 @@ class TunnelManager {
             resolve(this.url);
           } else {
             this.status = "error";
-            this.lastError = this.mode === "named" ? "Timed out connecting named tunnel" : "Timed out waiting for trycloudflare.com URL";
+            this.lastError = "Timed out waiting for trycloudflare.com URL";
             reject(new Error(this.lastError));
           }
         }
       }, 30000);
 
       try {
-        const isNamed = Boolean(CONFIG.tunnelToken);
-        const args = isNamed
-          ? [
-              "tunnel",
-              "run",
-              "--token", CONFIG.tunnelToken,
-              "--protocol", "quic",
-              "--ha-connections", "1",
-              "--no-autoupdate",
-              "--edge-ip-version", "auto",
-              "--grace-period", "2s",
-            ]
-          : [
-              "tunnel",
-              "--url", "http://localhost:" + port,
-              "--protocol", "quic",
-              "--ha-connections", "1",
-              "--no-autoupdate",
-              "--edge-ip-version", "auto",
-              "--grace-period", "2s",
-            ];
+        const args = [
+          "tunnel",
+          "--url", "http://localhost:" + port,
+          "--protocol", "quic",
+          "--ha-connections", "1",
+          "--no-autoupdate",
+          "--edge-ip-version", "auto",
+          "--grace-period", "1s",
+        ];
 
         const proc = spawn("cloudflared", args, {
           stdio: ["ignore", "pipe", "pipe"],
@@ -1005,54 +997,49 @@ class TunnelManager {
         });
         this.process = proc;
         this.startedAt = new Date();
+        this.consecutiveEdgeFailures = 0;
 
         const handleOutput = (chunk) => {
           const text = chunk.toString();
+          const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+          if (match) {
+            const newUrl = match[0];
+            const isNewUrl = this.url !== newUrl;
+            this.url = newUrl;
+            this.status = "running";
+            CONFIG.publicStreamBaseUrl = newUrl;
+            console.log(`[tunnel:auto-heal] 🚀 Active Quick Tunnel: ${newUrl}`);
 
-          if (isNamed) {
-            // Named tunnel mode
-            if (!this.url && CONFIG.publicStreamBaseUrl) {
-              this.url = CONFIG.publicStreamBaseUrl;
-            }
-            if (
-              text.includes("Registered tunnel connection") ||
-              text.includes("Connection registered") ||
-              text.includes("Starting tunnel") ||
-              text.includes("connIndex=0")
-            ) {
-              this.status = "running";
-              console.log("[tunnel] Active Cloudflare Named Tunnel running on:", this.url || CONFIG.publicStreamBaseUrl || "Custom Domain");
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
-                resolve(this.url || CONFIG.publicStreamBaseUrl);
-              }
-            }
-          } else {
-            // Quick tunnel mode
-            const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-            if (match) {
-              this.url = match[0];
-              this.status = "running";
-              console.log("[tunnel] Active Cloudflare Quick Tunnel:", this.url);
-              // Rapid warm-up: fire immediate parallel background pings to accelerate Cloudflare edge DNS/SSL propagation
+            // Real-time dynamic URL sync to MongoDB Atlas settings & event cards
+            if (isNewUrl) {
               (async () => {
-                for (let i = 0; i < 6; i++) {
-                  try {
-                    await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(3000) });
-                    await probeAll();
-                    break;
-                  } catch (e) {
-                    await sleep(1000);
-                  }
+                try {
+                  await setStreamBaseUrlInMongo(newUrl);
+                  await syncToCloud({ mirror: true });
+                  console.log(`[tunnel:auto-heal] ✅ Stream Base URL auto-synced to MongoDB & Vercel cards.`);
+                } catch (e) {
+                  console.warn(`[tunnel:auto-heal] Sync to cloud warning: ${e.message}`);
                 }
               })().catch(() => {});
+            }
 
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(timer);
-                resolve(this.url);
+            // Rapid edge warm-up: parallel background pings
+            (async () => {
+              for (let i = 0; i < 6; i++) {
+                try {
+                  await fetch(newUrl + "/healthz", { signal: AbortSignal.timeout(2000) });
+                  await probeAll().catch(() => {});
+                  break;
+                } catch (e) {
+                  await sleep(1000);
+                }
               }
+            })().catch(() => {});
+
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              resolve(this.url);
             }
           }
         };
@@ -1060,27 +1047,30 @@ class TunnelManager {
         proc.stdout.on("data", handleOutput);
         proc.stderr.on("data", handleOutput);
 
+        // Sub-second process drop detection
         proc.on("error", (err) => {
-          console.warn("[tunnel] cloudflared error:", err.message);
-          this.status = "error";
+          console.warn("[tunnel:auto-heal] ⚠️ Child process error:", err.message);
           this.lastError = err.message;
-          this.process = null;
           if (!resolved) {
             resolved = true;
             clearTimeout(timer);
             reject(err);
           }
+          this.triggerAutoHeal("Process Error: " + err.message);
         });
 
-        proc.on("exit", (code) => {
-          console.log("[tunnel] cloudflared exited with code " + code);
-          this.status = "stopped";
-          this.process = null;
+        proc.on("exit", (code, signal) => {
+          console.log(`[tunnel:auto-heal] ⚠️ cloudflared exited (code=${code}, signal=${signal})`);
           if (!resolved) {
             resolved = true;
             clearTimeout(timer);
-            reject(new Error("cloudflared exited with code " + code));
+            reject(new Error("cloudflared exited before URL generation"));
           }
+          this.triggerAutoHeal(`Process Exit (code=${code})`);
+        });
+
+        proc.on("close", (code) => {
+          this.triggerAutoHeal(`Process Closed (code=${code})`);
         });
       } catch (err) {
         this.status = "error";
@@ -1090,11 +1080,67 @@ class TunnelManager {
           clearTimeout(timer);
           reject(err);
         }
+        this.triggerAutoHeal("Spawn Failed: " + err.message);
       }
     });
   }
 
+  triggerAutoHeal(reason) {
+    if (this.isShuttingDown || this.restarting) return;
+    if (this.status === "healing") return; // Debounce duplicate triggers
+
+    this.status = "healing";
+    this.process = null;
+    this.healCount++;
+    this.lastHealedAt = new Date().toISOString();
+    console.warn(`[tunnel:auto-heal] ⚡ Tunnel drop detected (${reason})! Auto-healing in 1s... (Heal Count: ${this.healCount})`);
+
+    if (this.healTimeout) clearTimeout(this.healTimeout);
+    this.healTimeout = setTimeout(async () => {
+      if (this.isShuttingDown) return;
+      try {
+        await this.restart();
+      } catch (err) {
+        console.error(`[tunnel:auto-heal] ❌ Auto-heal attempt failed: ${err.message}. Retrying in 2s...`);
+        this.status = "error";
+        setTimeout(() => this.triggerAutoHeal("Retry after failure"), 2000);
+      }
+    }, 1000);
+  }
+
+  startEdgeWatcher() {
+    if (this.edgePingInterval) clearInterval(this.edgePingInterval);
+    // Ultra-fast secondary fallback ping (every 2.5s)
+    this.edgePingInterval = setInterval(async () => {
+      if (this.isShuttingDown || this.status !== "running" || !this.url || this.restarting) return;
+      try {
+        const res = await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(2000) });
+        if (res.ok) {
+          this.consecutiveEdgeFailures = 0;
+        } else {
+          this.consecutiveEdgeFailures++;
+        }
+      } catch (e) {
+        this.consecutiveEdgeFailures++;
+      }
+
+      if (this.consecutiveEdgeFailures >= 2) {
+        console.warn(`[tunnel:auto-heal] ⚠️ Edge connectivity failed 2 consecutive checks. Triggering instant tunnel recreation...`);
+        this.consecutiveEdgeFailures = 0;
+        this.triggerAutoHeal("Edge health check failed 2 consecutive times");
+      }
+    }, 2500);
+  }
+
   async stop() {
+    if (this.healTimeout) {
+      clearTimeout(this.healTimeout);
+      this.healTimeout = null;
+    }
+    if (this.edgePingInterval) {
+      clearInterval(this.edgePingInterval);
+      this.edgePingInterval = null;
+    }
     if (this.process) {
       try {
         this.process.kill("SIGTERM");
@@ -1107,16 +1153,26 @@ class TunnelManager {
   }
 
   async restart() {
-    await this.stop();
-    await sleep(1000);
-    return this.start();
+    if (this.restarting) return this.url;
+    this.restarting = true;
+    try {
+      await this.stop();
+      await sleep(500);
+      const newUrl = await this.start();
+      this.startEdgeWatcher();
+      return newUrl;
+    } finally {
+      this.restarting = false;
+    }
   }
 
   getStatus() {
     return {
       status: this.status,
-      mode: this.mode,
-      tokenConfigured: Boolean(CONFIG.tunnelToken),
+      mode: "quick",
+      autoHeal: true,
+      healCount: this.healCount,
+      lastHealedAt: this.lastHealedAt,
       url: this.url,
       publicStreamBaseUrl: CONFIG.publicStreamBaseUrl || null,
       uptimeSec: this.startedAt && this.status === "running" ? Math.round((Date.now() - this.startedAt.getTime()) / 1000) : 0,
@@ -1126,7 +1182,7 @@ class TunnelManager {
   }
 }
 
-const tunnelManager = new TunnelManager();
+const tunnelManager = new AutoHealingQuickTunnelManager();
 
 /**
  * Mirrors models/SportsEvent.ts of the Next.js app (same collection name and
@@ -2809,12 +2865,14 @@ const ADMIN_HTML = String.raw`<!doctype html>
       $('inDomainUrl').value = s.publicStreamBaseUrl;
     }
     if (s.tunnel) {
-      var isNamed = s.tunnel.mode === 'named';
       var isRunning = s.tunnel.running;
-      $('tunnelStatusChip').textContent = isNamed
-        ? (isRunning ? '💎 Named Tunnel Active' : '💎 Named Tunnel (Starting…)')
-        : (isRunning ? '⚡ Quick Tunnel Active' : '⚡ Quick Tunnel');
-      $('tunnelStatusChip').className = 'badge-chip ' + (isRunning ? 'online' : '');
+      var isHealing = s.tunnel.status === 'healing';
+      var text = isHealing ? '⚡ Auto-Healing…' : (isRunning ? '⚡ Auto-Healing Quick Tunnel (Active)' : '⚡ Quick Tunnel (Starting…)');
+      if (s.tunnel.healCount > 0) {
+        text += ' • Heals: ' + s.tunnel.healCount;
+      }
+      $('tunnelStatusChip').textContent = text;
+      $('tunnelStatusChip').className = 'badge-chip ' + (isRunning ? 'online' : (isHealing ? 'scheduled' : ''));
     }
   }
 
@@ -3064,8 +3122,10 @@ function listen(app, host, port, label) {
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log("\n[" + signal + "] shutting down…");
+  console.log("\n[" + signal + "] shutting down gracefully…");
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  tunnelManager.isShuttingDown = true;
+  await tunnelManager.stop().catch(() => {});
   try {
     if (heartbeatStrategies().length) {
       heartbeat.running = false;
@@ -3121,11 +3181,22 @@ async function main() {
   console.log("  ───────────────────────────────────────────────");
   console.log("  Admin UI        http://localhost:" + CONFIG.adminPort + (CONFIG.adminPassword ? "   (password protected)" : ""));
   console.log("  Forwarder       " + localForwarderBase() + "/live/<streamId>.m3u8" + (publicServer ? "   <- expose THIS port only" : ""));
-  console.log("  Public base     " + (CONFIG.publicStreamBaseUrl || "not set (PUBLIC_STREAM_BASE_URL)"));
+  console.log("  Public base     " + (CONFIG.publicStreamBaseUrl || "auto-spawning Quick Tunnel..."));
   console.log("  Cloud DB        " + (CONFIG.mongoUri ? redactUri(CONFIG.mongoUri) : "not set (MONGODB_URI)"));
   console.log("  Heartbeat       " + (heartbeatStrategies().length && CONFIG.autoHeartbeat ? "every " + CONFIG.heartbeatIntervalSec + "s via " + heartbeatStrategies().join(" → ") : "off"));
   console.log("  Events          " + store.events.length + " loaded from " + CONFIG.dataFile);
   console.log("");
+
+  // Automatically spawn Cloudflare Quick Tunnel and activate Auto-Healing Edge Watcher
+  tunnelManager
+    .start()
+    .then((url) => {
+      console.log("[tunnel:startup] 🚀 Auto-Healing Quick Tunnel ready:", url);
+      tunnelManager.startEdgeWatcher();
+    })
+    .catch((err) => {
+      console.warn("[tunnel:startup] Initial Quick Tunnel start error: " + err.message);
+    });
 
   if (CONFIG.autoHeartbeat && heartbeatStrategies().length) {
     const tick = () => {
@@ -3139,6 +3210,10 @@ async function main() {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("exit", () => {
+    tunnelManager.isShuttingDown = true;
+    tunnelManager.stop().catch(() => {});
+  });
 }
 
 process.on("unhandledRejection", (reason) => {

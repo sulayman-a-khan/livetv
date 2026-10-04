@@ -740,20 +740,20 @@ class StrictStreamManager {
 
   startIdleWatcher() {
     if (this.idleCheckTimer) clearInterval(this.idleCheckTimer);
-    // Runs every 5s to check if active stream has had 0 viewers for 30s
+    // Runs every 10s to check if active stream has had 0 viewers for 180s (3 minutes)
     this.idleCheckTimer = setInterval(() => {
       if (!this.activeStream || this.activeStream.status !== "active") return;
       const now = Date.now();
       const idleMs = now - (this.activeStream.lastDataAt || now);
 
-      if (idleMs > 30000) {
-        console.log(`[xtream:idle] 💤 0 active clients for 30s on "${this.activeStream.streamId}". Gracefully disconnecting upstream Xtream connection.`);
-        this.closeActiveStream("Idle disconnect (0 viewers for 30s)");
+      if (idleMs > 180000) {
+        console.log(`[xtream:idle] 💤 0 active clients for 3m on "${this.activeStream.streamId}". Gracefully disconnecting upstream Xtream connection.`);
+        this.closeActiveStream("Idle disconnect (0 viewers for 3m)");
       } else {
         // Clear viewers set periodically so stale closed tabs don't artificially keep it alive
-        if (idleMs > 10000) this.activeStream.viewers.clear();
+        if (idleMs > 60000) this.activeStream.viewers.clear();
       }
-    }, 5000);
+    }, 10000);
   }
 
   getActiveInfo() {
@@ -1051,7 +1051,7 @@ async function forward(req, res, streamId, rawRest) {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500); // 4.5s timeout for stall detection
+    const timer = setTimeout(() => controller.abort(), 12000); // 12s timeout for stall detection
     res.on("close", () => controller.abort());
 
     let upstream;
@@ -1431,14 +1431,14 @@ class AutoHealingQuickTunnelManager {
 
   startEdgeWatcher() {
     if (this.edgePingInterval) clearInterval(this.edgePingInterval);
-    // Fast secondary fallback ping (every 3s) with 12s initial warmup grace period
+    // Secondary fallback ping (every 20s) with 30s initial warmup grace period
     this.edgePingInterval = setInterval(async () => {
       if (this.isShuttingDown || this.status !== "running" || !this.url || this.restarting) return;
       const uptimeMs = this.startedAt ? Date.now() - this.startedAt.getTime() : 0;
-      if (uptimeMs < 12000) return; // Allow initial Cloudflare DNS & SSL edge handshake
+      if (uptimeMs < 30000) return; // Allow initial Cloudflare DNS & SSL edge handshake
 
       try {
-        const res = await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(2500) });
+        const res = await fetch(this.url + "/healthz", { signal: AbortSignal.timeout(8000) });
         if (res.ok) {
           this.consecutiveEdgeFailures = 0;
         } else {
@@ -1448,12 +1448,12 @@ class AutoHealingQuickTunnelManager {
         this.consecutiveEdgeFailures++;
       }
 
-      if (this.consecutiveEdgeFailures >= 3) {
-        console.warn(`[tunnel:auto-heal] ⚠️ Edge connectivity failed 3 consecutive checks. Triggering instant tunnel recreation...`);
+      if (this.consecutiveEdgeFailures >= 5) {
+        console.warn(`[tunnel:auto-heal] ⚠️ Edge connectivity failed 5 consecutive checks. Triggering tunnel auto-heal...`);
         this.consecutiveEdgeFailures = 0;
-        this.triggerAutoHeal("Edge health check failed 3 consecutive times");
+        this.triggerAutoHeal("Edge health check failed 5 consecutive times");
       }
-    }, 3000);
+    }, 20000);
   }
 
   async stop() {

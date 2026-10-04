@@ -155,9 +155,9 @@ const SERVER_SWITCH_MS = 5000;
 /** Step 3 — how long the Bangla banner shows before auto-advancing channels. */
 const EXHAUSTED_HOLD_MS = 5000;
 /** A link must play this long uninterrupted before it counts as healthy. */
-const STABLE_PLAYBACK_MS = 8000;
-/** Buffering longer than this counts as a failure. */
-const STALL_TIMEOUT_MS = 5000;
+const STABLE_PLAYBACK_MS = 3000;
+/** Buffering longer than this counts as a failure (increased to 15s to prevent false disconnects during live segment fetches). */
+const STALL_TIMEOUT_MS = 15000;
 /** How long we give ONE mirror to start playing in the background before trying the next mirror for the channel we're tuning into. */
 const PRELOAD_MIRROR_TIMEOUT_MS = 8000;
 
@@ -708,7 +708,8 @@ export default function HlsPlayer({
           if (opts.front) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                handleStreamFailure("network error / link offline");
+                console.warn("[HLS] Fatal network error. Calling hls.startLoad() to recover without dropping session...");
+                hls.startLoad();
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 hls.recoverMediaError();
@@ -970,11 +971,11 @@ export default function HlsPlayer({
       clearStallTimer();
       clearRecoveryTimers();
       recoveringRef.current = false;
+      retriedCurrentRef.current = false;
       setFailoverToast(null);
       if (recoveryPhase !== "idle") setRecoveryPhase("idle");
 
       stableTimerRef.current = setTimeout(() => {
-        retriedCurrentRef.current = false;
         deadServersRef.current.delete(displayedIndexRef.current);
       }, STABLE_PLAYBACK_MS);
     } else {

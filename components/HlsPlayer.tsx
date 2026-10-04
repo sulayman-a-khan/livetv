@@ -118,6 +118,7 @@ function readNetworkInfo(): NetworkInfo {
 
 interface HlsPlayerProps {
   channelName: string;
+  channelId?: string;
   streams: StreamMirror[];
   /** Optional controlled active stream index (e.g. driven by an external server switcher). */
   currentStreamIndex?: number;
@@ -172,6 +173,7 @@ const ALL_SERVERS_DOWN_BN = "চ্যানেল সচল নয়";
 
 export default function HlsPlayer({
   channelName,
+  channelId,
   streams,
   currentStreamIndex: controlledStreamIndex,
   onStreamIndexChange,
@@ -346,7 +348,13 @@ export default function HlsPlayer({
     (slot: Slot) => {
       const hlsRefObj = getHlsRefObj(slot);
       if (hlsRefObj.current) {
-        hlsRefObj.current.destroy();
+        try {
+          hlsRefObj.current.stopLoad();
+          hlsRefObj.current.detachMedia();
+          hlsRefObj.current.destroy();
+        } catch {
+          /* ignore */
+        }
         hlsRefObj.current = null;
       }
       const video = getVideoEl(slot);
@@ -579,8 +587,22 @@ export default function HlsPlayer({
 
       const hlsRefObj = getHlsRefObj(slot);
       if (hlsRefObj.current) {
-        hlsRefObj.current.destroy();
+        try {
+          hlsRefObj.current.stopLoad();
+          hlsRefObj.current.detachMedia();
+          hlsRefObj.current.destroy();
+        } catch {
+          /* ignore */
+        }
         hlsRefObj.current = null;
+      }
+
+      try {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      } catch {
+        /* ignore */
       }
 
       if (opts.front) {
@@ -915,44 +937,80 @@ export default function HlsPlayer({
   commitSwapRef.current = commitSwap;
 
   /**
-   * Single entry point for "the stream that should be showing changed" —
-   * whether that's a brand-new channel from the sidebar or a manual mirror
-   * pick within the same channel. The very first stream this player ever
-   * shows loads directly (nothing to preserve); every switch after that
-   * pre-buffers in the background and crossfades in once ready.
+   * Channel switch handler:
+   * Instantly purges cached video buffers, destroys active HLS instances,
+   * resets video element attributes, and instantiates a clean fresh player.
    */
   const requestSwitch = useCallback(
     (target: StreamMirror, fullMirrors: StreamMirror[], label: string) => {
       const generation = ++switchGenerationRef.current;
 
-      if (!frontEverLoadedRef.current) {
-        frontEverLoadedRef.current = true;
-        lastAppliedStreamIdRef.current = target._id;
-        setDisplayedChannelName(label);
-        displayedMirrorsRef.current = fullMirrors;
-        setDisplayedMirrors(fullMirrors);
-        const idx = Math.max(
-          0,
-          fullMirrors.findIndex((m) => m._id === target._id)
-        );
-        displayedIndexRef.current = idx;
-        setDisplayedIndex(idx);
-        deadServersRef.current = new Set();
-        retriedCurrentRef.current = false;
-        recoveringRef.current = false;
-        setRecoveryPhase("idle");
-        loadIntoSlot(frontSlotRef.current, target.url, { front: true, generation });
-        return;
+      // Clear any pending timers
+      clearStallTimer();
+      clearRecoveryTimers();
+      if (preloadTimeoutRef.current) {
+        clearTimeout(preloadTimeoutRef.current);
+        preloadTimeoutRef.current = null;
+      }
+      if (switchFailTimeoutRef.current) {
+        clearTimeout(switchFailTimeoutRef.current);
+        switchFailTimeoutRef.current = null;
       }
 
-      setSwitching(true);
-      setPendingChannelLabel(label);
+      // Force destroy existing HLS instances on both slots immediately
+      [hlsRefA, hlsRefB].forEach((ref) => {
+        if (ref.current) {
+          try {
+            ref.current.stopLoad();
+            ref.current.detachMedia();
+            ref.current.destroy();
+          } catch {
+            /* ignore */
+          }
+          ref.current = null;
+        }
+      });
+
+      // Completely reset both video elements to wipe out lingering MediaSource buffer cache
+      [videoRefA.current, videoRefB.current].forEach((video) => {
+        if (video) {
+          try {
+            video.pause();
+            video.removeAttribute("src");
+            video.load();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+
+      frontEverLoadedRef.current = true;
+      frontSlotRef.current = "A";
+      setFrontSlot("A");
+      lastAppliedStreamIdRef.current = target._id;
+      setDisplayedChannelName(label);
+      displayedMirrorsRef.current = fullMirrors;
+      setDisplayedMirrors(fullMirrors);
+
+      const idx = Math.max(
+        0,
+        fullMirrors.findIndex((m) => m._id === target._id)
+      );
+      displayedIndexRef.current = idx;
+      setDisplayedIndex(idx);
+
+      deadServersRef.current = new Set();
+      retriedCurrentRef.current = false;
+      recoveringRef.current = false;
+      setRecoveryPhase("idle");
+      setFailoverToast(null);
+      setSwitching(false);
+      setPendingChannelLabel(null);
       setSwitchFailedMsg(null);
-      pendingStreamsRef.current = fullMirrors;
-      pendingChannelNameRef.current = label;
-      pendingMirrorOrderRef.current = [target, ...fullMirrors.filter((m) => m._id !== target._id)];
-      preloadAttemptIndexRef.current = 0;
-      attemptPreloadRef.current?.(generation);
+      setShowQualityMenu(false);
+
+      // Instantly instantiate a fresh player
+      loadIntoSlot("A", target.url, { front: true, generation });
     },
     [loadIntoSlot]
   );
@@ -964,9 +1022,9 @@ export default function HlsPlayer({
     if (!streams || streams.length === 0) return;
     const target = streams[currentStreamIndex] || streams[0];
     if (!target) return;
-    if (target._id === lastAppliedStreamIdRef.current) return;
+    if (target._id === lastAppliedStreamIdRef.current && displayedChannelName === channelName) return;
     requestSwitch(target, streams, channelName);
-  }, [streams, currentStreamIndex, channelName, requestSwitch]);
+  }, [streams, currentStreamIndex, channelName, channelId, displayedChannelName, requestSwitch]);
 
   // Full teardown on unmount only.
   useEffect(() => {

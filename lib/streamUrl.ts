@@ -94,15 +94,69 @@ export function resolveStreamUrl(rawUrl?: string, customBaseUrl?: string): strin
 }
 
 /**
+ * Determines whether a stream requires security proxying (/api/stream, tokenization, AES proxy).
+ *
+ * Requirements:
+ * - Sports Arena streams (live sports events, matches, sports categories) MUST remain 100% secured & proxied.
+ * - Local PC Server / Forwarder streams (/live/..., trycloudflare, localhost/port 5001, Xtream CDN) MUST remain secured & proxied.
+ * - Public Free Categories (News, Entertainment, General, Bangladeshi TV, Indian TV, Pakistani TV, Global TV, GitHub/IPTV-org)
+ *   bypass the proxy and use direct URL playback for 0 backend overhead.
+ * - CRITICAL: Never base this logic solely on file extension (.m3u8). Sports Arena streams also use .m3u8.
+ */
+export function isSecuredOrSportsStream(
+  url?: string,
+  categoryOrSource?: string,
+  isSportsEvent?: boolean
+): boolean {
+  if (isSportsEvent) return true;
+
+  const cat = (categoryOrSource || "").toLowerCase();
+  if (
+    cat.includes("sport") ||
+    cat.includes("arena") ||
+    cat === "live sports" ||
+    cat === "sports-tv" ||
+    cat === "cricket" ||
+    cat === "football"
+  ) {
+    return true;
+  }
+
+  if (!url || typeof url !== "string") return false;
+  const cleanUrl = url.toLowerCase();
+
+  // Local PC Server / Forwarder / Cloudflare tunnel sources
+  const isLocalOrTunnel =
+    cleanUrl.includes("localhost") ||
+    cleanUrl.includes("127.0.0.1") ||
+    cleanUrl.includes(".trycloudflare.com") ||
+    cleanUrl.includes("/live/") ||
+    cleanUrl.includes("/api/stream");
+
+  // Xtream CDN / Provider sources
+  const isXtreamOrProvider =
+    cleanUrl.includes("player_api.php") ||
+    cleanUrl.includes("get.php") ||
+    cleanUrl.includes("/play/") ||
+    cleanUrl.endsWith(".ts") ||
+    cleanUrl.includes(".ts?") ||
+    cleanUrl.includes("/ts/");
+
+  return isLocalOrTunnel || isXtreamOrProvider;
+}
+
+/**
  * Builds candidate stream mirrors for the HLS player.
- * Includes the direct stream as primary, followed by dynamic fallback through
- * the Next.js /api/stream proxy, plus any configured backup URLs.
+ * - For Public Free Categories: returns DIRECT URLs for instant playback without backend overhead.
+ * - For Sports Arena / Local PC Server / Xtream CDN: includes direct stream plus dynamic /api/stream proxy fallback.
  */
 export function buildStreamCandidates(
   primaryUrl: string,
   backupUrls: string[] = [],
   id: string = "event",
-  customBaseUrl?: string
+  customBaseUrl?: string,
+  categoryOrSource?: string,
+  isSportsEvent?: boolean
 ): ResolvedStreamMirror[] {
   const resolvedPrimary = resolveStreamUrl(primaryUrl, customBaseUrl);
   const candidates: ResolvedStreamMirror[] = [];
@@ -117,8 +171,10 @@ export function buildStreamCandidates(
       latency: 25,
     });
 
-    // Dynamic URL fallback through /api/stream proxy (handles CORS & tunnel quirks)
-    if (!resolvedPrimary.startsWith("/") && !resolvedPrimary.includes("/api/stream")) {
+    const requiresSecurity = isSecuredOrSportsStream(resolvedPrimary, categoryOrSource, isSportsEvent);
+
+    // Dynamic URL fallback through /api/stream proxy ONLY for Sports Arena / Local PC / Xtream CDN
+    if (requiresSecurity && !resolvedPrimary.startsWith("/") && !resolvedPrimary.includes("/api/stream")) {
       candidates.push({
         _id: `stream_${id}_proxy`,
         url: `/api/stream?url=${encodeURIComponent(resolvedPrimary)}`,

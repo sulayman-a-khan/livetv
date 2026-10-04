@@ -244,7 +244,14 @@ export default function WatchPage() {
               sportsFound = true;
               const pUrl = evMatch.primaryStreamUrl || evMatch.streamUrl || "";
               const bUrls = evMatch.backupStreamUrls || [];
-              const candidates = buildStreamCandidates(pUrl, bUrls, channelId);
+              const candidates = buildStreamCandidates(
+                pUrl,
+                bUrls,
+                channelId,
+                undefined,
+                evMatch.sportType || "Live Sports",
+                true
+              );
               setChannel({
                 _id: channelId,
                 name: evMatch.matchTitle || "Live Sports Match",
@@ -265,7 +272,14 @@ export default function WatchPage() {
           const streamParam = searchParams.get("stream");
           const titleParam = searchParams.get("title");
           if (streamParam) {
-            const candidates = buildStreamCandidates(streamParam, [], channelId);
+            const candidates = buildStreamCandidates(
+              streamParam,
+              [],
+              channelId,
+              undefined,
+              "Live Sports",
+              true
+            );
             setChannel({
               _id: channelId,
               name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
@@ -288,7 +302,14 @@ export default function WatchPage() {
       const streamParam = searchParams.get("stream");
       const titleParam = searchParams.get("title");
       if (streamParam) {
-        const candidates = buildStreamCandidates(streamParam, [], channelId);
+        const candidates = buildStreamCandidates(
+          streamParam,
+          [],
+          channelId,
+          undefined,
+          "Live Sports",
+          true
+        );
         setChannel({
           _id: channelId,
           name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
@@ -343,7 +364,14 @@ export default function WatchPage() {
 
     if (streamParam) {
       setActiveChannelId(channelIdParam || "live-sports-event");
-      const candidates = buildStreamCandidates(streamParam, [], channelIdParam || "direct");
+      const candidates = buildStreamCandidates(
+        streamParam,
+        [],
+        channelIdParam || "direct",
+        undefined,
+        "Live Sports",
+        true
+      );
       setChannel({
         _id: channelIdParam || "live-sports-event",
         name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
@@ -679,6 +707,7 @@ export default function WatchPage() {
                   ) : (
                     <HlsPlayer
                       channelName={channel.name}
+                      channelId={channel._id}
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}

@@ -16,14 +16,14 @@ export default function Header() {
           />
         </Link>
 
-        {/* Live banner — cropped to its text, sized so the visible glyphs
-            match the brand logo's visible height, right-aligned */}
+        {/* App promo banner — asset is trimmed to its visible ink so the
+            height classes below are the real on-screen height */}
         <div className="ml-auto flex items-center shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/images/header-banner.png"
-            alt="লাইভ খেলা ও টিভি দেখুন"
-            className="h-[24px] sm:h-[27px] w-auto object-contain"
+            src="/images/app-promo-banner.png"
+            alt="মোবাইল অ্যাপটি ডাউনলোড করুন"
+            className="h-[34px] sm:h-[42px] lg:h-[48px] w-auto object-contain select-none"
           />
         </div>
       </div>

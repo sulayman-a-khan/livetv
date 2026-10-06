@@ -10,7 +10,7 @@ The site looks for a single token, defined in `lib/appRuntime.ts`:
 export const EMBEDDED_APP_UA_TOKEN = "SoluPlayApp";
 ```
 
-Append it to the WebView's User-Agent. The app's build **must** do this, or web-only UI (the "download our app" ticker) shows up inside the app.
+Append it to the WebView's User-Agent. The app's build **must** do this, or the web-only "download our app" promos show up inside the app.
 
 **Android / Kotlin (WebView):**
 
@@ -36,6 +36,8 @@ Any other framework (Capacitor, Cordova, Tauri, etc.) is fine as long as the UA 
 | UI | Web | App |
 | --- | --- | --- |
 | App-download news ticker under the direct-HLS player (`components/NewsTicker.tsx`) | shown | hidden |
+| Navbar "Download the APP NOW!" promo (`components/Header.tsx`) | shown | hidden |
+| App promo above the homepage footer (`components/AppDownloadBanner.tsx`) | shown under 768px | hidden |
 
 ## Adding more web/app differences later
 
@@ -45,4 +47,4 @@ Any other framework (Capacitor, Cordova, Tauri, etc.) is fine as long as the UA 
 
 ## Verifying the app branch without the app
 
-Spoof the UA before page scripts run, then load any `/watch/[id]` page. In Chrome DevTools, override the User-Agent to end with `SoluPlayApp/1.0`; the ticker should be absent from the DOM while the player still renders.
+Spoof the UA before page scripts run, then load the homepage and any `/watch/[id]` page. In Chrome DevTools, override the User-Agent to end with `SoluPlayApp/1.0`: the navbar promo, the footer promo and the ticker should all be absent from the DOM (and never fetched), while the logo, player and rails still render.

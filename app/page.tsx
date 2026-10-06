@@ -4,6 +4,7 @@ import "@/lib/tvPolyfills";
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
+import AppDownloadBanner from "@/components/AppDownloadBanner";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
 import LiveSportsArena from "@/components/LiveSportsArena";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
@@ -145,6 +146,8 @@ export default function HomePage() {
           </div>
         )}
       </main>
+
+      <AppDownloadBanner />
 
       {/* Footer */}
       <footer className="border-t border-slate-800/80 bg-[#070d18] py-4 text-center text-xs text-slate-400 mt-4">

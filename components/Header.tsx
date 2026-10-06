@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 
+// Placeholder until the real app download URL exists
+const APP_DOWNLOAD_URL = "https://example.com/soluplay-app";
+
 export default function Header() {
   return (
     <header className="sticky top-0 z-50 bg-[#070d18]/90 backdrop-blur-md border-b border-slate-800/80">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-[72px] lg:h-[80px] flex items-center justify-between gap-3">
         {/* Brand Logo */}
         <Link href="/" className="flex items-center group shrink-0 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -19,12 +22,20 @@ export default function Header() {
         {/* App promo banner — asset is trimmed to its visible ink so the
             height classes below are the real on-screen height */}
         <div className="ml-auto flex items-center shrink-0">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/images/app-promo-banner.png"
-            alt="মোবাইল অ্যাপটি ডাউনলোড করুন"
-            className="h-[34px] sm:h-[42px] lg:h-[48px] w-auto object-contain select-none"
-          />
+          <Link
+            href={APP_DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="মোবাইল অ্যাপটি ডাউনলোড করুন"
+            className="block shrink-0"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/images/app-promo-banner.png"
+              alt="মোবাইল অ্যাপটি ডাউনলোড করুন"
+              className="h-[44px] sm:h-[52px] lg:h-[58px] w-auto object-contain select-none hover:scale-[1.04] active:scale-[0.99] transition-transform"
+            />
+          </Link>
         </div>
       </div>
     </header>

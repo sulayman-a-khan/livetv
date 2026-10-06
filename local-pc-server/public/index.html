@@ -77,6 +77,11 @@ body{
 .brand-name em{font-style:normal;color:var(--muted);font-weight:500}
 .brand-sub{font-size:12px;color:var(--faint);display:flex;align-items:center;gap:6px;white-space:nowrap}
 .brand-sub .ic{width:12px;height:12px;color:var(--green)}
+.sig{display:inline-flex;align-items:center;gap:4px;margin-left:2px;padding:3px 7px;border:1px solid var(--line-2);border-radius:999px;background:rgba(10,18,32,.65);cursor:help;flex:none}
+.sig-dot{width:6px;height:6px;border-radius:50%;background:#2a3b5e;transition:background .25s,box-shadow .25s}
+.sig[data-state="ok"] .sig-dot.ok{background:var(--green);box-shadow:0 0 7px var(--green)}
+.sig[data-state="warn"] .sig-dot.warn{background:var(--amber);box-shadow:0 0 7px var(--amber)}
+.sig[data-state="bad"] .sig-dot.bad{background:var(--rose);box-shadow:0 0 7px var(--rose)}
 .topbar-actions{display:flex;align-items:center;gap:9px;margin-left:auto;flex-wrap:wrap}
 
 /* ---------- buttons ---------- */
@@ -292,11 +297,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 .seg-btn.active{color:#9cc1ff;border-color:var(--blue);background:rgba(77,141,255,.14)}
 .seg-btn .ic{width:12px;height:12px}
 
-.staged{margin:12px 18px 0 20px;border:1px solid rgba(245,165,36,.38);background:rgba(245,165,36,.06);border-radius:12px;padding:12px 14px}
-.staged-head{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#ffc45e;letter-spacing:.2px}
-.staged-head .ic{width:14px;height:14px}
-.staged code{display:block;margin:8px 0 10px;font:12.5px var(--mono);color:#e8c78d;word-break:break-all}
-.staged-actions{display:flex;gap:8px;flex-wrap:wrap}
 
 .card-foot{display:flex;align-items:center;gap:12px;padding:13px 18px 15px 20px;flex-wrap:wrap}
 .times{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12.5px;min-width:0;flex-wrap:wrap}
@@ -426,8 +426,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
   <symbol id="i-logo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></symbol>
   <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></symbol>
-  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
-  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19a4.5 4.5 0 1 0-.36-8.99 6 6 0 1 0-11.13 2.9A3.5 3.5 0 0 0 6.5 19z"/></symbol>
@@ -444,7 +442,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
-  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></symbol>
   <symbol id="i-server" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></symbol>
   <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
@@ -462,12 +459,12 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       <div class="brand-tile"><svg class="ic"><use href="#i-logo"/></svg></div>
       <div>
         <div class="brand-name">SoluPlay <em>Origin Control</em></div>
-        <div class="brand-sub"><svg class="ic"><use href="#i-server"/></svg><span id="nodeChip">connecting…</span></div>
+        <div class="brand-sub"><svg class="ic"><use href="#i-server"/></svg><span id="nodeChip">connecting…</span><span class="sig" id="connSig" data-state="idle" title="Connecting to server…"><i class="sig-dot ok"></i><i class="sig-dot warn"></i><i class="sig-dot bad"></i></span></div>
       </div>
     </div>
     <div class="topbar-actions">
-      <button id="btnProbe" class="btn ghost" title="Re-check upstream encoders and cloud URLs for every card"><svg class="ic"><use href="#i-refresh"/></svg><span class="btn-label">Probe All</span></button>
-      <button id="btnSync" class="btn ghost" title="Upsert all cards into the cloud database and fix isLocalServerActive"><svg class="ic"><use href="#i-cloud"/></svg><span class="btn-label">Sync Cloud</span></button>
+      <button id="btnProbe" class="btn ghost" title="Re-check live sources and CDN URLs for every card"><svg class="ic"><use href="#i-refresh"/></svg><span class="btn-label">Refresh Cards</span></button>
+      <button id="btnSync" class="btn ghost" title="Upsert all cards into MongoDB and fix isLocalServerActive"><svg class="ic"><use href="#i-cloud"/></svg><span class="btn-label">Sync Mongo</span></button>
       <button id="btnNew" class="btn primary" title="Create a new event card"><svg class="ic"><use href="#i-plus"/></svg><span class="btn-label">New Event</span></button>
     </div>
   </div>
@@ -480,7 +477,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     <article class="stat-card" data-state="idle">
       <div class="stat-icon tint-sky"><svg class="ic"><use href="#i-server"/></svg></div>
       <div class="stat-body">
-        <div class="stat-label">Upstream Encoder</div>
+        <div class="stat-label">Live Source</div>
         <div class="stat-value" id="xtreamStat">—</div>
       </div>
       <span class="stat-dot"></span>
@@ -504,7 +501,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     <article class="stat-card" data-state="idle">
       <div class="stat-icon tint-amber"><svg class="ic"><use href="#i-cloud"/></svg></div>
       <div class="stat-body">
-        <div class="stat-label">Public Stream</div>
+        <div class="stat-label">Cloudflare</div>
         <div class="stat-value" id="proxyStat">—</div>
       </div>
       <span class="stat-dot"></span>
@@ -604,14 +601,9 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
           <input id="fPrimary" maxlength="2048" placeholder="e.g. 206 or https://…/live/…m3u8" required>
         </label>
         <label class="check"><input id="fForward" type="checkbox" checked> Route viewers through the forwarder (/live/&lt;id&gt;.m3u8)</label>
-        <div class="grid-2" style="margin-top:12px">
-          <label class="field">Backup Channels
-            <textarea id="fBackups" rows="3" placeholder="One per line or comma separated&#10;e.g. 69, 64"></textarea>
-          </label>
-          <label class="field">Staged Source (draft)
-            <textarea id="fStaged" rows="3" placeholder="Optional — stays in draft until &quot;Send to Live&quot;"></textarea>
-          </label>
-        </div>
+        <label class="field" style="margin-top:12px">Backup Channels
+          <textarea id="fBackups" rows="3" placeholder="One per line or comma separated&#10;e.g. 69, 64"></textarea>
+        </label>
       </fieldset>
 
       <fieldset>
@@ -620,7 +612,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
           <label class="field">Stream ID
             <input id="fStreamId" placeholder="auto-generated on create" spellcheck="false" autocomplete="off">
           </label>
-          <label class="field">Custom Upstream Headers (JSON)
+          <label class="field">Custom Source Headers (JSON)
             <textarea id="fHeaders" rows="3" placeholder='{"Referer": "https://example.com"}'></textarea>
           </label>
         </div>
@@ -858,6 +850,16 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     if (card) card.dataset.state = state || "idle";
   }
 
+  function setConn(state, note) {
+    var sig = $("connSig");
+    if (!sig) return;
+    sig.dataset.state = state;
+    sig.title = note || (state === "ok" ? "Server connected — node online"
+      : state === "warn" ? "Server reachable — node offline"
+      : state === "bad" ? "Server unreachable"
+      : "Connecting to server…");
+  }
+
   function renderStatus(st, xt) {
     st = st || {};
     statusCache = st;
@@ -870,6 +872,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     } else {
       node.textContent = "Node offline";
     }
+    setConn(st.nodeId ? "ok" : "warn");
 
     if (xt.serverUrl) {
       var host = String(xt.serverUrl).replace(/^https?:\/\//, "");
@@ -989,11 +992,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     var c = ev.cloudHealth;
     var active = ev.activeCandidate;
     card.append(el("div", { class: "status-strip" },
-      buildTile("Upstream", "server",
+      buildTile("Live Feed", "server",
         o ? (o.online ? "ok" : "bad") : "idle",
         o ? (o.online ? (o.latencyMs != null ? o.latencyMs + " ms" : "online") : (o.error || "offline")) : "not probed",
-        o ? (o.error || ("Checked " + ago(o.checkedAt))) : "Use Probe All to check the upstream source"),
-      buildTile("Cloud Edge", "cloud",
+        o ? (o.error || ("Checked " + ago(o.checkedAt))) : "Use Refresh Cards to check the live source"),
+      buildTile("CDN", "cloud",
         c ? (c.online ? "ok" : "bad") : "idle",
         c ? (c.direct ? "direct (no proxy)" : (c.online ? (c.latencyMs != null ? c.latencyMs + " ms" : "reachable") : (c.error || "down"))) : "not probed",
         c && c.url ? "URL " + c.url : "Cloud URL health for this card"),
@@ -1011,7 +1014,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     if (ev.status !== "ended" && c && !c.online && ev.useForwarder) {
       card.append(el("div", { class: "alert" },
         icon("alert"),
-        el("span", { text: "Cloud edge unreachable for this card" + (c.error ? " — " + c.error : "") + "." }),
+        el("span", { text: "CDN unreachable for this card" + (c.error ? " — " + c.error : "") + "." }),
         el("button", { class: "btn tiny ghost", type: "button", onclick: function () { probeAll(); } }, icon("refresh"), el("span", { class: "btn-label", text: "Re-probe" }))
       ));
     }
@@ -1031,9 +1034,8 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       el("span", { class: "srow-label", text: "Source" }),
       el("code", { text: active ? maskUrl(active.maskedUrl) : "—", title: active ? maskUrl(active.maskedUrl) : "" }),
       el("div", { class: "srow-actions" },
-        el("button", { class: "btn tiny ghost", type: "button", title: "Reveal the raw upstream URL (credentials included — admin only)", onclick: function () { testRawSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Raw" })),
-        el("button", { class: "btn tiny ghost", type: "button", title: "Probe the upstream source and the local forwarder pipe", onclick: function () { testProxyPipe(ev); } }, icon("activity"), el("span", { class: "btn-label", text: "Test Pipe" })),
-        el("button", { class: "btn tiny ghost", type: "button", title: "Stage a new source as a draft (live stream untouched)", onclick: function () { promptStageSource(ev); } }, icon("upload"), el("span", { class: "btn-label", text: "Stage New" }))
+        el("button", { class: "btn tiny ghost", type: "button", title: "Reveal the raw source URL (credentials included — admin only)", onclick: function () { testRawSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Raw" })),
+        el("button", { class: "btn tiny ghost", type: "button", title: "Probe the live source and the local forwarder pipe", onclick: function () { testProxyPipe(ev); } }, icon("activity"), el("span", { class: "btn-label", text: "Test Pipe" }))
       )
     ));
 
@@ -1056,20 +1058,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     }
     card.append(box);
 
-    /* staged draft */
-    if (ev.stagedSource) {
-      var stagedDisplay = ev.stagedCandidate ? ev.stagedCandidate.maskedUrl : maskUrl(ev.stagedSource);
-      card.append(el("div", { class: "staged" },
-        el("div", { class: "staged-head" }, icon("flask"), el("span", { text: "STAGED DRAFT — not live until you promote it" })),
-        el("code", { text: stagedDisplay }),
-        el("div", { class: "staged-actions" },
-          el("button", { class: "btn tiny ghost", type: "button", onclick: function () { testStagedSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Staged" })),
-          el("button", { class: "btn tiny primary", type: "button", onclick: function () { promoteStaged(ev); } }, icon("send"), el("span", { class: "btn-label", text: "Send to Live" })),
-          el("button", { class: "btn tiny danger-ghost", type: "button", onclick: function () { discardStaged(ev); } }, icon("x"), el("span", { class: "btn-label", text: "Discard" }))
-        )
-      ));
-    }
-
     /* foot */
     card.append(el("footer", { class: "card-foot" },
       el("div", { class: "times" }, icon("clock"),
@@ -1077,8 +1065,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         el("span", { class: "muted", text: ev.updatedAt ? "· updated " + ago(ev.updatedAt) : "" })
       ),
       el("div", { class: "foot-actions" },
-        iconButton("arrow-up", "Move up", function () { moveEvent(ev, -1); }),
-        iconButton("arrow-down", "Move down", function () { moveEvent(ev, 1); }),
         ev.status === "live"
           ? el("button", { class: "btn sm", type: "button", title: "Mark this event as ended", onclick: function () { quickStatus(ev, "ended"); } }, icon("stop"), el("span", { class: "btn-label", text: "End" }))
           : el("button", { class: "btn sm primary", type: "button", title: "Mark this event as live and sync to cloud", onclick: function () { quickStatus(ev, "live"); } }, icon("play"), el("span", { class: "btn-label", text: "Go Live" })),
@@ -1130,15 +1116,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       .catch(function (err) { toast("Reorder failed: " + err.message, "error"); return refresh(); });
   }
 
-  function moveEvent(ev, dir) {
-    var ids = eventsCache.map(function (x) { return x.id; });
-    var i = ids.indexOf(ev.id);
-    var j = i + dir;
-    if (i < 0 || j < 0 || j >= ids.length) return;
-    ids.splice(j, 0, ids.splice(i, 1)[0]);
-    reorderTo(ids);
-  }
-
   /* ======================= actions ======================= */
   function refresh() {
     return Promise.all([
@@ -1149,6 +1126,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       renderStatus(out[1], out[2]);
       renderCards(out[0] && out[0].events);
     }).catch(function (err) {
+      setConn("bad");
       toast("Refresh failed: " + err.message, "error");
     });
   }
@@ -1191,24 +1169,12 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         showTestModal("Raw Source — " + ev.matchTitle, [
           { label: "Active channel", text: compactLabel(r.label) },
           { label: "Format", text: r.format },
-          { label: "Raw upstream URL", mono: true, text: r.rawUrl, copy: r.rawUrl },
+          { label: "Raw source URL", mono: true, text: r.rawUrl, copy: r.rawUrl },
           { label: "Masked URL", mono: true, text: r.maskedUrl },
           { label: "Local pipe URL", mono: true, text: r.proxyUrl, copy: r.proxyUrl }
         ]);
       })
       .catch(function (err) { toast("Test failed: " + err.message, "error"); });
-  }
-
-  function testStagedSource(ev) {
-    api("GET", "/api/events/" + encodeURIComponent(ev.id) + "/test-staged-source")
-      .then(function (r) {
-        showTestModal("Staged Source — " + ev.matchTitle, [
-          { label: "Format", text: r.format },
-          { label: "Staged URL", mono: true, text: r.rawUrl, copy: r.rawUrl },
-          { label: "Masked URL", mono: true, text: r.maskedUrl }
-        ]);
-      })
-      .catch(function (err) { toast("Staged test failed: " + err.message, "error"); });
   }
 
   function testProxyPipe(ev) {
@@ -1222,29 +1188,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         ]);
       })
       .catch(function (err) { toast("Pipe test failed: " + err.message, "error"); });
-  }
-
-  function promoteStaged(ev) {
-    if (!confirm('Send the staged source to LIVE for "' + ev.matchTitle + '"?\n\nThe active upstream session is reset and viewers are reconnected to the new source.')) return;
-    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/promote-staged")
-      .then(function (r) { toast((r && r.message) || "Staged source promoted to live", "success"); return refresh(); })
-      .catch(function (err) { toast("Promote failed: " + err.message, "error"); });
-  }
-
-  function discardStaged(ev) {
-    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/discard-staged")
-      .then(function () { toast("Staged source discarded", "success"); return refresh(); })
-      .catch(function (err) { toast("Discard failed: " + err.message, "error"); });
-  }
-
-  function promptStageSource(ev) {
-    var val = prompt('Stage a new source for "' + ev.matchTitle + '"\n\nEnter an http(s) URL or Xtream Stream ID. It stays in draft until you press "Send to Live":', "");
-    if (val === null) return;
-    val = val.trim();
-    if (!val) { toast("Nothing staged — empty input", ""); return; }
-    api("POST", "/api/events/" + encodeURIComponent(ev.id) + "/stage-source", { stagedSource: val })
-      .then(function () { toast("Source staged as draft — test it, then Send to Live", "success"); return refresh(); })
-      .catch(function (err) { toast("Staging failed: " + err.message, "error"); });
   }
 
   /* ======================= test results modal ======================= */
@@ -1316,7 +1259,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     $("fEnd").value = toInputValue(ev && ev.endTime);
     $("fPrimary").value = ev ? ev.primaryStreamUrl : "";
     $("fForward").checked = ev ? !!ev.useForwarder : true;
-    $("fStaged").value = ev && ev.stagedSource ? ev.stagedSource : "";
     $("fBackups").value = ev && ev.backupStreamUrls && ev.backupStreamUrls.length ? ev.backupStreamUrls.join("\n") : "";
     $("fStreamId").value = ev ? ev.streamId : "";
     $("fStreamId").disabled = !!ev;
@@ -1349,7 +1291,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       startTime: fromInputValue($("fStart").value),
       endTime: fromInputValue($("fEnd").value),
       primaryStreamUrl: $("fPrimary").value.trim(),
-      stagedSource: $("fStaged").value.trim(),
+      stagedSource: "", /* empty string clears any lingering draft server-side */
       useForwarder: $("fForward").checked,
       backupStreamUrls: $("fBackups").value.split(/[\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean),
       headers: headers
@@ -1382,13 +1324,13 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 
   /* ======================= global actions ======================= */
   function probeAll() {
-    return busy($("btnProbe"), "Probing…", function () {
+    return busy($("btnProbe"), "Refreshing…", function () {
       return api("POST", "/api/probe")
         .then(function (r) {
-          toast("Probe finished · " + (r && r.checked != null ? r.checked + " card(s) checked" : "done"), "success");
+          toast("Refresh finished · " + (r && r.checked != null ? r.checked + " card(s) checked" : "done"), "success");
           return refresh();
         })
-        .catch(function (err) { toast("Probe failed: " + err.message, "error"); });
+        .catch(function (err) { toast("Refresh failed: " + err.message, "error"); });
     });
   }
 
@@ -1401,7 +1343,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
           if (s.created) bits.push(s.created + " created");
           if (s.updated) bits.push(s.updated + " updated");
           if (s.removed) bits.push(s.removed + " removed");
-          toast("Cloud sync done · " + (bits.length ? bits.join(", ") : "already up to date") +
+          toast("Mongo sync done · " + (bits.length ? bits.join(", ") : "already up to date") +
             (s.cards != null ? " · " + s.cards + " card(s)" : "") + (s.durationMs != null ? " in " + s.durationMs + " ms" : ""), "success");
           if (s.warnings && s.warnings.length) toast("Sync warnings: " + s.warnings.join("; "), "warn");
           return refresh();

@@ -127,29 +127,30 @@ body{
 .section-gap{margin-top:20px}
 
 /* ---------- stat cards ---------- */
-.stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.stats-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
 .stat-card{
   --st:#3b4c6e;
-  position:relative;display:flex;gap:12px;align-items:center;
+  position:relative;display:flex;gap:7px;align-items:center;
   background:linear-gradient(180deg,var(--panel),var(--bg-2));
   border:1px solid var(--line);border-radius:var(--r-lg);
-  padding:14px 16px;box-shadow:var(--shadow-1);min-width:0;
+  padding:11px 9px;box-shadow:var(--shadow-1);min-width:0;
   transition:border-color .2s;
 }
 .stat-card[data-state="ok"]{--st:var(--green)}
 .stat-card[data-state="bad"]{--st:var(--rose)}
 .stat-card[data-state="warn"]{--st:var(--amber)}
-.stat-icon{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;flex:none}
-.stat-icon .ic{width:19px;height:19px}
+.stat-icon{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex:none}
+.stat-icon .ic{width:15px;height:15px}
 .tint-blue{color:#8fb7ff;background:rgba(77,141,255,.13)}
 .tint-green{color:#5fe3ab;background:rgba(34,201,138,.12)}
 .tint-amber{color:#ffc45e;background:rgba(245,165,36,.12)}
 .tint-violet{color:#b3a8ff;background:rgba(139,123,255,.13)}
 .tint-sky{color:#7dd3fc;background:rgba(56,189,248,.12)}
+.tint-slate{color:#dbe4f3;background:rgba(219,228,243,.1)}
 .stat-body{min-width:0;flex:1}
-.stat-label{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--faint)}
-.stat-value{font-size:13.5px;font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stat-dot{width:8px;height:8px;border-radius:50%;background:var(--st);box-shadow:0 0 9px var(--st);flex:none;margin-left:auto}
+.stat-label{font-size:clamp(8.2px,.6vw,9.6px);font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-value{font-size:clamp(9.6px,.72vw,10.6px);font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-dot{width:7px;height:7px;border-radius:50%;background:var(--st);box-shadow:0 0 8px var(--st);flex:none;margin-left:auto}
 
 /* ---------- panels ---------- */
 .panel{
@@ -394,7 +395,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 .foot-note .ic{width:13px;height:13px}
 
 /* ---------- responsive ---------- */
-@media (max-width:1020px){
+@media (max-width:1120px){
   .stats-grid{grid-template-columns:repeat(3,1fr)}
 }
 @media (max-width:860px){
@@ -483,14 +484,6 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       <span class="stat-dot"></span>
     </article>
     <article class="stat-card" data-state="idle">
-      <div class="stat-icon tint-violet"><svg class="ic"><use href="#i-database"/></svg></div>
-      <div class="stat-body">
-        <div class="stat-label">Database</div>
-        <div class="stat-value" id="dbStat">—</div>
-      </div>
-      <span class="stat-dot"></span>
-    </article>
-    <article class="stat-card" data-state="idle">
       <div class="stat-icon tint-green"><svg class="ic"><use href="#i-activity"/></svg></div>
       <div class="stat-body">
         <div class="stat-label">Local Server</div>
@@ -503,6 +496,22 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       <div class="stat-body">
         <div class="stat-label">Cloudflare</div>
         <div class="stat-value" id="proxyStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-violet"><svg class="ic"><use href="#i-database"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Database</div>
+        <div class="stat-value" id="dbStat">—</div>
+      </div>
+      <span class="stat-dot"></span>
+    </article>
+    <article class="stat-card" data-state="idle">
+      <div class="stat-icon tint-slate"><svg class="ic"><use href="#i-globe"/></svg></div>
+      <div class="stat-body">
+        <div class="stat-label">Vercel Host</div>
+        <div class="stat-value" id="vercelStat">—</div>
       </div>
       <span class="stat-dot"></span>
     </article>
@@ -893,6 +902,12 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     var hb = st.heartbeat || {};
     if (hb.ok) setStat("hbStat", "ok", "Healthy · " + ago(hb.lastAt), hb.error || "");
     else setStat("hbStat", "bad", hb.lastAt ? "Failing · last ok " + ago(hb.lastAt) : "No check-in yet", hb.error || "");
+
+    var vcHost = String(db.appUrl || "").replace(/^https?:\/\//, "");
+    if (!db.appUrl) setStat("vercelStat", "bad", "Not configured", "CLOUD_APP_URL is missing in .env");
+    else if (hb.ok && hb.via === "http") setStat("vercelStat", "ok", "Reachable · " + ago(hb.lastAt), vcHost);
+    else if ((db.heartbeatVia || []).indexOf("http") === -1) setStat("vercelStat", "warn", "HTTP path off", vcHost + " · set LOCAL_SERVER_SECRET to ping the cloud app directly");
+    else setStat("vercelStat", "bad", "Unreachable", hb.error || vcHost);
 
     var tun = st.tunnel || {};
     var pub = st.publicStreamBaseUrl || "";

@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import { DirectHlsPlayer } from "@/components/players";
 import { FreeStreamMirror, buildFreeStreamLadder } from "@/lib/freeChannelService";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
+import NewsTicker from "@/components/NewsTicker";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import Link from "next/link";
@@ -761,6 +762,8 @@ export default function WatchPage() {
                     />
                   )}
                 </div>
+
+                <NewsTicker text="⚠️ ওয়েবসাইট যেকোনো সময় বন্ধ বা ডাউন হতে পারে। লাইভ টিভি ও খেলা দেখতে আমাদের মোবাইল অ্যাপটি এখনই ডাউনলোড করে রাখুন।" />
               </div>
 
               {/* Bottom Channel Info Banner - Hidden on Mobile */}

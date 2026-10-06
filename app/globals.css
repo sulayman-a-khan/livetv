@@ -112,6 +112,24 @@
   animation: fade-in 0.3s ease-out;
 }
 
+/* News ticker marquee — duration is supplied inline from the measured text width */
+@keyframes news-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-news-ticker {
+  animation: news-ticker linear infinite;
+}
+
+.animate-news-ticker:hover {
+  animation-play-state: paused;
+}
+
 /* Countdown bar used by the "all servers down" overlay (5s auto-advance) */
 @keyframes shrink {
   from {

@@ -151,7 +151,7 @@ export default function LiveSportsArena() {
 
   if (!loading && events.length === 0) {
     return (
-      <section className="animate-fade-in">
+      <section className="animate-fade-in sm:hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/images/arena-promo-banner.png"

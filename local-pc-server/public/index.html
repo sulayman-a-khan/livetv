@@ -493,7 +493,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     <article class="stat-card" data-state="idle">
       <div class="stat-icon tint-green"><svg class="ic"><use href="#i-activity"/></svg></div>
       <div class="stat-body">
-        <div class="stat-label">Heartbeat</div>
+        <div class="stat-label">Local Server</div>
         <div class="stat-value" id="hbStat">—</div>
       </div>
       <span class="stat-dot"></span>
@@ -892,7 +892,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 
     var hb = st.heartbeat || {};
     if (hb.ok) setStat("hbStat", "ok", "Healthy · " + ago(hb.lastAt), hb.error || "");
-    else setStat("hbStat", "bad", hb.lastAt ? "Failing · last ok " + ago(hb.lastAt) : "No heartbeat yet", hb.error || "");
+    else setStat("hbStat", "bad", hb.lastAt ? "Failing · last ok " + ago(hb.lastAt) : "No check-in yet", hb.error || "");
 
     var tun = st.tunnel || {};
     var pub = st.publicStreamBaseUrl || "";

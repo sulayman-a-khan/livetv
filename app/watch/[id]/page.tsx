@@ -27,6 +27,7 @@ import {
   Radio,
   CheckCircle2,
   SatelliteDish,
+  Youtube,
 } from "lucide-react";
 
 interface ChannelDetails {
@@ -740,14 +741,33 @@ export default function WatchPage() {
                     <span className="sm:hidden">Home</span>
                   </Link>
 
-                  {/* Live uplink badge — server switching lives in the player controls */}
-                  <div className="flex items-center gap-1.5 min-w-0 rounded-lg border border-emerald-500/25 bg-[#0d1628] px-2 py-[3px]">
+                  {/* Live uplink badge — a YouTube feed isn't a satellite pull,
+                      so it names the platform instead of an orbiting bird */}
+                  <div
+                    className={`flex items-center gap-1.5 min-w-0 rounded-lg border px-2 py-[3px] ${
+                      isActiveStreamYouTube
+                        ? "border-red-500/30 bg-[#1a0e12]"
+                        : "border-emerald-500/25 bg-[#0d1628]"
+                    }`}
+                  >
                     <span className="relative grid place-items-center w-5 h-5 shrink-0">
-                      <span className="absolute w-3.5 h-3.5 rounded-full border border-emerald-400/30 animate-ping" />
-                      <SatelliteDish className="relative w-[15px] h-[15px] text-emerald-400 -rotate-12" />
+                      <span
+                        className={`absolute w-3.5 h-3.5 rounded-full border animate-ping ${
+                          isActiveStreamYouTube ? "border-red-500/35" : "border-emerald-400/30"
+                        }`}
+                      />
+                      {isActiveStreamYouTube ? (
+                        <Youtube className="relative w-[15px] h-[15px] text-red-500" />
+                      ) : (
+                        <SatelliteDish className="relative w-[15px] h-[15px] text-emerald-400 -rotate-12" />
+                      )}
                     </span>
-                    <span className="text-[10px] font-extrabold tracking-wide text-emerald-300 whitespace-nowrap">
-                      {activeUplinkName}
+                    <span
+                      className={`text-[10px] font-extrabold tracking-wide whitespace-nowrap ${
+                        isActiveStreamYouTube ? "text-red-400" : "text-emerald-300"
+                      }`}
+                    >
+                      {isActiveStreamYouTube ? "YouTube Live" : activeUplinkName}
                     </span>
                   </div>
                 </div>

@@ -15,6 +15,7 @@ import { getChannelLogo, getSatelliteUplink } from "@/lib/utils";
 import {
   getCategoryBySlug,
   isChannelInCategory,
+  normalizeCategory,
   CATEGORIES,
   CategoryConfig,
 } from "@/lib/categories";
@@ -34,7 +35,6 @@ interface ChannelDetails {
   name: string;
   logo: string;
   category: string;
-  subCategory?: string;
   country: string;
   streams: FreeStreamMirror[];
 }
@@ -44,22 +44,11 @@ interface SidebarChannel {
   name: string;
   logo: string;
   category: string;
-  subCategory?: string;
   country: string;
   activeStreamCount: number;
   isPinned?: boolean;
   priorityOrder?: number;
 }
-
-/** Short filter labels for the six fixed categories. */
-const CATEGORY_LABELS: Record<string, string> = {
-  "sports-tv": "Sports",
-  "bangladeshi-tv": "Bangla",
-  "indian-tv": "Indian",
-  "pakistani-tv": "Pakistani",
-  "news-tv": "News",
-  "global-tv": "Global",
-};
 
 export default function WatchPage() {
   const params = useParams();
@@ -450,28 +439,27 @@ export default function WatchPage() {
       if (found) return found;
     }
     if (channel) {
-      const matched = CATEGORIES.find((cat) => isChannelInCategory(channel, cat));
+      // A sports-event placeholder (or any legacy label) is folded onto its rail
+      // by the same classifier the backend uses, so the sidebar opens on Sports.
+      const rail = normalizeCategory(channel.category, channel.name, channel.country);
+      const matched = CATEGORIES.find((cat) => cat.category === rail);
       if (matched) return matched;
     }
-    return CATEGORIES[1]; // Default to Bangladeshi TV
+    return CATEGORIES[1]; // Default to the Bangla rail
   }, [activeCategorySlug, channel]);
 
   // Filter sidebar channels to the active view.
   // "All" → every visible channel, pinned first (then priorityOrder, then name).
-  // A specific slug → only channels in that category (pinned first as well).
+  // A specific slug → only channels in that category.
   const filteredSidebarChannels = useMemo(() => {
     if (allChannels.length === 0) return allChannels;
     // Drop channels whose servers just died — they disappear from the playlist
     // instantly and return only when the backend reports them healthy again.
     const visible = allChannels.filter((c) => !hiddenChannelIds.includes(c._id));
 
-    let list: SidebarChannel[];
-    if (isAllView) {
-      list = visible;
-    } else {
-      list = visible.filter((c) => isChannelInCategory(c, currentCategoryConfig));
-      if (list.length === 0) list = visible;
-    }
+    const list: SidebarChannel[] = isAllView
+      ? visible
+      : visible.filter((c) => isChannelInCategory(c, currentCategoryConfig));
 
     // Pinned channels always surface first, ordered by priorityOrder.
     return [...list].sort((a, b) => {
@@ -854,9 +842,7 @@ export default function WatchPage() {
                   </div>
 
                   <p className="text-xs text-slate-400">
-                    {channel.subCategory && channel.subCategory !== "Others"
-                      ? channel.subCategory
-                      : channel.category || "General Broadcast"} • HD Quality Stream
+                    {channel.category || "Live TV"} • HD Quality Stream
                   </p>
                 </div>
               </div>
@@ -886,7 +872,7 @@ export default function WatchPage() {
                   {["all", ...CATEGORIES.map((c) => c.slug)].map((slug) => {
                     const isActive = activeCategorySlug === slug;
                     const label =
-                      slug === "all" ? "All" : CATEGORY_LABELS[slug] || slug;
+                      slug === "all" ? "All" : getCategoryBySlug(slug)?.name || slug;
                     return (
                       <button
                         key={slug}
@@ -919,7 +905,7 @@ export default function WatchPage() {
                       <p className="text-xs text-slate-400">
                         {isAllView
                           ? "No channels online right now"
-                          : `No channels under "${CATEGORY_LABELS[activeCategorySlug] || currentCategoryConfig.title}"`}
+                          : `No channels under "${currentCategoryConfig.name}"`}
                       </p>
                     </div>
                   ) : (
@@ -1057,7 +1043,7 @@ export default function WatchPage() {
                 onClick={() => setActiveCategorySlug(c.slug)}
                 className={activeCategorySlug === c.slug ? "text-emerald-400 font-bold" : "hover:text-white"}
               >
-                {CATEGORY_LABELS[c.slug] || c.name}
+                {c.name}
               </button>
             ))}
           </div>

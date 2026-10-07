@@ -5,7 +5,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { getChannelLogo, getCountryFlag } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
 import PlaylistSourcePanel from "@/components/PlaylistSourcePanel";
-import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
+import { CATEGORIES, getCategoryBySlug, isChannelInCategory, CHANNEL_CATEGORIES, type ChannelCategory } from "@/lib/categories";
 import {
   ShieldAlert,
   Database,
@@ -64,7 +64,6 @@ interface ChannelWithStreams {
   logo: string;
   isPinned?: boolean;
   priorityOrder?: number;
-  subCategory?: string;
   tags?: string[];
   isManuallyEdited?: boolean;
   streams: Array<{
@@ -97,15 +96,10 @@ interface HealthSchedule {
   lastFullCheckAt: string;
 }
 
-/** Short labels for the six fixed categories, matching the player filters. */
-const ADMIN_CATEGORY_LABELS: Record<string, string> = {
-  "sports-tv": "Sports",
-  "bangladeshi-tv": "Bangla",
-  "indian-tv": "Indian",
-  "pakistani-tv": "Pakistani",
-  "news-tv": "News",
-  "global-tv": "Global",
-};
+/** Short labels for the five rails, keyed by slug so the tabs and the table agree. */
+const ADMIN_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.slug, c.name])
+);
 
 /** True when a channel belongs to the given pinned-board tab ("all" or a category slug). */
 function channelInPinnedTab(
@@ -144,6 +138,17 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   // Health check button loading state
   const [healthCheckLoading, setHealthCheckLoading] = useState(false);
   const [healthCheckLog, setHealthCheckLog] = useState<string | null>(null);
+
+  // Manual Channel Entry (one curated channel + its first link, unpinned)
+  const [manualForm, setManualForm] = useState({
+    name: "",
+    logo: "",
+    category: "Bangla" as ChannelCategory,
+    country: "Bangladesh",
+    streamUrl: "",
+  });
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualLog, setManualLog] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   // Auto health-checker schedule (for the next-probe countdown timer)
   const [schedule, setSchedule] = useState<HealthSchedule | null>(null);
@@ -248,9 +253,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     };
   }, [schedule, nowTick]);
 
-  // The six fixed display categories (Sports, Bangla, Indian, Pakistani, News,
-  // Global). The admin filter offers exactly these and matches channels with the
-  // same logic the player uses — no ad-hoc categories from raw data.
+  // The five and only five catalogue categories (Sports, Bangla, Indian,
+  // Pakistani, Documentary). The admin filter offers exactly these and matches
+  // channels on their single stored `category` value — no ad-hoc categories from
+  // raw data, and no subcategories anywhere.
   const categories = CATEGORIES;
 
   // Compute filtered and sorted channel list
@@ -274,7 +280,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         if (statusFilter === "hidden" && activeCount > 0) return false;
         if (statusFilter === "degraded" && degradedCount === 0) return false;
 
-        // Category filter (one of the six fixed categories)
+        // Category filter (exactly one of the five rails)
         if (categoryFilter !== "all") {
           const cfg = getCategoryBySlug(categoryFilter);
           if (cfg && !isChannelInCategory(ch, cfg)) return false;
@@ -496,7 +502,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
       if (finalSummary) {
         setIngestLog(
-          `Success! Processed ${finalSummary.totalParsed} streams → Created ${finalSummary.channelsCreated} new channels, Added ${finalSummary.activeLinksAdded} working backup links (${finalSummary.brokenLinksAdded} broken, ${finalSummary.linksSkipped} duplicates skipped).`
+          `Success! Processed ${finalSummary.totalParsed} streams → added ${finalSummary.channelsCreated} new channel(s) (all unpinned, so nothing went live), ${finalSummary.activeLinksAdded} working link(s) and ${finalSummary.brokenLinksAdded} unverified one(s); ${finalSummary.linksSkipped} duplicate(s) skipped. Review the Unpinned rows, then pin the ones you want viewers to see.`
         );
         setM3uText("");
         setM3uUrl("");
@@ -508,6 +514,56 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       setIngestProgress((p) => (p ? { ...p, phase: "Failed", message: err.message, done: true } : p));
     } finally {
       setIngestLoading(false);
+    }
+  };
+
+  // Manual Channel Entry — creates one unpinned, hand-edited channel whose link
+  // the server probes before storing it.
+  const handleCreateManualChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manualForm.name.trim()) {
+      setManualLog({ type: "err", text: "Channel name is required." });
+      return;
+    }
+    if (!/^https?:\/\//i.test(manualForm.streamUrl.trim())) {
+      setManualLog({ type: "err", text: "Enter a valid http(s) M3U8 stream URL." });
+      return;
+    }
+
+    setManualSaving(true);
+    setManualLog(null);
+    try {
+      const res = await fetch("/api/admin/channels", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": secretKey.trim(),
+        },
+        body: JSON.stringify({
+          name: manualForm.name.trim(),
+          logo: manualForm.logo.trim(),
+          category: manualForm.category,
+          country: manualForm.country,
+          streamUrl: manualForm.streamUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setManualLog({ type: "err", text: data.error || "Could not create the channel." });
+        return;
+      }
+      setManualLog({
+        type: data.probe?.ok ? "ok" : "err",
+        text: data.probe?.ok
+          ? `Added "${data.channel.name}" (${manualForm.category}) with a verified link at ${data.probe.latency}ms. It is unpinned, so viewers cannot see it yet.`
+          : `Added "${data.channel.name}" but the probe failed: ${data.probe?.reason || "unreachable"}. The link is stored as broken and the channel stays unpinned until you verify it.`,
+      });
+      setManualForm((f) => ({ ...f, name: "", logo: "", streamUrl: "" }));
+      await fetchStats();
+    } catch (err: any) {
+      setManualLog({ type: "err", text: err.message || "Network error." });
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -1040,6 +1096,123 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         )}
       </div>
 
+      {/* Manual Channel Entry — one curated channel, typed by hand */}
+      <div className="glass-panel p-6 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-2 mb-1">
+          <SlidersHorizontal className="w-5 h-5 text-brand-500" />
+          <h2 className="text-base font-bold text-white">Manual Channel Entry</h2>
+        </div>
+        <p className="text-[11px] text-slate-400 mb-4">
+          Adds one unpinned channel with a single hand-verified link. It stays hidden from
+          viewers until you pin it, and no playlist sync or cleanup pass can rewrite it.
+        </p>
+
+        <form onSubmit={handleCreateManualChannel} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="space-y-1 sm:col-span-2">
+              <span className="block text-xs font-semibold text-slate-400">Channel Name</span>
+              <input
+                value={manualForm.name}
+                onChange={(e) => setManualForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="T Sports HD"
+                className="w-full bg-slate-900 text-xs text-white placeholder-slate-600 px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500"
+              />
+            </label>
+
+            <label className="space-y-1 sm:col-span-2">
+              <span className="block text-xs font-semibold text-slate-400">Logo URL (optional)</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={manualForm.logo}
+                  onChange={(e) => setManualForm((f) => ({ ...f, logo: e.target.value }))}
+                  placeholder="https://example.com/logo.png"
+                  className="flex-1 bg-slate-900 text-xs text-white placeholder-slate-600 px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500"
+                />
+                {manualForm.logo && (
+                  <div className="w-10 h-10 rounded-lg bg-white p-1 flex items-center justify-center shrink-0">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={manualForm.logo}
+                      alt="logo preview"
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+            </label>
+
+            <label className="space-y-1">
+              <span className="block text-xs font-semibold text-slate-400">Category (exactly one)</span>
+              <select
+                value={manualForm.category}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, category: e.target.value as ChannelCategory }))
+                }
+                className="w-full bg-slate-900 text-xs text-white px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 cursor-pointer"
+              >
+                {CHANNEL_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {CATEGORIES.find((cat) => cat.category === c)?.badge} {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1">
+              <span className="block text-xs font-semibold text-slate-400">Country</span>
+              <select
+                value={manualForm.country}
+                onChange={(e) => setManualForm((f) => ({ ...f, country: e.target.value }))}
+                className="w-full bg-slate-900 text-xs text-white px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 cursor-pointer"
+              >
+                {["Bangladesh", "India", "Pakistan", "Global"].map((c) => (
+                  <option key={c} value={c}>
+                    {getCountryFlag(c)} {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 sm:col-span-2">
+              <span className="block text-xs font-semibold text-slate-400">M3U8 Stream URL</span>
+              <input
+                type="url"
+                value={manualForm.streamUrl}
+                onChange={(e) => setManualForm((f) => ({ ...f, streamUrl: e.target.value }))}
+                placeholder="https://example.com/live/channel.m3u8"
+                className="w-full bg-slate-900 text-xs font-mono text-slate-200 placeholder-slate-600 px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500"
+              />
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            disabled={manualSaving || !manualForm.name.trim() || !manualForm.streamUrl.trim()}
+            className="flex items-center gap-2 px-5 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 shadow-lg shadow-brand-600/25"
+          >
+            {manualSaving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <PlusCircle className="w-4 h-4" />
+            )}
+            <span>{manualSaving ? "Probing stream..." : "Add Channel (Unpinned)"}</span>
+          </button>
+        </form>
+
+        {manualLog && (
+          <div
+            className={`mt-4 p-4 rounded-xl text-xs font-semibold border ${
+              manualLog.type === "ok"
+                ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
+                : "bg-red-500/10 text-red-300 border-red-500/30"
+            }`}
+          >
+            {manualLog.text}
+          </div>
+        )}
+      </div>
+
       {/* Direct HLS playlist source monitoring */}
       <PlaylistSourcePanel secretKey={secretKey} onCatalogueChanged={fetchStats} />
 
@@ -1305,7 +1478,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               </select>
             </div>
 
-            {/* Category Filter (2 cols) — the six fixed categories only */}
+            {/* Category Filter (2 cols) — the five rails only */}
             <div className="lg:col-span-2">
               <select
                 value={categoryFilter}

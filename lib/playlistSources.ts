@@ -194,7 +194,6 @@ export async function getSourcesPayload() {
       lastChangeAt: source.lastChangeAt ? new Date(source.lastChangeAt).toISOString() : null,
       entriesParsed: source.lastSummary?.entriesParsed || 0,
       summary: {
-        channelsCreated: source.lastSummary?.channelsCreated || 0,
         newEntries: source.lastSummary?.newEntries || 0,
         updatedUrls: source.lastSummary?.updatedUrls || 0,
         entriesRemoved: source.lastSummary?.entriesRemoved || 0,

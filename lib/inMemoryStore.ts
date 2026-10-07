@@ -7,14 +7,15 @@
 import fs from "fs";
 import path from "path";
 import { getChannelLogo } from "./utils";
+import { normalizeCategory, type ChannelCategory } from "./categories";
 
 export interface InMemoryChannel {
   _id: string;
   name: string;
   normalizedName: string;
   logo: string;
-  category: string;
-  subCategory?: string;
+  /** Exactly one of the five catalogue categories. */
+  category: ChannelCategory;
   country: string;
   isPinned: boolean;
   priorityOrder: number;
@@ -86,124 +87,35 @@ export interface InMemoryStreamLink {
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
 
+const seedChannel = (
+  _id: string,
+  name: string,
+  normalizedName: string,
+  category: ChannelCategory,
+  country: string
+): InMemoryChannel => ({
+  _id,
+  name,
+  normalizedName,
+  logo: getChannelLogo(name),
+  category,
+  country,
+  isPinned: false,
+  priorityOrder: 99,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+});
+
 const INITIAL_CHANNELS: InMemoryChannel[] = [
-  {
-    _id: "ch_tsports",
-    name: "T Sports HD",
-    normalizedName: "tsports",
-    logo: getChannelLogo("T Sports HD"),
-    category: "Live Sports",
-    subCategory: "Cricket",
-    country: "Bangladesh",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_gtv",
-    name: "GTV (Gazi TV)",
-    normalizedName: "gtv",
-    logo: getChannelLogo("GTV (Gazi TV)"),
-    category: "Live Sports",
-    subCategory: "Cricket",
-    country: "Bangladesh",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_starsports1",
-    name: "Star Sports 1 HD",
-    normalizedName: "starsports1",
-    logo: getChannelLogo("Star Sports 1 HD"),
-    category: "Live Sports",
-    subCategory: "Cricket",
-    country: "India",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_sonyten1",
-    name: "Sony Ten 1 HD",
-    normalizedName: "sonyten1",
-    logo: getChannelLogo("Sony Ten 1 HD"),
-    category: "Live Sports",
-    subCategory: "Football",
-    country: "India",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_ptvsports",
-    name: "PTV Sports",
-    normalizedName: "ptvsports",
-    logo: getChannelLogo("PTV Sports"),
-    category: "Live Sports",
-    subCategory: "Cricket",
-    country: "Pakistan",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_asports",
-    name: "A Sports HD",
-    normalizedName: "asports",
-    logo: getChannelLogo("A Sports HD"),
-    category: "Live Sports",
-    subCategory: "Football",
-    country: "Pakistan",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_somoynews",
-    name: "Somoy News TV",
-    normalizedName: "somoynews",
-    logo: getChannelLogo("Somoy News TV"),
-    category: "News",
-    subCategory: "News",
-    country: "Bangladesh",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_aajtak",
-    name: "Aaj Tak HD",
-    normalizedName: "aajtak",
-    logo: getChannelLogo("Aaj Tak HD"),
-    category: "News",
-    subCategory: "News",
-    country: "India",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    _id: "ch_geonews",
-    name: "GEO News",
-    normalizedName: "geonews",
-    logo: getChannelLogo("GEO News"),
-    category: "News",
-    subCategory: "News",
-    country: "Pakistan",
-    isPinned: false,
-    priorityOrder: 99,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
+  seedChannel("ch_tsports", "T Sports HD", "tsports", "Sports", "Bangladesh"),
+  seedChannel("ch_gtv", "GTV (Gazi TV)", "gtv", "Bangla", "Bangladesh"),
+  seedChannel("ch_starsports1", "Star Sports 1 HD", "starsports1", "Sports", "India"),
+  seedChannel("ch_sonyten1", "Sony Ten 1 HD", "sonyten1", "Sports", "India"),
+  seedChannel("ch_ptvsports", "PTV Sports", "ptvsports", "Sports", "Pakistan"),
+  seedChannel("ch_asports", "A Sports HD", "asports", "Sports", "Pakistan"),
+  seedChannel("ch_somoynews", "Somoy News TV", "somoynews", "Bangla", "Bangladesh"),
+  seedChannel("ch_aajtak", "Aaj Tak HD", "aajtak", "Indian", "India"),
+  seedChannel("ch_geonews", "GEO News", "geonews", "Pakistani", "Pakistan"),
 ];
 
 const INITIAL_STREAMS: InMemoryStreamLink[] = [
@@ -347,28 +259,30 @@ function ensureLoaded(force: boolean = false) {
       if (Array.isArray(parsed.channels) && Array.isArray(parsed.streams)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         global.__freetv_in_memory_channels = parsed.channels.map((c: any) => {
-          // Hand-edited channels keep exactly what the admin saved.
-          if (c.isManuallyEdited) {
-            return {
-              ...c,
-              tags: Array.isArray(c.tags) ? c.tags : [],
-              isPinned: c.isPinned === true,
-              priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
-              createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
-              updatedAt: c.updatedAt ? new Date(c.updatedAt) : new Date(),
-            };
-          }
-          const detected = detectCategoryAndCountry(c.name, c.category || "");
-          return {
+          const base = {
             ...c,
-            country: (!c.country || c.country === "Global" || c.country === "All") ? detected.country : c.country,
-            category: (!c.category || c.category === "General") ? detected.category : c.category,
-            subCategory: (!c.subCategory || c.subCategory === "Others") ? detected.subCategory : c.subCategory,
-            logo: getChannelLogo(c.name, c.logo),
+            // Legacy category text ("Live Sports", "News", "Movies", "General")
+            // collapses into the five; a value already in the five passes through.
+            category: normalizeCategory(c.category, c.name, c.country),
+            tags: Array.isArray(c.tags) ? c.tags : [],
             isPinned: c.isPinned === true,
             priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
             createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
             updatedAt: c.updatedAt ? new Date(c.updatedAt) : new Date(),
+          };
+
+          // A hand-edited record is authoritative: only the category collapse runs,
+          // never automatic country/logo re-detection.
+          if (c.isManuallyEdited) return base;
+
+          const detected = detectCategoryAndCountry(c.name, c.category || "");
+          return {
+            ...base,
+            country:
+              !c.country || c.country === "Global" || c.country === "All"
+                ? detected.country
+                : c.country,
+            logo: getChannelLogo(c.name, c.logo),
           };
         });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -411,14 +325,18 @@ export const inMemoryDb = {
     ensureLoaded(true);
     const channels = global.__freetv_in_memory_channels || [];
     return channels.map((c) => {
-      // Manual admin overrides are authoritative — skip auto-detection.
-      if (c.isManuallyEdited) return c;
+      // Manual admin overrides are authoritative for everything but the
+      // five-category collapse, which no record is allowed to escape.
+      const category = normalizeCategory(c.category, c.name, c.country);
+      if (c.isManuallyEdited) return { ...c, category };
       const detected = detectCategoryAndCountry(c.name, c.category || "");
       return {
         ...c,
-        country: (!c.country || c.country === "Global" || c.country === "All") ? detected.country : c.country,
-        category: (!c.category || c.category === "General") ? detected.category : c.category,
-        subCategory: (!c.subCategory || c.subCategory === "Others") ? detected.subCategory : c.subCategory,
+        country:
+          !c.country || c.country === "Global" || c.country === "All"
+            ? detected.country
+            : c.country,
+        category,
         logo: getChannelLogo(c.name, c.logo),
         isPinned: c.isPinned === true,
         priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,

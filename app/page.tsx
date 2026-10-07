@@ -12,17 +12,15 @@ import { RefreshCw, Tv } from "lucide-react";
 
 /** Friendly row headings for each category rail (overrides the raw category title). */
 const RAIL_TITLES: Record<string, string> = {
-  "sports-tv": "Sports Channels",
-  "bangladeshi-tv": "Bangladeshi Channels",
-  "indian-tv": "Indian Channels",
-  "pakistani-tv": "Pakistani Channels",
-  "news-tv": "News Channels",
-  "global-tv": "Global Channels",
+  sports: "Sports Channels",
+  bangla: "Bangla Channels",
+  indian: "Indian Channels",
+  pakistani: "Pakistani Channels",
+  documentary: "Documentary Channels",
 };
 
 interface ApiChannel extends RailChannel {
   category?: string;
-  subCategory?: string;
   country?: string;
 }
 
@@ -62,36 +60,19 @@ export default function HomePage() {
     };
   }, []);
 
-  /** One rail per category, in the CATEGORIES order (Sports → Bangla → India → Pakistan → News → Global). */
+  /** One rail per category, in the CATEGORIES order (Sports → Bangla → Indian → Pakistani → Documentary). */
   const rails = useMemo(() => {
-    const catRails = CATEGORIES.map((category) => {
-      return {
-        category,
-        title: RAIL_TITLES[category.slug] || category.title,
-        channels: channels.filter((ch) => isChannelInCategory(ch, category)),
-      };
-    }).filter((rail) => rail.channels.length > 0);
+    const catRails = CATEGORIES.map((category) => ({
+      slug: category.slug,
+      title: RAIL_TITLES[category.slug] || category.title,
+      badge: category.badge,
+      channels: channels.filter((ch) => isChannelInCategory(ch, category)),
+    })).filter((rail) => rail.channels.length > 0);
 
-    // Fallback: If channels exist but didn't match any specific category rail, show them in a general rail
+    // Fallback: channels exist but matched no rail (only possible if a record
+    // somehow carries a category outside the five) — show them all in one row.
     if (catRails.length === 0 && channels.length > 0) {
-      return [
-        {
-          category: {
-            slug: "all-channels",
-            name: "All Channels",
-            title: "Live Stream Channels",
-            badge: "📺",
-            flag: "📺",
-            subtitle: "All Available Live Streams",
-            description: "All live channels",
-            image: "",
-            filterType: "category" as const,
-            filterValues: [],
-          },
-          title: "All Live Channels",
-          channels,
-        },
-      ];
+      return [{ slug: "all-channels", title: "All Live Channels", badge: "📺", channels }];
     }
 
     return catRails;
@@ -138,10 +119,10 @@ export default function HomePage() {
           <div className="space-y-4 sm:space-y-10 animate-fade-in">
             {rails.map((rail) => (
               <ChannelRail
-                key={rail.category.slug}
+                key={rail.slug}
                 title={rail.title}
-                accent={rail.category.badge}
-                categorySlug={rail.category.slug}
+                accent={rail.badge}
+                categorySlug={rail.slug}
                 channels={rail.channels}
               />
             ))}

@@ -5,12 +5,16 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { MAX_CONSECUTIVE_FAILURES } from "@/lib/streamHealth";
-import { getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
+import { getCategoryBySlug, isChannelCategory } from "@/lib/categories";
 
 // SoluPlay Channels API Route - Force Recompile for Logo Fix
 export const dynamic = "force-dynamic";
 
 /**
+ * The public catalogue is the curated one: only channels an admin has pinned are
+ * ever listed here, in any mode, for any parameter combination. An unpinned
+ * channel exists in the database and in the Admin Dashboard only.
+ *
  * The catalogue is read by every visitor on every page, so it is served from the
  * edge for half a minute instead of hitting Atlas per request. Stale is fine for
  * a TV grid (a pin or a recovered stream shows up within ~30s), and
@@ -20,7 +24,7 @@ const CATALOGUE_CACHE = "public, s-maxage=30, stale-while-revalidate=300";
 
 /** Only the fields the grid, the rails and the watch sidebar actually render. */
 const CHANNEL_FIELDS =
-  "_id name logo category subCategory country tags isPinned priorityOrder streamUrl url";
+  "_id name logo category country tags isPinned priorityOrder streamUrl url";
 
 /**
  * Mirror rows as they may leave the server. `headers` (upstream Referer/Origin
@@ -64,36 +68,46 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
-    const subCategory = searchParams.get("subCategory");
     const country = searchParams.get("country");
     const search = searchParams.get("search");
-    // A rail is one of the six fixed display categories. The category page asks
+    // A rail is one of the five fixed display categories. The category page asks
     // for its own rail instead of downloading the whole catalogue and filtering
     // in the browser — the matching rules are shared, so the result is identical.
     const rail = searchParams.get("rail");
     const railConfig = rail ? getCategoryBySlug(rail) : undefined;
 
+    // A rail slug nobody recognises lists nothing. Falling back to the whole
+    // catalogue would turn a stale link into an uncurated browse page.
+    if (rail && !railConfig) {
+      return NextResponse.json(
+        { success: true, count: 0, channels: [] },
+        { headers: { "Cache-Control": CATALOGUE_CACHE } }
+      );
+    }
+
+    // `rail` and `category` are the same axis now that a channel has exactly one
+    // category, so the rail simply supplies the category value.
+    const requestedCategory = railConfig ? railConfig.category : category;
+    if (requestedCategory && !isChannelCategory(requestedCategory)) {
+      return NextResponse.json(
+        { success: true, count: 0, channels: [] },
+        { headers: { "Cache-Control": CATALOGUE_CACHE } }
+      );
+    }
+
     const conn = await connectToDatabase();
 
     if (conn) {
-      // MongoDB Mode: Find matching channels
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const filter: any = {};
-      if (category && category !== "All") filter.category = category;
-      if (subCategory && subCategory !== "All") filter.subCategory = subCategory;
+      // MongoDB Mode: the pinned catalogue only, then the optional filters.
+      const filter: Record<string, unknown> = { isPinned: true };
+      if (requestedCategory && requestedCategory !== "All") filter.category = requestedCategory;
       if (country && country !== "All") filter.country = country;
       if (search) filter.name = { $regex: search, $options: "i" };
 
-      const allChannels = await Channel.find(filter)
+      const channels = await Channel.find(filter)
         .sort({ isPinned: -1, priorityOrder: 1, name: 1 })
         .select(CHANNEL_FIELDS)
         .lean();
-
-      // Filtered before the stream lookup, so a rail request only reads the
-      // mirrors it is going to send.
-      const channels = railConfig
-        ? allChannels.filter((c) => isChannelInCategory(c as any, railConfig))
-        : allChannels;
 
       const channelIds = channels.map((c) => c._id);
 
@@ -147,24 +161,18 @@ export async function GET(req: NextRequest) {
         { headers: { "Cache-Control": CATALOGUE_CACHE } }
       );
     } else {
-      // In-Memory Fallback Mode
-      let channels = inMemoryDb.getChannels();
+      // In-Memory Fallback Mode — the same pinned-only rule as the MongoDB branch.
+      let channels = inMemoryDb.getChannels().filter((c) => c.isPinned === true);
       const streams = inMemoryDb.getStreams();
 
-      if (category && category !== "All") {
-        channels = channels.filter((c) => c.category === category);
-      }
-      if (subCategory && subCategory !== "All") {
-        channels = channels.filter((c) => c.subCategory === subCategory);
+      if (requestedCategory && requestedCategory !== "All") {
+        channels = channels.filter((c) => c.category === requestedCategory);
       }
       if (country && country !== "All") {
         channels = channels.filter((c) => c.country === country);
       }
       if (search) {
         channels = channels.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
-      }
-      if (railConfig) {
-        channels = channels.filter((c) => isChannelInCategory(c as any, railConfig));
       }
 
       const result = channels
@@ -188,17 +196,10 @@ export async function GET(req: NextRequest) {
         })
         .filter((c) => c.primaryStream !== null)
         .sort((a, b) => {
-          // Pinned channels first
-          const aPinned = (a as any).isPinned === true ? 1 : 0;
-          const bPinned = (b as any).isPinned === true ? 1 : 0;
-          if (bPinned !== aPinned) return bPinned - aPinned;
-          // Within pinned, sort by priorityOrder ascending
-          if (aPinned && bPinned) {
-            const aOrder = (a as any).priorityOrder ?? 99;
-            const bOrder = (b as any).priorityOrder ?? 99;
-            return aOrder - bOrder;
-          }
-          // Unpinned: sort alphabetically by name
+          // Everything left is pinned, so the admin's board order is the only one.
+          const aOrder = a.priorityOrder ?? 99;
+          const bOrder = b.priorityOrder ?? 99;
+          if (aOrder !== bOrder) return aOrder - bOrder;
           return a.name.localeCompare(b.name);
         });
 

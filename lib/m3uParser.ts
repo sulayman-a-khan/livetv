@@ -1,11 +1,12 @@
 import { normalizeChannelName, detectCategoryAndCountry, getChannelLogo } from "./utils";
+import type { ChannelCategory } from "./categories";
 
 export interface ParsedM3uChannel {
   name: string;
   normalizedName: string;
   logo: string;
-  category: string;
-  subCategory: string;
+  /** Exactly one of the five catalogue categories. */
+  category: ChannelCategory;
   country: string;
   streamUrl: string;
 }
@@ -49,7 +50,7 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
         const normalized = normalizeChannelName(rawName);
 
         if (normalized) {
-          const { category, subCategory, country } = detectCategoryAndCountry(
+          const { category, country } = detectCategoryAndCountry(
             rawName,
             currentMeta.groupTitle || ""
           );
@@ -62,7 +63,6 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
             normalizedName: normalized,
             logo,
             category,
-            subCategory,
             country,
             streamUrl: line,
           });

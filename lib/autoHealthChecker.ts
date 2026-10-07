@@ -1,11 +1,20 @@
 /**
  * SoluPlay Automatic Server-Side Health Checker
  *
- * Two-tier schedule:
- *   - On boot            : probes PINNED channels (the homepage rails) so the
- *                          visible catalogue has fresh evidence within a minute.
- *   - Every 6 hours      : probes EVERY stream link in the catalogue, pinned
- *                          links first, in a bounded batch.
+ * The curated catalogue only: this checker probes links that belong to PINNED
+ * channels, and nothing else.
+ *
+ *   - On boot            : probes the pinned channels so the visible rails have
+ *                          fresh evidence within a minute.
+ *   - Category batches   : `lib/healthSchedule.ts` splits the five categories
+ *                          across 09:00/09:30, 15:00/15:30 and 21:00/21:30 UTC,
+ *                          plus a 03:00 sweep over every pinned channel.
+ *   - Every 6 hours      : a long-lived process re-checks the whole pinned set.
+ *
+ * Unpinned channels are invisible to users, so they are never probed: an
+ * administrator brings a channel into health checking by pinning it. When no
+ * channel matches a batch there is simply nothing to check — the scope never
+ * widens back to the full catalogue.
  *
  * Six-hourly checking is a *detection* cadence only. A link is hidden after 3
  * consecutive failed DAILY checks (`lib/streamHealth.ts` advances the streak at
@@ -28,8 +37,24 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
 import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
 import { refreshChannelLinks, runMaintenance } from "@/lib/maintenanceRunner";
+import type { ChannelCategory } from "@/lib/categories";
+import type { HealthBatchTask } from "@/lib/healthSchedule";
 
-export type HealthCheckScope = "pinned" | "full";
+/**
+ * `"pinned"` = every pinned channel, `"full"` = every pinned channel and the
+ * whole-catalogue maintenance afterwards, anything else = one category batch
+ * from `lib/healthSchedule.ts`.
+ */
+export type HealthCheckScope = "pinned" | "full" | HealthBatchTask;
+
+export interface HealthCheckOptions {
+  /** Restrict the pass to these categories (pinned channels only either way). */
+  categories?: readonly ChannelCategory[] | null;
+  /** Wall-clock budget for a serverless run; the next pass resumes the rotation. */
+  deadlineMs?: number;
+  /** Run the whole-catalogue maintenance pass afterwards. */
+  maintenanceAfter?: boolean;
+}
 
 const FULL_INTERVAL_MS = 6 * 60 * 60 * 1000;       // every 6 hours
 const RETRY_DELAY_MS = 15 * 60 * 1000;             // a skipped/failed pass retries soon
@@ -131,19 +156,43 @@ function toLastCheckDetail(result: HlsCheckResult) {
 }
 
 /**
+ * Resolves the channels one pass may touch: pinned only, optionally narrowed to
+ * a category batch. An empty result means empty work — callers must not widen
+ * the scope, since unpinned channels are deliberately outside the health engine.
+ */
+async function resolveTargetChannelIds(
+  conn: Awaited<ReturnType<typeof connectToDatabase>>,
+  categories: readonly ChannelCategory[] | null | undefined
+): Promise<string[]> {
+  const scoped = categories && categories.length > 0 ? Array.from(categories) : null;
+
+  if (conn) {
+    const filter: Record<string, unknown> = { isPinned: true };
+    if (scoped) filter.category = { $in: scoped };
+    const docs = await Channel.find(filter).select("_id").lean();
+    return docs.map((c) => String(c._id));
+  }
+
+  return inMemoryDb
+    .getChannels()
+    .filter((c) => c.isPinned && (!scoped || scoped.includes(c.category)))
+    .map((c) => c._id);
+}
+
+/**
  * Run health check on streams (In-Memory mode).
- * `channelIds`: when set, only streams belonging to these channels are probed
- * (used for the hourly pinned-only pass); `null` probes everything.
+ * `channelIds`: the pinned channels in scope for this pass — links belonging to
+ * any other channel are never probed.
  */
 async function runInMemoryHealthCheck(
   scope: HealthCheckScope,
-  channelIds: string[] | null
+  channelIds: string[]
 ): Promise<HealthCheckResult> {
-  const allStreams = inMemoryDb.getStreams().filter((s) => !s.adminDisabled);
-  const streams = (channelIds
-    ? allStreams.filter((s) => channelIds.includes(s.channelId))
-    : allStreams
-  ).slice(0, MAX_LINKS_PER_RUN);
+  const allowed = new Set(channelIds);
+  const streams = inMemoryDb
+    .getStreams()
+    .filter((s) => !s.adminDisabled && allowed.has(s.channelId))
+    .slice(0, MAX_LINKS_PER_RUN);
   const now = new Date();
   let active = 0;
   let degraded = 0;
@@ -207,19 +256,20 @@ async function runInMemoryHealthCheck(
 
 /**
  * Run health check on streams (MongoDB mode).
- * `channelIds`: when set, only streams belonging to these channels are probed
- * (the boot-time pinned pass); `null` probes everything up to `MAX_LINKS_PER_RUN`.
+ * `channelIds`: the pinned channels in scope for this pass. Nothing outside
+ * those ids is ever probed — an unpinned channel's links are invisible here, and
+ * so is the whole catalogue when nothing is pinned.
  * `deadlineAt`: stop starting new batches after this epoch-ms. A scheduled run
  * from a serverless cron has a hard wall-clock limit, and because links are
  * picked least-recently-checked-first the next pass simply continues where this
- * one stopped — nothing is missed, the catalogue just rotates across runs.
+ * one stopped — nothing is missed, the batch just rotates across runs.
  *
  * An admin-disabled link is not probed at all: only an admin can bring it back,
  * otherwise a 6-hourly check would silently undo a deliberate take-out-of-service.
  */
 async function runMongoHealthCheck(
   scope: HealthCheckScope,
-  channelIds: string[] | null,
+  channelIds: string[],
   deadlineAt?: number
 ): Promise<HealthCheckResult> {
   const now = new Date();
@@ -228,32 +278,19 @@ async function runMongoHealthCheck(
   let broken = 0;
   let recovered = 0;
 
-  const baseFilter = { adminDisabled: { $ne: true } };
-  // Homepage channels come first in a full pass, so the links a viewer is most
-  // likely to click get corrected earliest within the same run.
-  const pinnedDocs = channelIds
-    ? []
-    : await Channel.find({ isPinned: true }).select("_id").lean();
-  const pinnedIds = pinnedDocs.map((c) => String(c._id));
-
-  const scopedFilter = channelIds
-    ? { ...baseFilter, channelId: { $in: channelIds } }
-    : pinnedIds.length > 0
-      ? { ...baseFilter, channelId: { $nin: pinnedIds } }
-      : baseFilter;
-
-  const pinnedStreams =
-    !channelIds && pinnedIds.length > 0
-      ? await StreamLink.find({ ...baseFilter, channelId: { $in: pinnedIds } })
-          .sort({ lastCheckedAt: 1 })
-          .limit(MAX_LINKS_PER_RUN)
-      : [];
-  const restStreams = await StreamLink.find(scopedFilter)
+  // Least-recently-checked first, so a bounded run rotates through the batch
+  // instead of re-probing the same links and starving the rest.
+  const streams = await StreamLink.find({
+    adminDisabled: { $ne: true },
+    channelId: { $in: channelIds },
+  })
     .sort({ lastCheckedAt: 1 })
-    .limit(Math.max(0, MAX_LINKS_PER_RUN - pinnedStreams.length));
-  const streams = [...pinnedStreams, ...restStreams];
+    .limit(MAX_LINKS_PER_RUN);
 
-  const skippedDisabled = await StreamLink.countDocuments({ adminDisabled: true });
+  const skippedDisabled = await StreamLink.countDocuments({
+    adminDisabled: true,
+    channelId: { $in: channelIds },
+  });
   console.log(
     `[AutoHealthChecker] (${scope}) Probing ${streams.length} stream links (MongoDB mode)` +
       (skippedDisabled > 0 ? `, ${skippedDisabled} admin-disabled link(s) left alone` : "") +
@@ -406,7 +443,7 @@ async function releaseMongoLock(conn: typeof import("mongoose")): Promise<void> 
  * transient failure to look like a quiet gap in coverage. Retry shortly instead,
  * up to a bounded number of times so a persistently broken run cannot spin.
  */
-function scheduleRetry(scope: HealthCheckScope, reason: string) {
+function scheduleRetry(scope: HealthCheckScope, reason: string, options: HealthCheckOptions = {}) {
   const attempts = global.__freetv_health_retry_count || 0;
   if (attempts >= MAX_RETRIES_PER_CYCLE) {
     console.warn(
@@ -420,18 +457,20 @@ function scheduleRetry(scope: HealthCheckScope, reason: string) {
     `[AutoHealthChecker] (${scope}) ${reason} — retry ${attempts + 1}/${MAX_RETRIES_PER_CYCLE} in ${RETRY_DELAY_MS / 60_000} min`
   );
   if (global.__freetv_health_retry_timer) clearTimeout(global.__freetv_health_retry_timer);
-  global.__freetv_health_retry_timer = setTimeout(() => runAutoHealthCheck(scope), RETRY_DELAY_MS);
+  global.__freetv_health_retry_timer = setTimeout(() => runAutoHealthCheck(scope, options), RETRY_DELAY_MS);
   global.__freetv_health_retry_timer.unref?.();
 }
 
 /**
- * Main health check runner — detects DB mode and runs the requested scope.
- * `scope` defaults to "full" (used by the admin panel's manual "Run Now" button).
- * `deadlineMs` bounds wall-clock work for scheduled (serverless) runs.
+ * Main health check runner — detects DB mode and probes the pinned channels in
+ * scope. `scope` defaults to "full" (used by the admin panel's manual "Run Now"
+ * button). `options.categories` narrows the pass to one category batch,
+ * `deadlineMs` bounds wall-clock work for scheduled (serverless) runs, and
+ * `maintenanceAfter` opts a batch into the whole-catalogue maintenance pass.
  */
 async function runAutoHealthCheck(
   scope: HealthCheckScope = "full",
-  options: { deadlineMs?: number } = {}
+  options: HealthCheckOptions = {}
 ): Promise<HealthCheckResult> {
   const deadlineAt = options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
   // Re-entrancy guard: with enough streams a single pass can take longer than
@@ -459,34 +498,26 @@ async function runAutoHealthCheck(
       const acquired = await acquireMongoLock(conn);
       if (!acquired) {
         global.__freetv_health_check_running = false;
-        scheduleRetry(scope, "Another instance already holds the lock");
+        scheduleRetry(scope, "Another instance already holds the lock", options);
         return emptyResult(scope);
       }
       mongoLockHeld = true;
     }
 
-    // Resolve which channels are in scope. "full" = every channel (null filter).
-    let pinnedChannelIds: string[] | null = null;
-    if (scope === "pinned") {
-      if (conn) {
-        const pinned = await Channel.find({ isPinned: true }).select("_id").lean();
-        pinnedChannelIds = pinned.map((c) => String(c._id));
-      } else {
-        pinnedChannelIds = inMemoryDb
-          .getChannels()
-          .filter((c) => c.isPinned)
-          .map((c) => c._id);
-      }
+    // Every pass is pinned-only; a category batch narrows it further. No
+    // fallback to the full catalogue: zero channels in scope is zero work.
+    const targetChannelIds = await resolveTargetChannelIds(conn, options.categories);
 
-      if (pinnedChannelIds.length === 0) {
-        console.log("[AutoHealthChecker] (pinned) No pinned channels — nothing to check.");
-        return emptyResult(scope);
-      }
+    if (targetChannelIds.length === 0) {
+      console.log(
+        `[AutoHealthChecker] (${scope}) No pinned channels in scope — nothing to check.`
+      );
+      return emptyResult(scope);
     }
 
     const result = conn
-      ? await runMongoHealthCheck(scope, pinnedChannelIds, deadlineAt)
-      : await runInMemoryHealthCheck(scope, pinnedChannelIds);
+      ? await runMongoHealthCheck(scope, targetChannelIds, deadlineAt)
+      : await runInMemoryHealthCheck(scope, targetChannelIds);
 
     global.__freetv_last_health_check = result.timestamp;
     if (scope === "full") {
@@ -498,10 +529,12 @@ async function runAutoHealthCheck(
     // Links whose status flipped were already re-ranked for their own channel
     // inside the pass above; this is the whole-catalogue pass that also merges
     // duplicates, drops dead links past their window and re-sorts every channel.
+    // Only a sweep that covered the pinned catalogue end to end qualifies.
+    const maintainAfter = options.maintenanceAfter ?? scope === "full";
     try {
-      // A budget-truncated pass has not seen the whole catalogue, so it must not
+      // A budget-truncated pass has not seen the whole scope, so it must not
       // merge, reorder or delete across it — that happens on a completed pass.
-      if (scope === "full" && !result.truncated) {
+      if (maintainAfter && !result.truncated) {
         const maintenance = await runMaintenance();
         console.log(
           `[AutoHealthChecker] Maintenance: merged ${maintenance.channelsMerged}, ` +
@@ -521,13 +554,13 @@ async function runAutoHealthCheck(
     console.log(`  Degraded      : ${result.degraded}`);
     console.log(`  Broken        : ${result.broken}`);
     console.log(`  Recovered     : ${result.recovered}`);
-    console.log(`  Next check in : ${scope === "pinned" ? "the next 6-hour cycle" : "6 hours"}`);
+    console.log(`  Next check in : ${scope === "full" ? "6 hours" : "the next scheduled batch"}`);
     console.log("══════════════════════════════════════════════════════\n");
 
     return result;
   } catch (err: any) {
     console.error(`[AutoHealthChecker] (${scope}) Fatal error:`, err.message || err);
-    scheduleRetry(scope, `pass failed (${err?.message || err})`);
+    scheduleRetry(scope, `pass failed (${err?.message || err})`, options);
     return emptyResult(scope);
   } finally {
     if (mongoLockHeld && mongoConnForLock) {
@@ -539,8 +572,10 @@ async function runAutoHealthCheck(
 
 /**
  * Start the automatic health checker: a quick pinned pass shortly after boot,
- * then the whole catalogue every 6 hours. Safe to call multiple times — only
- * starts once per process via a global flag.
+ * then the whole pinned set every 6 hours. Vercel's cron batches
+ * (`lib/healthSchedule.ts`) cover the same ground on a long-lived server that
+ * never restarts; this interval is the in-process counterpart. Safe to call
+ * multiple times — only starts once per process via a global flag.
  */
 export function startAutoHealthChecker() {
   if (global.__freetv_health_checker_started) {
@@ -550,7 +585,7 @@ export function startAutoHealthChecker() {
   global.__freetv_health_checker_started = true;
 
   console.log(
-    "[AutoHealthChecker] ✦ Activated — pinned channels on boot, full catalogue every 6 hours"
+    "[AutoHealthChecker] ✦ Activated — pinned channels on boot, pinned catalogue every 6 hours"
   );
 
   // Pinned channels first, so the homepage rails have fresh evidence within a
@@ -559,8 +594,8 @@ export function startAutoHealthChecker() {
     runAutoHealthCheck("pinned");
   }, 30_000);
 
-  // Full catalogue: first run after 2 minutes (let the pinned check settle in
-  // first), then every 6 hours.
+  // The whole pinned set, with maintenance: first run after 2 minutes (let the
+  // boot pass settle in first), then every 6 hours.
   setTimeout(() => {
     runAutoHealthCheck("full");
   }, 2 * 60_000);

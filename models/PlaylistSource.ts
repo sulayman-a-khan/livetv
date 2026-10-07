@@ -13,7 +13,6 @@ export type PlaylistSyncStatus = "ok" | "unchanged" | "failed";
 
 export interface IPlaylistSyncSummary {
   entriesParsed: number;
-  channelsCreated: number;
   /** URLs the playlist newly lists, for a channel this source already knows. */
   newEntries: number;
   /** A channel kept its identity but got a different URL. */
@@ -53,7 +52,6 @@ export interface IPlaylistSource extends Document {
 const PlaylistSyncSummarySchema = new Schema(
   {
     entriesParsed: { type: Number, default: 0 },
-    channelsCreated: { type: Number, default: 0 },
     newEntries: { type: Number, default: 0 },
     updatedUrls: { type: Number, default: 0 },
     entriesRemoved: { type: Number, default: 0 },

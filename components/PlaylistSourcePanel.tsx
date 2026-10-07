@@ -125,7 +125,6 @@ function summarySentence(summary: Record<string, number>): string {
   const parts: string[] = [];
   if (summary.newEntries) parts.push(`${summary.newEntries} new entr${summary.newEntries === 1 ? "y" : "ies"}`);
   if (summary.updatedUrls) parts.push(`${summary.updatedUrls} URL(s) updated`);
-  if (summary.channelsCreated) parts.push(`${summary.channelsCreated} channel(s) created`);
   if (summary.linksAddedActive) parts.push(`${summary.linksAddedActive} link(s) added active`);
   if (summary.linksAddedBroken) parts.push(`${summary.linksAddedBroken} held as candidate`);
   if (summary.linksRevived) parts.push(`${summary.linksRevived} link(s) revived`);

@@ -19,6 +19,11 @@ export const dynamic = "force-dynamic";
  */
 const CHANNEL_CACHE = "public, s-maxage=15, stale-while-revalidate=120";
 
+// Curated-only, the same rule the catalogue list uses: an unpinned channel
+// answers 404 here, so a saved or guessed `/watch/<id>` link cannot bypass the
+// pin. `SportsEvent` documents are not catalogue channels — the Live Sports
+// Arena links straight to them — so they stay reachable below.
+
 /**
  * `headers` (upstream Referer/Origin, sometimes provider credentials) and the
  * `lastCheck` diagnostics blob are server-side only: no browser can set a
@@ -57,7 +62,7 @@ export async function GET(
     if (conn) {
       if (mongoose.isValidObjectId(id)) {
         const [channel, streams] = await Promise.all([
-          Channel.findById(id).lean(),
+          Channel.findOne({ _id: id, isPinned: true }).lean(),
           StreamLink.find({ channelId: id, adminDisabled: { $ne: true } })
             .sort({ priority: 1, latency: 1 })
             .select(STREAM_FIELDS)
@@ -143,7 +148,7 @@ export async function GET(
                 _id: String(sportDoc._id),
                 name: sportDoc.matchTitle,
                 logo: getChannelLogo(sportDoc.sportType, ""),
-                category: "Live Sports",
+                category: "Sports",
                 country: "Global",
                 streams,
               },
@@ -160,7 +165,8 @@ export async function GET(
     const channels = inMemoryDb.getChannels();
     const streams = inMemoryDb.getStreams();
 
-    const channel = channels.find((c) => c._id === id);
+    // Curated-only, exactly as the MongoDB branch above.
+    const channel = channels.find((c) => c._id === id && c.isPinned === true);
     if (!channel) {
       return NextResponse.json({ success: false, error: "Channel not found" }, { status: 404 });
     }

@@ -6,20 +6,32 @@
       "schedule": "0 20 * * *"
     },
     {
-      "path": "/api/admin/scheduler/health",
+      "path": "/api/admin/scheduler/health-all",
       "schedule": "0 3 * * *"
     },
     {
-      "path": "/api/admin/scheduler/health",
+      "path": "/api/admin/scheduler/health-bangla-pakistani",
       "schedule": "0 9 * * *"
     },
     {
-      "path": "/api/admin/scheduler/health",
+      "path": "/api/admin/scheduler/health-sports-indian-documentary",
+      "schedule": "30 9 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-bangla-indian",
       "schedule": "0 15 * * *"
     },
     {
-      "path": "/api/admin/scheduler/health",
+      "path": "/api/admin/scheduler/health-sports-pakistani-documentary",
+      "schedule": "30 15 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-bangla-pakistani",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-sports-indian-documentary",
+      "schedule": "30 21 * * *"
     }
   ]
 }

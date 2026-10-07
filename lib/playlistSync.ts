@@ -13,6 +13,8 @@
  *     ingest, so a re-published URL updates a channel instead of duplicating it.
  *   - Only links this source provided are ever retired; hand-added links and
  *     links owned by another source are left alone.
+ *   - A sync never creates a Channel and never changes `isPinned`. New URLs are
+ *     added only to channels the admin has already pinned.
  *
  * Playlist sources live in MongoDB by design (the specification requires the
  * configuration and sync state to survive restarts), so this adapter has no
@@ -71,7 +73,6 @@ const PROBE_TIMEOUT_MS = 10_000;
 const PROBE_CONCURRENCY = 15;
 
 const EMPTY_STATS: PlaylistSyncSummary["stats"] = {
-  channelsCreated: 0,
   newEntries: 0,
   updatedUrls: 0,
   entriesRemoved: 0,
@@ -146,7 +147,6 @@ function toDesiredEntries(parsed: ReturnType<typeof parseM3uContent>): DesiredEn
       canonicalUrl,
       logo: item.logo,
       category: item.category,
-      subCategory: item.subCategory,
       country: item.country,
     });
   }
@@ -158,7 +158,7 @@ async function loadChannelStates(
   storedEntries: StoredEntry[]
 ): Promise<ChannelState[]> {
   const channels = await Channel.find({ normalizedName: { $in: keys } })
-    .select("_id name normalizedName isManuallyEdited")
+    .select("_id name normalizedName isManuallyEdited isPinned")
     .lean();
   if (channels.length === 0) return [];
 
@@ -178,6 +178,7 @@ async function loadChannelStates(
       channelKey: channel.normalizedName,
       channelId: String(channel._id),
       isManuallyEdited: Boolean(channel.isManuallyEdited),
+      isPinned: channel.isPinned === true,
       links: owned.map((l) => ({
         _id: String(l._id),
         url: l.url,
@@ -398,7 +399,7 @@ export async function syncPlaylistSource(
 
   onEvent?.({
     phase: "apply",
-    message: `Applying ${plan.channelsToCreate.length} new channel(s), ${plan.linksToCreate.length} link(s), ${plan.linksToDelete.length} retirement(s).`,
+    message: `Applying ${plan.linksToCreate.length} link(s) to pinned channels, ${plan.linksToDelete.length} retirement(s).`,
   });
 
   await applyPlan(sourceId, plan);
@@ -409,7 +410,6 @@ export async function syncPlaylistSource(
   await PlaylistEntry.updateMany({ sourceId, status: "present" }, { $set: { lastSeenAt: now } });
 
   const changed =
-    plan.channelsToCreate.length > 0 ||
     plan.linksToCreate.length > 0 ||
     plan.linksToDelete.length > 0 ||
     plan.entryPatches.length > 0 ||
@@ -447,27 +447,13 @@ export async function syncPlaylistSource(
   return summary;
 }
 
-/** Writes a plan to MongoDB. Order matters: channels, then links, then entries. */
+/** Writes a plan to MongoDB. Order matters: links, then entries. */
 async function applyPlan(sourceId: string, plan: PlaylistSyncPlan): Promise<void> {
+  // The planner only ever links a channel that already exists and is pinned, so
+  // the identity → id map comes straight from the groups; nothing is created here.
   const idByKey = new Map<string, string>();
-
-  for (const create of plan.channelsToCreate) {
-    try {
-      const doc = await Channel.create({
-        name: create.name,
-        normalizedName: create.channelKey,
-        logo: create.logo,
-        category: create.category,
-        subCategory: create.subCategory,
-        country: create.country,
-      });
-      idByKey.set(create.channelKey, String(doc._id));
-    } catch (err: any) {
-      // Another sync instance created the same identity a moment ago.
-      if (err?.code !== 11000) throw err;
-      const existing = await Channel.findOne({ normalizedName: create.channelKey }).lean();
-      if (existing) idByKey.set(create.channelKey, String(existing._id));
-    }
+  for (const group of plan.groups) {
+    if (group.channelId) idByKey.set(group.channelKey, group.channelId);
   }
 
   for (const patch of plan.linkPatches) {
@@ -477,6 +463,8 @@ async function applyPlan(sourceId: string, plan: PlaylistSyncPlan): Promise<void
   for (const create of plan.linksToCreate) {
     const channelId = idByKey.get(create.channelKey);
     if (!channelId) continue;
+    const pinned = plan.groups.find((g) => g.channelKey === create.channelKey)?.isPinned;
+    if (!pinned) continue;
     const count = await StreamLink.countDocuments({ channelId });
     await StreamLink.create({
       channelId,

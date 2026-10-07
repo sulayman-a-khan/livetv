@@ -113,6 +113,8 @@ export async function POST(req: NextRequest) {
           for (const item of parsedChannels) {
             // Identity is resolved through the canonical key, so "Bangla/TV" and
             // "bangla_tv" land on the same channel instead of creating two.
+            // Everything discovered is imported, and nothing is pinned here:
+            // an imported channel stays admin-only until the admin pins it.
             const canonicalKey = canonicalChannelKey(item.name);
             let channel = await Channel.findOne({ normalizedName: canonicalKey });
             if (!channel) {
@@ -121,8 +123,8 @@ export async function POST(req: NextRequest) {
                 normalizedName: canonicalKey,
                 logo: item.logo,
                 category: item.category,
-                subCategory: item.subCategory,
                 country: item.country,
+                isPinned: false,
               });
               channelsCreated++;
             } else if (!channel.logo && item.logo) {
@@ -176,7 +178,6 @@ export async function POST(req: NextRequest) {
                 normalizedName: canonicalKey,
                 logo: item.logo,
                 category: item.category,
-                subCategory: item.subCategory,
                 country: item.country,
                 isPinned: false,
                 tags: [],

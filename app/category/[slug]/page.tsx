@@ -1,16 +1,10 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import Header from "@/components/Header";
-import {
-  getCategoryBySlug,
-  CATEGORIES,
-  GENRE_FILTERS,
-  GenreFilter,
-  matchesGenreFilter,
-} from "@/lib/categories";
+import { getCategoryBySlug, CATEGORIES } from "@/lib/categories";
 import { getChannelLogo } from "@/lib/utils";
 import { ArrowLeft, RefreshCw, AlertCircle, Tv } from "lucide-react";
 
@@ -19,7 +13,6 @@ interface ChannelItem {
   name: string;
   logo: string;
   category: string;
-  subCategory?: string;
   country: string;
   activeStreamCount: number;
 }
@@ -32,16 +25,15 @@ export default function CategoryPage() {
   const [categoryChannels, setCategoryChannels] = useState<ChannelItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeGenre, setActiveGenre] = useState<GenreFilter>("all");
 
   useEffect(() => {
     async function loadCategoryChannels() {
       setLoading(true);
       setError(null);
       try {
-        // Ask the API for just this rail: the matching rules live in
-        // lib/categories and run server-side, so the payload is this rail only
-        // instead of the whole catalogue.
+        // Ask the API for just this rail: it already knows the curated (pinned)
+        // catalogue and the exact category, so the payload is this rail only
+        // instead of the whole catalogue filtered in the browser.
         const url = categoryConfig
           ? `/api/channels?rail=${encodeURIComponent(slug)}`
           : "/api/channels";
@@ -67,35 +59,6 @@ export default function CategoryPage() {
 
     loadCategoryChannels();
   }, [slug, categoryConfig]);
-
-  // Dynamic counts for each genre pill
-  const genreCounts = useMemo(() => {
-    const counts: Record<GenreFilter, number> = {
-      all: categoryChannels.length,
-      news: 0,
-      entertainment: 0,
-      sports: 0,
-    };
-
-    for (const ch of categoryChannels) {
-      if (matchesGenreFilter(ch, "news")) counts.news++;
-      if (matchesGenreFilter(ch, "entertainment")) counts.entertainment++;
-      if (matchesGenreFilter(ch, "sports")) counts.sports++;
-    }
-
-    return counts;
-  }, [categoryChannels]);
-
-  // Filter channels by active genre
-  const displayedChannels = useMemo(() => {
-    let result = categoryChannels;
-
-    if (activeGenre !== "all") {
-      result = result.filter((c) => matchesGenreFilter(c, activeGenre));
-    }
-
-    return result;
-  }, [categoryChannels, activeGenre]);
 
   if (!categoryConfig) {
     return (
@@ -150,39 +113,6 @@ export default function CategoryPage() {
           </span>
         </section>
 
-
-        {/* In-Page Sub-Category / Genre Filter Tabs */}
-        <section className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center sm:gap-3 sm:overflow-x-auto sm:scrollbar-none pb-1">
-          {GENRE_FILTERS.map((filter) => {
-            const isActive = activeGenre === filter.id;
-            const count = genreCounts[filter.id] || 0;
-
-            return (
-              <button
-                key={filter.id}
-                onClick={() => setActiveGenre(filter.id)}
-                className={`flex sm:inline-flex items-center justify-center gap-1 sm:gap-2 px-1.5 sm:px-4 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all min-w-0 sm:shrink-0 cursor-pointer ${
-                  isActive
-                    ? "bg-[#00c978] text-slate-950 shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-400/50 sm:scale-[1.02]"
-                    : "bg-[#0d1628] text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white hover:bg-[#111c34]"
-                }`}
-              >
-                <span className="shrink-0">{filter.icon}</span>
-                <span className="truncate">{filter.label}</span>
-                <span
-                  className={`hidden sm:inline text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                    isActive
-                      ? "bg-slate-950/20 text-slate-950"
-                      : "bg-slate-900 border border-slate-700/80 text-slate-400"
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </section>
-
         {/* Channels Grid Section */}
         {loading ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
@@ -201,25 +131,17 @@ export default function CategoryPage() {
               Retry
             </button>
           </div>
-        ) : displayedChannels.length === 0 ? (
+        ) : categoryChannels.length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
             <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-white mb-1">No Channels Found</h3>
+            <h3 className="text-base font-bold text-white mb-1">No Channels Yet</h3>
             <p className="text-xs text-slate-400 mt-1">
-              {`No channels found under "${activeGenre}" for this category.`}
+              {`No pinned channels are listed under ${categoryConfig.title} right now.`}
             </p>
-            {activeGenre !== "all" && (
-              <button
-                onClick={() => setActiveGenre("all")}
-                className="mt-4 px-4 py-2 bg-[#00c978] text-slate-950 rounded-xl text-xs font-bold hover:bg-[#00db84] transition-all"
-              >
-                View All {categoryChannels.length} Channels
-              </button>
-            )}
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2.5 sm:gap-6 animate-fade-in">
-            {displayedChannels.map((channel) => {
+            {categoryChannels.map((channel) => {
               const displayLogo = getChannelLogo(channel.name, channel.logo);
 
               return (

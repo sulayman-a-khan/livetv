@@ -6,6 +6,7 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { canonicalChannelKey } from "@/lib/channelIdentity";
+import { normalizeCategory } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,11 @@ export async function DELETE(
 /**
  * PUT /api/admin/channels/[id]
  * Manual override of channel metadata. Accepts any subset of:
- *   name, logo, category, subCategory, country, tags[]
+ *   name, logo, category, country, tags[]
+ *
+ * `category` is always collapsed to exactly one of the five catalogue rails
+ * before it is stored — the routes it passes through do not run the model's
+ * `pre("validate")` normalisation, so the guard lives here.
  *
  * Saving marks the channel `isManuallyEdited`, which permanently protects these
  * fields from auto-detection and from the merge pass overwriting them.
@@ -71,7 +76,7 @@ export async function PUT(
     }
 
     const { id } = params;
-    const { name, logo, category, subCategory, country, tags } = body;
+    const { name, logo, category, country, tags } = body;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const patch: any = {};
@@ -80,8 +85,9 @@ export async function PUT(
       patch.normalizedName = canonicalChannelKey(name.trim());
     }
     if (typeof logo === "string") patch.logo = logo.trim();
-    if (typeof category === "string" && category.trim()) patch.category = category.trim();
-    if (typeof subCategory === "string") patch.subCategory = subCategory.trim();
+    if (typeof category === "string" && category.trim()) {
+      patch.category = normalizeCategory(category.trim(), patch.name || "", patch.country || "");
+    }
     if (typeof country === "string" && country.trim()) patch.country = country.trim();
     if (Array.isArray(tags)) {
       patch.tags = tags

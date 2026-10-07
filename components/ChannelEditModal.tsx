@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CHANNEL_CATEGORIES, normalizeCategory, type ChannelCategory } from "@/lib/categories";
 import { getCountryFlag } from "@/lib/utils";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
@@ -40,7 +41,6 @@ export interface EditableChannel {
   name: string;
   logo: string;
   category: string;
-  subCategory?: string;
   country: string;
   tags?: string[];
   streams: EditableStream[];
@@ -54,20 +54,7 @@ interface Props {
   onSaved: () => void | Promise<void>;
 }
 
-const CATEGORY_OPTIONS = ["General", "News", "Sports"];
 const COUNTRY_OPTIONS = ["Bangladesh", "India", "Pakistan", "Global"];
-
-/**
- * Fold any legacy/auto-detected category into the three supported buckets so
- * the dropdown always has a valid selection (e.g. "Live Sports" → "Sports",
- * "Entertainment"/"Movies"/... → "General").
- */
-function normalizeCategory(raw?: string): string {
-  const c = (raw || "").toLowerCase();
-  if (c.includes("sport")) return "Sports";
-  if (c.includes("news")) return "News";
-  return "General";
-}
 
 /**
  * Manual override panel for a single channel.
@@ -80,7 +67,9 @@ function normalizeCategory(raw?: string): string {
 export default function ChannelEditModal({ channel, secretKey, onClose, onSaved }: Props) {
   const [name, setName] = useState(channel.name);
   const [logo, setLogo] = useState(channel.logo || "");
-  const [category, setCategory] = useState(normalizeCategory(channel.category));
+  const [category, setCategory] = useState<ChannelCategory>(
+    normalizeCategory(channel.category, channel.name, channel.country)
+  );
   const [country, setCountry] = useState(channel.country || "Global");
 
   const [saving, setSaving] = useState(false);
@@ -300,10 +289,10 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Category</span>
             <select
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
+              onChange={(e) => setCategory(normalizeCategory(e.target.value))}
               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-brand-500 outline-none"
             >
-              {CATEGORY_OPTIONS.map((c) => (
+              {CHANNEL_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>

@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { classifyCategory, type ChannelCategory } from "./categories";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -22,11 +23,12 @@ export function normalizeChannelName(name: string): string {
 }
 
 /**
- * Auto-detects category and subCategory from channel name or M3U group title.
+ * Auto-detects the one category (out of the five) and the country for a channel
+ * name plus its M3U group title. Categories come from `lib/categories`, which is
+ * the single source of truth rails, health batches and the admin form share.
  */
 export function detectCategoryAndCountry(name: string, groupTitle: string = ""): {
-  category: string;
-  subCategory: string;
+  category: ChannelCategory;
   country: string;
 } {
   const combined = `${name} ${groupTitle}`.toLowerCase();
@@ -53,35 +55,7 @@ export function detectCategoryAndCountry(name: string, groupTitle: string = ""):
     country = "Pakistan";
   }
 
-  // Category & SubCategory Detection
-  let category = "General";
-  let subCategory = "Others";
-
-  if (
-    /sports|cricket|football|ptv sports|ten sports|star sports|sony ten|t sports|tsports|sports18|willow|bein|sky sports|premier league|icc|a sports|dd sports|sony six/i.test(
-      combined
-    )
-  ) {
-    category = "Live Sports";
-    if (/cricket|willow|star sports|ptv sports|icc|ipl|bpl|psl|dd sports/i.test(combined)) {
-      subCategory = "Cricket";
-    } else if (/football|premier league|la liga|champions league|bein|supersport/i.test(combined)) {
-      subCategory = "Football";
-    } else {
-      subCategory = "Others";
-    }
-  } else if (/news|somoy|jamuna|aaj tak|geo news|cnn|bbc|al jazeera|republic|dbc|channel 24|ekattor|independent|abp|ndtv|india today|ary news|samaa/i.test(combined)) {
-    category = "News";
-    subCategory = "News";
-  } else if (/movie|cinema|hbo|action|film|star movies|sony max|zee cinema|movie bangla/i.test(combined)) {
-    category = "Movies";
-    subCategory = "Movies";
-  } else if (/entertainment|drama|colors|star plus|zee tv|sony tv|hum tv|ary digital|ntv|channel i|boishakhi|deepto|ananda|my tv|deshi|nagorik|atn/i.test(combined)) {
-    category = "Entertainment";
-    subCategory = "Entertainment";
-  }
-
-  return { category, subCategory, country };
+  return { category: classifyCategory(name, groupTitle, country), country };
 }
 
 /**

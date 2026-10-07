@@ -11,7 +11,9 @@
  *                     owns at least one real, working link.
  *   4. Manual wins  — anything an admin edited by hand (`isManuallyEdited`) is
  *                     never overwritten by an automated pass, and a `manual`
- *                     link is never deleted by automation.
+ *                     link is never deleted by automation. In a merge the
+ *                     curated (pinned) record is always the survivor, so a
+ *                     duplicate can never delete a channel the admin pinned.
  *   5. Dead purge   — a link that fails the daily health check for
  *                     `DEAD_LINK_PURGE_DAYS` straight days, is not hand-added and
  *                     is no longer listed by any source is deleted; until then it
@@ -31,7 +33,6 @@ export interface MaintChannel {
   normalizedName?: string;
   logo?: string;
   category?: string;
-  subCategory?: string;
   country?: string;
   tags?: string[];
   isPinned?: boolean;
@@ -167,14 +168,21 @@ export function selectPurgeableTestLinks(streams: MaintStream[]): string[] {
   return streams.filter((s) => isPlaceholderStream(s.url)).map((s) => s._id);
 }
 
-/** Picks which record survives a merge: manual edits win, then most working links, then oldest. */
+/**
+ * Picks which record survives a merge.
+ *
+ * The pinned (curated) record wins first: it is the one users see, the one whose
+ * category an admin verified, and the one whose link history the health engine
+ * built, so losing it would silently undo curation. Hand-editing then working
+ * links, then age.
+ */
 function pickSurvivor(group: MaintChannel[], streamsByChannel: Map<string, MaintStream[]>): MaintChannel {
   return [...group].sort((a, b) => {
-    const manual = Number(Boolean(b.isManuallyEdited)) - Number(Boolean(a.isManuallyEdited));
-    if (manual !== 0) return manual;
-
     const pinned = Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned));
     if (pinned !== 0) return pinned;
+
+    const manual = Number(Boolean(b.isManuallyEdited)) - Number(Boolean(a.isManuallyEdited));
+    if (manual !== 0) return manual;
 
     const aActive = (streamsByChannel.get(a._id) || []).filter((s) => s.status === "active").length;
     const bActive = (streamsByChannel.get(b._id) || []).filter((s) => s.status === "active").length;
@@ -203,15 +211,22 @@ function mergeMetadata(survivor: MaintChannel, others: MaintChannel[]): Partial<
 
   for (const other of others) {
     if (!survivor.logo && other.logo) patch.logo = other.logo;
-    if (isGeneric(survivor.category) && !isGeneric(other.category)) patch.category = other.category;
-    if (isGeneric(survivor.subCategory) && !isGeneric(other.subCategory))
-      patch.subCategory = other.subCategory;
+    // A curated (pinned) channel's category is the one an admin confirmed, so a
+    // duplicate never rewrites it; otherwise a blank record borrows a filled one.
+    if (
+      !survivor.isPinned &&
+      isGeneric(survivor.category) &&
+      !isGeneric(other.category)
+    ) {
+      patch.category = other.category;
+    }
     if (isGeneric(survivor.country) && !isGeneric(other.country)) patch.country = other.country;
 
     if (other.tags?.length) {
       patch.tags = Array.from(new Set([...(survivor.tags || []), ...(patch.tags || []), ...other.tags]));
     }
-    // A pin anywhere in the group survives the merge.
+    // A pin anywhere in the group survives the merge, keeping the record that
+    // carries it (and its board position) rather than the duplicate's.
     if (other.isPinned && !survivor.isPinned) {
       patch.isPinned = true;
       patch.priorityOrder = other.priorityOrder ?? survivor.priorityOrder ?? 99;
@@ -263,6 +278,11 @@ export function planMaintenance(
   for (const group of Array.from(groups.values())) {
     const survivor = pickSurvivor(group, streamsByChannel);
     const duplicates = group.filter((c) => c._id !== survivor._id);
+
+    // Unpinned records are the admin's staging shelf: a group where nothing is
+    // pinned is left exactly as it is, because automation may not delete a
+    // channel nobody has curated yet. Only a pinned survivor absorbs duplicates.
+    if (duplicates.length > 0 && !survivor.isPinned) continue;
 
     // Gather every link the merged channel will own
     const owned: MaintStream[] = [...(streamsByChannel.get(survivor._id) || [])];

@@ -20,6 +20,12 @@
  *   D  old dead,  new dead    → nothing is deleted, both links are marked and
  *                               the channel can recover on a later run
  * A playlist that cannot be fetched never reaches this planner at all.
+ *
+ * Pin gate: cases A–D only ever apply to a channel the admin has *pinned*. The
+ * catalogue is curated by hand, so a sync may add or retire links on a pinned
+ * channel but must never create a channel, never pin one and never touch an
+ * unpinned one — an unpinned entry still gets its `PlaylistEntry` row kept
+ * accurate, so the admin can see that the source lists it.
  */
 
 import { decideStreamHealth, type StoredStreamStatus } from "./streamHealth";
@@ -33,7 +39,6 @@ export interface DesiredEntry {
   canonicalUrl: string;
   logo?: string;
   category?: string;
-  subCategory?: string;
   country?: string;
 }
 
@@ -68,6 +73,8 @@ export interface ChannelState {
   channelKey: string;
   channelId: string | null;
   isManuallyEdited?: boolean;
+  /** Curated by the admin — the only channels a playlist may add links to. */
+  isPinned?: boolean;
   links: ChannelLink[];
   /** Links this source previously supplied — the only retirement candidates. */
   sourceLinkIds: string[];
@@ -77,6 +84,7 @@ export interface SyncGroup {
   channelKey: string;
   channelId: string | null;
   isManuallyEdited: boolean;
+  isPinned: boolean;
   links: ChannelLink[];
   sourceLinkIds: string[];
   desired: DesiredEntry[];
@@ -93,14 +101,6 @@ export interface SyncGroup {
 
 export interface PlaylistSyncPlan {
   groups: SyncGroup[];
-  channelsToCreate: {
-    channelKey: string;
-    name: string;
-    logo: string;
-    category: string;
-    subCategory: string;
-    country: string;
-  }[];
   linksToCreate: {
     channelKey: string;
     url: string;
@@ -124,7 +124,6 @@ export interface PlaylistSyncPlan {
   }[];
   entryPatches: { _id: string; patch: Record<string, unknown> }[];
   stats: {
-    channelsCreated: number;
     newEntries: number;
     updatedUrls: number;
     entriesRemoved: number;
@@ -176,6 +175,7 @@ export function groupPlaylistEntries(input: PlannerInput): SyncGroup[] {
       channelKey,
       channelId: channel ? channel.channelId : null,
       isManuallyEdited: Boolean(channel?.isManuallyEdited),
+      isPinned: Boolean(channel?.isPinned),
       links: channel ? channel.links : [],
       sourceLinkIds: channel ? channel.sourceLinkIds : [],
       desired: groupDesired,
@@ -193,15 +193,17 @@ export function groupPlaylistEntries(input: PlannerInput): SyncGroup[] {
 
 /**
  * URLs that need a live probe before the plan can be decided: every URL of a
- * changed group — the incoming one (it must be verified before it can serve the
- * channel) and this source's outgoing ones (Case B needs to know the old URL is
- * genuinely dead before it is retired). Unchanged groups are never probed, so a
- * daily run only tests what actually moved in the playlist.
+ * changed, *pinned* group — the incoming one (it must be verified before it can
+ * serve the channel) and this source's outgoing ones (Case B needs to know the
+ * old URL is genuinely dead before it is retired). Unchanged groups are never
+ * probed, so a daily run only tests what actually moved in the playlist, and an
+ * unpinned channel is never probed at all because no probe result can be applied
+ * to it.
  */
 export function selectProbeUrls(groups: SyncGroup[]): string[] {
   const out = new Set<string>();
   for (const group of groups) {
-    if (!group.changed) continue;
+    if (!group.changed || !group.isPinned) continue;
     for (const entry of group.newEntries) {
       out.add(entry.canonicalUrl);
     }
@@ -240,14 +242,12 @@ export function planPlaylistSync(
 ): PlaylistSyncPlan {
   const plan: PlaylistSyncPlan = {
     groups,
-    channelsToCreate: [],
     linksToCreate: [],
     linkPatches: [],
     linksToDelete: [],
     entriesToCreate: [],
     entryPatches: [],
     stats: {
-      channelsCreated: 0,
       newEntries: 0,
       updatedUrls: 0,
       entriesRemoved: 0,
@@ -259,22 +259,10 @@ export function planPlaylistSync(
   };
 
   for (const group of groups) {
-    // A channel the admin deleted on purpose is not resurrected by a sync that
-    // found nothing new — only a real change re-introduces it.
-    let resolved = Boolean(group.channelId);
-    if (!resolved && group.changed && group.desired.length > 0) {
-      const template = group.newEntries[0] || group.desired[0];
-      plan.channelsToCreate.push({
-        channelKey: group.channelKey,
-        name: template.name,
-        logo: template.logo || "",
-        category: template.category || "General",
-        subCategory: template.subCategory || "Others",
-        country: template.country || "Global",
-      });
-      plan.stats.channelsCreated++;
-      resolved = true;
-    }
+    // Fails closed: a playlist may only move links on a channel the admin has
+    // pinned. An unknown identity (no channel yet) and an unpinned one are both
+    // left alone — the sync never creates a channel and never pins one.
+    const pinned = Boolean(group.channelId && group.isPinned);
 
     // URLs this channel really has after the run: everything the playlist lists
     // plus links from other sources that the playlist says nothing about.
@@ -282,13 +270,13 @@ export function planPlaylistSync(
     const linkByUrl = new Map(group.links.map((l) => [l.canonicalUrl, l]));
 
     for (const entry of group.newEntries) {
-      const probe = probes.get(entry.canonicalUrl);
+      const probe = pinned ? probes.get(entry.canonicalUrl) : undefined;
       const working = Boolean(probe && (probe.ok || probe.status === "DEGRADED"));
 
       // Duplicate-URL guard: the same URL may already be on the channel under a
       // different name spelling, or added by hand. Record the entry, never a copy.
       const alreadyLinked = linkByUrl.has(entry.canonicalUrl);
-      if (!alreadyLinked && resolved) {
+      if (!alreadyLinked && pinned) {
         plan.linksToCreate.push({
           channelKey: group.channelKey,
           url: entry.url,
@@ -372,7 +360,7 @@ export function planPlaylistSync(
       });
     }
 
-    if (!resolved) continue;
+    if (!pinned) continue;
 
     for (const entry of group.vanishedEntries) {
       const link = linkByUrl.get(entry.canonicalUrl);
@@ -406,7 +394,6 @@ export function planPlaylistSync(
  */
 export function describeSyncStats(stats: PlaylistSyncPlan["stats"]): string {
   const parts: string[] = [];
-  if (stats.channelsCreated) parts.push(`${stats.channelsCreated} new channel(s)`);
   if (stats.updatedUrls) parts.push(`${stats.updatedUrls} updated URL(s)`);
   if (stats.linksAddedActive) parts.push(`${stats.linksAddedActive} working link(s)`);
   if (stats.linksAddedBroken) parts.push(`${stats.linksAddedBroken} unverified link(s)`);

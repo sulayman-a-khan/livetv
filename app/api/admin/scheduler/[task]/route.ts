@@ -8,14 +8,19 @@
  * never fire again. Vercel Cron calls these URLs instead, doing the same two
  * jobs with the same locks, in the same order:
  *
- *   GET /api/admin/scheduler/health   four times a day (every ~6 hours)
- *   GET /api/admin/scheduler/sync     once a day, at the scheduled hour
+ *   GET /api/admin/scheduler/<category batch>   the pinned channels of a few
+ *                                               categories, at each UTC time in
+ *                                               `lib/healthSchedule.ts`
+ *   GET /api/admin/scheduler/health             every pinned channel, plus the
+ *                                               whole-catalogue maintenance pass
+ *   GET /api/admin/scheduler/sync               once a day, at the fixed hour
  *
- * The task is a path segment, not a query string: Vercel documents dynamic
- * routes as cron-eligible, and every job expression here runs once per day,
- * which is the most frequent schedule the Hobby plan accepts.
+ * The task is a path segment, not a query string: Vercel cron paths must be
+ * static, and every job expression in `vercel.json` runs once per day.
  *
  * Safety properties that matter here:
+ *   - Every health pass is pinned-only: a batch with no pinned channels probes
+ *     nothing, and never widens to the unpinned catalogue.
  *   - Overlapping runs are impossible: `runAutoHealthCheck` and
  *     `runPlaylistMonitorTick` both take a process flag and a MongoDB `_locks`
  *     document, so a second cron landing on a warm instance is a no-op.
@@ -24,7 +29,7 @@
  *     rather than "what fired".
  *   - Each health run is time-budgeted. Links are picked least-recently-checked
  *     first, so a truncated pass continues where it stopped instead of
- *     restarting, and the whole catalogue still rotates within the day.
+ *     restarting, and the batch still rotates within the day.
  *   - Nothing here decides visibility; it only refreshes the health state that
  *     the public API gates on.
  */
@@ -32,6 +37,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedAdmin, isAuthorizedByBearer } from "@/lib/adminAuth";
 import { runAutoHealthCheck, getLastFullHealthCheckTime } from "@/lib/autoHealthChecker";
 import { runPlaylistMonitorTick, getPlaylistMonitorStatus } from "@/lib/playlistMonitor";
+import { HEALTH_BATCHES, getHealthBatch } from "@/lib/healthSchedule";
 
 export const dynamic = "force-dynamic";
 /** Vercel kills the function at this wall-clock limit; the budget stays under it. */
@@ -42,8 +48,9 @@ const HEALTH_BUDGET_MS = 45_000;
 /** A manual pass is only skipped if a recent one already covered the window. */
 const HEALTH_DUE_MS = 6 * 60 * 60 * 1000;
 
-const TASKS = ["health", "sync", "all"] as const;
-type Task = (typeof TASKS)[number];
+const STATIC_TASKS = ["health", "sync", "all"] as const;
+/** `health`, `sync`, `all`, plus one path per category batch. */
+const TASKS: readonly string[] = [...STATIC_TASKS, ...HEALTH_BATCHES.map((b) => b.task)];
 
 function authorized(req: NextRequest): boolean {
   // Vercel's scheduler sends `Authorization: Bearer $CRON_SECRET`; the dashboard
@@ -86,10 +93,15 @@ async function handle(
     );
   }
 
-  const task = String(rawTask || "").toLowerCase() as Task;
+  const task = String(rawTask || "").toLowerCase().trim();
   if (!TASKS.includes(task)) {
     return NextResponse.json(
-      { success: false, error: `Unknown task "${task}" — use health, sync or all` },
+      {
+        success: false,
+        error: `Unknown task "${task}" — use health, sync, all or one of ${HEALTH_BATCHES.map(
+          (b) => b.task
+        ).join(", ")}`,
+      },
       { status: 400, ...responseInit }
     );
   }
@@ -97,15 +109,34 @@ async function handle(
   const ran: Record<string, unknown> = {};
 
   try {
-    if (task === "health" || task === "all") {
+    const batch = getHealthBatch(task);
+    const wantsHealth = batch !== undefined || task === "health" || task === "all";
+
+    if (wantsHealth) {
+      // A batch pass covers its own categories; `health`/`all` cover every
+      // pinned channel and are the only runs that follow up with maintenance.
+      const sweep = batch ? batch.sweep === true : true;
       const last = getLastFullHealthCheckTime();
       const overdue = !last || Date.now() - new Date(last).getTime() >= HEALTH_DUE_MS;
-      if (force || scheduledInvocation(req) || overdue) {
-        const result = await runAutoHealthCheck("full", { deadlineMs: HEALTH_BUDGET_MS });
-        ran.health = { skipped: false, ...result };
+      const batchIsDue = batch !== undefined && !batch.sweep;
+
+      if (force || scheduledInvocation(req) || overdue || batchIsDue) {
+        const result = await runAutoHealthCheck(
+          batch ? batch.task : "full",
+          {
+            categories: batch ? batch.categories : null,
+            deadlineMs: HEALTH_BUDGET_MS,
+            maintenanceAfter: sweep,
+          }
+        );
+        ran[batch ? batch.task : "health"] = { skipped: false, ...result };
       } else {
         // A long-lived server's own timer already covered this window.
-        ran.health = { skipped: true, reason: "a full pass ran recently", lastFullCheckAt: last };
+        ran[batch ? batch.task : "health"] = {
+          skipped: true,
+          reason: "a full pass ran recently",
+          lastFullCheckAt: last,
+        };
       }
     }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
+import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream } from "@/lib/streamProbe";
@@ -35,6 +36,34 @@ export async function POST(req: NextRequest) {
     const requestedCutoff = typeof body.before === "string" ? new Date(body.before) : null;
     const cutoff = requestedCutoff && !Number.isNaN(requestedCutoff.getTime()) ? requestedCutoff : now;
 
+    // Only curated (pinned) channels are batch health-checked, here exactly as in
+    // the cron passes. An unpinned channel's links are still testable one by one
+    // from its edit card; a batch run simply never touches them, and zero pinned
+    // channels means zero targets rather than a fallback to the whole store.
+    const pinnedChannelIds = conn
+      ? (await Channel.find({ isPinned: true }).select("_id").lean()).map((c) => String(c._id))
+      : inMemoryDb
+          .getChannels()
+          .filter((c) => c.isPinned)
+          .map((c) => c._id);
+
+    if (pinnedChannelIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        batchSize: 0,
+        runStartedAt: cutoff.toISOString(),
+        hasMore: false,
+        skipped: "No pinned channels — nothing to health-check",
+        summary: {
+          checkedCount: 0,
+          activeCount: 0,
+          degradedCount: 0,
+          brokenCount: 0,
+          deletedCount: 0,
+        },
+      });
+    }
+
     let checkedCount = 0;
     let activeCount = 0;
     let degradedCount = 0;
@@ -46,6 +75,7 @@ export async function POST(req: NextRequest) {
       // service, so a batch run has no business re-probing or re-enabling them.
       const pendingFilter = {
         adminDisabled: { $ne: true },
+        channelId: { $in: pinnedChannelIds },
         $or: [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: cutoff } }],
       };
       const streamsToTest = await StreamLink.find(pendingFilter)
@@ -97,15 +127,19 @@ export async function POST(req: NextRequest) {
         },
       });
     } else {
-      // In-Memory Mode — mirror the MongoDB branch: bounded batch size, least-
-      // recently-checked first, and probed with limited concurrency so this
-      // request can't run for minutes (or hit a serverless timeout) on a
-      // catalogue of hundreds/thousands of streams.
-      const streams = [...inMemoryDb.getStreams()].sort((a, b) => {
-        const aTime = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
-        const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
-        return aTime - bTime;
-      });
+      // In-Memory Mode — mirror the MongoDB branch: only pinned channels, no
+      // admin-disabled links, bounded batch size, least-recently-checked first,
+      // and probed with limited concurrency so this request can't run for minutes
+      // (or hit a serverless timeout) on a catalogue of hundreds/thousands of
+      // streams.
+      const pinned = new Set(pinnedChannelIds);
+      const streams = [...inMemoryDb.getStreams()]
+        .filter((stream) => !stream.adminDisabled && pinned.has(stream.channelId))
+        .sort((a, b) => {
+          const aTime = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
+          const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
+          return aTime - bTime;
+        });
       const streamsToTest = streams
         .filter((stream) => !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime())
         .slice(0, BATCH_LIMIT);

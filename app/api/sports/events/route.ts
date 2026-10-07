@@ -173,7 +173,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/sports/events   (admin)
- * Creates one event card. Auth: `x-admin-secret` header, `?secretKey=` or body `secretKey`.
+ * Creates one event card. Auth: `x-admin-secret` header or body `secretKey`.
  * Body: { matchTitle, sportType, startTime, endTime, primaryStreamUrl, status?,
  *         backupStreamUrls?, isLocalServerActive?, priorityOrder? }
  */

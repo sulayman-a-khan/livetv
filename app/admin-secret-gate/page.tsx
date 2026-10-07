@@ -38,7 +38,7 @@ export default function AdminGatePage() {
 
   const validateKey = async (key: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/admin/stats?secretKey=${encodeURIComponent(key)}`, {
+      const res = await fetch("/api/admin/stats", {
         headers: { "x-admin-secret": key },
       });
       const data = await res.json();
@@ -57,7 +57,7 @@ export default function AdminGatePage() {
     setErrorMsg(null);
 
     try {
-      const res = await fetch(`/api/admin/stats?secretKey=${encodeURIComponent(cleanPasscode)}`, {
+      const res = await fetch("/api/admin/stats", {
         headers: { "x-admin-secret": cleanPasscode },
       });
       const data = await res.json();

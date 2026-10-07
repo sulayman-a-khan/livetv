@@ -6,23 +6,35 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET /api/admin/health-status
- * Returns the auto health checker status (no auth required for status only)
+ * Returns the auto health checker schedule. Admin-gated like the rest of
+ * /api/admin/*: even a "harmless" status reply tells an outsider how often the
+ * catalogue is probed and when it last ran.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!isAuthorizedAdmin(req)) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   const lastCheck = getLastHealthCheckTime();
   const lastFullCheck = getLastFullHealthCheckTime();
   const isRunning = !!global.__freetv_health_checker_started;
 
-  return NextResponse.json({
-    success: true,
-    autoHealthChecker: {
-      running: isRunning,
-      pinnedIntervalMinutes: 60,
-      fullIntervalMinutes: 1440,
-      lastCheckAt: lastCheck || "Not yet run",
-      lastFullCheckAt: lastFullCheck || "Not yet run",
+  return NextResponse.json(
+    {
+      success: true,
+      autoHealthChecker: {
+        running: isRunning,
+        pinnedIntervalMinutes: 60,
+        fullIntervalMinutes: 1440,
+        lastCheckAt: lastCheck || "Not yet run",
+        lastFullCheckAt: lastFullCheck || "Not yet run",
+      },
     },
-  });
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 /**

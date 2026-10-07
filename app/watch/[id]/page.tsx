@@ -4,7 +4,7 @@ import "@/lib/tvPolyfills";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
 import { DirectHlsPlayer } from "@/components/players";
-import { FreeStreamMirror, buildFreeStreamLadder } from "@/lib/freeChannelService";
+import { FreeStreamMirror, buildFreeStreamLadder, buildLadderFromMirrors } from "@/lib/freeChannelService";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
 import NewsTicker from "@/components/NewsTicker";
 import { isYouTubeUrl } from "@/lib/youtube";
@@ -252,7 +252,7 @@ export default function WatchPage() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/channels/${channelId}`, { cache: "no-store" });
+      const res = await fetch(`/api/channels/${channelId}`);
       const data = await res.json();
 
       // A newer channel switch has started since this request went out —
@@ -261,13 +261,9 @@ export default function WatchPage() {
 
       if (data.success && data.channel) {
         const rawCh = data.channel;
-        const primary = rawCh.streamUrl || (rawCh.streams && rawCh.streams[0]?.url) || "";
-        const backups = Array.isArray(rawCh.backupStreamUrls)
-          ? rawCh.backupStreamUrls
-          : Array.isArray(rawCh.streams)
-          ? rawCh.streams.slice(1).map((s: any) => s.url)
-          : [];
-        const ladder = buildFreeStreamLadder(primary, backups, channelId);
+        // Keep the API's own mirror docs (and their real StreamLink ids) so a
+        // dead server can be reported back by id instead of by synthetic label.
+        const ladder = buildLadderFromMirrors(rawCh.streams, rawCh.streamUrl, channelId);
         setChannel({
           ...rawCh,
           streams: ladder.length > 0 ? ladder : (rawCh.streams as FreeStreamMirror[]),
@@ -352,24 +348,27 @@ export default function WatchPage() {
   }, [revertFailedSwitch]);
 
   /**
-   * Loads the playlist. The API only returns channels that currently have at
-   * least one ACTIVE stream link, so it doubles as the auto-restoration
-   * mechanism: once the backend health check revives a channel's streams, the
-   * next refresh brings it back and clears its local hidden flag.
+   * Loads the playlist, and doubles as the auto-restoration mechanism: a
+   * channel stays hidden locally until the catalogue reports at least one
+   * usable link for it again, which is exactly what happens once the backend
+   * health check or a playlist sync revives its streams.
    *
    * @param silent background refresh — don't flash the loading state
    */
   const fetchSidebarChannels = useCallback(async (silent: boolean = false) => {
     if (!silent) setSidebarLoading(true);
     try {
-      const res = await fetch("/api/channels", { cache: "no-store" });
+      const res = await fetch("/api/channels");
       const data = await res.json();
       if (data.success && Array.isArray(data.channels)) {
         setAllChannels(data.channels);
 
-        // Anything the server still lists is healthy again → un-hide it.
-        const liveIds = new Set<string>(data.channels.map((c: SidebarChannel) => c._id));
-        setHiddenChannelIds((prev) => prev.filter((id) => !liveIds.has(id)));
+        const revivedIds = new Set<string>(
+          data.channels
+            .filter((c: SidebarChannel) => (c.activeStreamCount ?? 0) > 0)
+            .map((c: SidebarChannel) => c._id)
+        );
+        setHiddenChannelIds((prev) => prev.filter((id) => !revivedIds.has(id)));
       }
     } catch {
       console.error("Failed to load sidebar channels");
@@ -606,6 +605,42 @@ export default function WatchPage() {
   }, [revertFailedSwitch]);
 
   /**
+   * The player gave up on one mirror. Report it to the backend by StreamLink id
+   * so the link is demoted for every viewer, not just this session. Only real
+   * Mongo ids are reportable — the synthetic ids built for query-param and
+   * sports-event ladders have no document behind them.
+   *
+   * One report per link per viewing session: hls.js can fire several fatal
+   * errors during a single stall, and three reports is exactly what the backend
+   * needs to call a healthy-but-glitchy link broken for everyone.
+   */
+  const reportedStreamIdsRef = useRef<Set<string>>(new Set());
+
+  const handleStreamFailed = useCallback((streamId: string) => {
+    if (!/^[0-9a-f]{24}$/i.test(streamId)) return;
+    if (reportedStreamIdsRef.current.has(streamId)) return;
+    reportedStreamIdsRef.current.add(streamId);
+
+    fetch("/api/streams/report-broken", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ streamId }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((report) => {
+        // Nothing usable left for this channel → hide it now instead of
+        // waiting for the next playlist poll.
+        const channelId = report?.channelId;
+        if (report?.channelHidden && channelId) {
+          setHiddenChannelIds((prev) => (prev.includes(channelId) ? prev : [...prev, channelId]));
+        }
+      })
+      .catch(() => {
+        /* best-effort — the player has already moved to the next server */
+      });
+  }, []);
+
+  /**
    * Every server for this channel is dead. The player has already shown the
    * Bangla notice for 5 seconds, so now:
    *   1. hide the channel from the playlist immediately,
@@ -758,6 +793,7 @@ export default function WatchPage() {
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
+                      onStreamFailed={handleStreamFailed}
                       onAllServersFailed={handleAllServersFailed}
                     />
                   )}

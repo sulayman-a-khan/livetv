@@ -18,19 +18,6 @@ export interface FreeStreamMirror {
   isYouTube?: boolean;
 }
 
-export interface FreeChannel {
-  _id: string;
-  name: string;
-  logo: string;
-  category: string;
-  subCategory?: string;
-  country: string;
-  streams: FreeStreamMirror[];
-  isPinned?: boolean;
-  priorityOrder?: number;
-  activeStreamCount?: number;
-}
-
 /**
  * Checks if a URL points to a YouTube video/live broadcast.
  */
@@ -124,90 +111,60 @@ export function buildFreeStreamLadder(
   return ladder;
 }
 
-/**
- * Client-side fetch helper for free channel catalog.
- */
-export async function fetchFreeChannels(): Promise<FreeChannel[]> {
-  try {
-    const res = await fetch(`/api/channels?_t=${Date.now()}`, {
-      cache: "no-store",
-      headers: {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        Pragma: "no-cache",
-      },
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const rawList = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.channels)
-      ? data.channels
-      : Array.isArray(data?.data)
-      ? data.data
-      : [];
-
-    return rawList.map((ch: any) => {
-      const primary = ch.streamUrl || (ch.streams && ch.streams[0]?.url) || "";
-      const backups = Array.isArray(ch.backupStreamUrls)
-        ? ch.backupStreamUrls
-        : Array.isArray(ch.streams)
-        ? ch.streams.slice(1).map((s: any) => s.url)
-        : [];
-
-      return {
-        _id: ch._id || ch.id || "",
-        name: ch.name || "Unknown Channel",
-        logo: ch.logo || "",
-        category: ch.category || "General Broadcast",
-        subCategory: ch.subCategory || "",
-        country: ch.country || "Global",
-        streams: buildFreeStreamLadder(primary, backups, ch._id || "ch"),
-        isPinned: Boolean(ch.isPinned),
-        priorityOrder: ch.priorityOrder ?? 99,
-        activeStreamCount: ch.activeStreamCount ?? (primary ? 1 : 0),
-      };
-    });
-  } catch (err) {
-    console.error("[FreeChannelService] fetchFreeChannels failed:", err);
-    return [];
-  }
+/** A mirror doc as returned by /api/channels and /api/channels/[id]. */
+export interface RawStreamMirror {
+  _id?: unknown;
+  url?: string;
+  priority?: number;
+  status?: string;
+  latency?: number;
 }
 
 /**
- * Client-side fetch helper for single free channel details.
+ * Builds the playback ladder from the mirrors the API already ranked.
+ *
+ * The real StreamLink id MUST survive this step: players report a dead link to
+ * /api/streams/report-broken by id, and a synthetic id matches no document —
+ * the failure would never reach the backend, so the link would keep being
+ * served to every other viewer.
  */
-export async function fetchFreeChannelById(channelId: string): Promise<FreeChannel | null> {
-  if (!channelId) return null;
-  try {
-    const res = await fetch(`/api/channels/${encodeURIComponent(channelId)}?_t=${Date.now()}`, {
-      cache: "no-store",
+export function buildLadderFromMirrors(
+  mirrors: RawStreamMirror[] | null | undefined,
+  directUrl?: string,
+  channelId = "channel"
+): FreeStreamMirror[] {
+  const ladder: FreeStreamMirror[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const mirror of Array.isArray(mirrors) ? mirrors : []) {
+    const url = normalizeDirectPublicUrl(mirror?.url);
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
+
+    const status = mirror.status;
+    ladder.push({
+      _id: mirror._id ? String(mirror._id) : `mirror_${channelId}_${ladder.length + 1}`,
+      url,
+      priority: typeof mirror.priority === "number" ? mirror.priority : ladder.length + 1,
+      status: status === "degraded" || status === "broken" ? status : "active",
+      latency: typeof mirror.latency === "number" ? mirror.latency : 0,
+      isYouTube: isYouTubeStream(url),
     });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.success || !data.channel) return null;
-
-    const ch = data.channel;
-    const primary = ch.streamUrl || (ch.streams && ch.streams[0]?.url) || "";
-    const backups = Array.isArray(ch.backupStreamUrls)
-      ? ch.backupStreamUrls
-      : Array.isArray(ch.streams)
-      ? ch.streams.slice(1).map((s: any) => s.url)
-      : [];
-
-    return {
-      _id: ch._id || channelId,
-      name: ch.name || "Channel",
-      logo: ch.logo || "",
-      category: ch.category || "General Broadcast",
-      subCategory: ch.subCategory || "",
-      country: ch.country || "Global",
-      streams: buildFreeStreamLadder(primary, backups, channelId),
-      isPinned: Boolean(ch.isPinned),
-      priorityOrder: ch.priorityOrder ?? 99,
-      activeStreamCount: ch.activeStreamCount ?? 1,
-    };
-  } catch (err) {
-    console.error(`[FreeChannelService] fetchFreeChannelById(${channelId}) error:`, err);
-    return null;
   }
+
+  if (ladder.length === 0) {
+    const fallback = normalizeDirectPublicUrl(directUrl);
+    if (fallback) {
+      ladder.push({
+        _id: `direct_${channelId}`,
+        url: fallback,
+        priority: 1,
+        status: "active",
+        latency: 100,
+        isYouTube: isYouTubeStream(fallback),
+      });
+    }
+  }
+
+  return ladder.sort((a, b) => a.priority - b.priority);
 }

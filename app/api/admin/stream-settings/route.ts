@@ -15,9 +15,15 @@ export async function OPTIONS(req: NextRequest) {
 /**
  * GET /api/admin/stream-settings
  * Returns the active streamBaseUrl from MongoDB settings (or env fallback).
+ * Auth: Admin secret or Local Server secret — same gate as the POST, since this
+ * reply names the host every forwarded stream is pulled from.
  */
 export async function GET(req: NextRequest) {
   try {
+    if (!isAuthorizedAdmin(req) && !isAuthorizedLocalServer(req)) {
+      return sportsJson(req, { success: false, error: "Unauthorized" }, { status: 401 });
+    }
+
     const streamBaseUrl = await getDynamicStreamBaseUrl();
     return sportsJson(req, {
       success: true,

@@ -11,8 +11,39 @@ import { resolveStreamUrl } from "@/lib/streamUrl";
 import { getDynamicStreamBaseUrl } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const fetchCache = "force-no-store";
+
+/**
+ * A channel's mirror list changes only when a probe or a viewer report moves it,
+ * so it is safe to serve from the edge briefly. Playback still gets a fresh
+ * manifest from the CDN — only this metadata is cached.
+ */
+const CHANNEL_CACHE = "public, s-maxage=15, stale-while-revalidate=120";
+
+/**
+ * `headers` (upstream Referer/Origin, sometimes provider credentials) and the
+ * `lastCheck` diagnostics blob are server-side only: no browser can set a
+ * Referer, so shipping them just leaks the upstream configuration.
+ */
+const STREAM_FIELDS = "_id url priority status latency failedAttempts";
+
+/** Same field whitelist, applied to the in-memory store's rows. */
+function projectStream(stream: {
+  _id: unknown;
+  url?: string;
+  priority?: number;
+  status?: string;
+  latency?: number;
+  failedAttempts?: number;
+}) {
+  return {
+    _id: String(stream._id),
+    url: stream.url,
+    priority: stream.priority ?? 99,
+    status: stream.status ?? "active",
+    latency: stream.latency ?? 0,
+    failedAttempts: stream.failedAttempts ?? 0,
+  };
+}
 
 export async function GET(
   req: NextRequest,
@@ -25,12 +56,12 @@ export async function GET(
     // 1. If MongoDB is connected, query Channel or SportsEvent
     if (conn) {
       if (mongoose.isValidObjectId(id)) {
-        const idStr = id.toString();
         const [channel, streams] = await Promise.all([
           Channel.findById(id).lean(),
-          StreamLink.find({
-            channelId: { $in: [id, idStr] },
-          }).sort({ priority: 1, latency: 1 }).lean(),
+          StreamLink.find({ channelId: id })
+            .sort({ priority: 1, latency: 1 })
+            .select(STREAM_FIELDS)
+            .lean(),
         ]);
 
         if (channel) {
@@ -54,14 +85,17 @@ export async function GET(
             ];
           }
 
-          return NextResponse.json({
-            success: true,
-            channel: {
-              ...channel,
-              logo: getChannelLogo(channel.name, channel.logo),
-              streams: usableStreams,
+          return NextResponse.json(
+            {
+              success: true,
+              channel: {
+                ...channel,
+                logo: getChannelLogo(channel.name, channel.logo),
+                streams: usableStreams.map(projectStream),
+              },
             },
-          });
+            { headers: { "Cache-Control": CHANNEL_CACHE } }
+          );
         }
       }
 
@@ -97,17 +131,20 @@ export async function GET(
             });
           });
 
-          return NextResponse.json({
-            success: true,
-            channel: {
-              _id: String(sportDoc._id),
-              name: sportDoc.matchTitle,
-              logo: getChannelLogo(sportDoc.sportType, ""),
-              category: "Live Sports",
-              country: "Global",
-              streams,
+          return NextResponse.json(
+            {
+              success: true,
+              channel: {
+                _id: String(sportDoc._id),
+                name: sportDoc.matchTitle,
+                logo: getChannelLogo(sportDoc.sportType, ""),
+                category: "Live Sports",
+                country: "Global",
+                streams,
+              },
             },
-          });
+            { headers: { "Cache-Control": CHANNEL_CACHE } }
+          );
         }
       } catch {
         // Continue to fallback
@@ -151,10 +188,17 @@ export async function GET(
       ];
     }
 
-    return NextResponse.json({
-      success: true,
-      channel: { ...channel, logo: getChannelLogo(channel.name, channel.logo), streams: chStreams },
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        channel: {
+          ...channel,
+          logo: getChannelLogo(channel.name, channel.logo),
+          streams: chStreams.map(projectStream),
+        },
+      },
+      { headers: { "Cache-Control": CHANNEL_CACHE } }
+    );
   } catch (error: any) {
     console.error("GET /api/channels/[id] error:", error);
     return NextResponse.json(

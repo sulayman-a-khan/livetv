@@ -173,10 +173,10 @@ export default function PlaylistSourcePanel({
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(
-        `/api/admin/playlist-sources?secretKey=${encodeURIComponent(secretKey.trim())}`,
-        { headers: { "x-admin-secret": secretKey.trim() }, cache: "no-store" }
-      );
+      const res = await fetch("/api/admin/playlist-sources", {
+        headers: { "x-admin-secret": secretKey.trim() },
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.success) {
         setSources(data.sources as SourceRow[]);

@@ -164,7 +164,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     setLoading(true);
     try {
       const cleanKey = secretKey.trim();
-      const res = await fetch(`/api/admin/stats?secretKey=${encodeURIComponent(cleanKey)}`, {
+      const res = await fetch("/api/admin/stats", {
         headers: {
           "x-admin-secret": cleanKey,
         },
@@ -193,7 +193,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   // so the "next probe" countdown updates every second without re-fetching.
   const fetchSchedule = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/health-status", { cache: "no-store" });
+      const res = await fetch("/api/admin/health-status", {
+        headers: { "x-admin-secret": secretKey.trim() },
+        cache: "no-store",
+      });
       const data = await res.json();
       if (data.success && data.autoHealthChecker) {
         setSchedule(data.autoHealthChecker as HealthSchedule);
@@ -201,7 +204,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     } catch (err) {
       console.error("Failed to load health schedule:", err);
     }
-  }, []);
+  }, [secretKey]);
 
   useEffect(() => {
     fetchSchedule();

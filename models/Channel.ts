@@ -40,6 +40,10 @@ const ChannelSchema = new Schema<IChannel>(
   { timestamps: true }
 );
 
+// The public catalogue always reads pinned-first, then priority, then name.
+// Without this compound index MongoDB sorts the whole collection in memory.
+ChannelSchema.index({ isPinned: -1, priorityOrder: 1, name: 1 });
+
 // Delete models cache to prevent overwrite model error in hot reload
 if (mongoose.models && mongoose.models.Channel) {
   delete mongoose.models.Channel;

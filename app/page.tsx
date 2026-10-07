@@ -34,7 +34,9 @@ export default function HomePage() {
     let active = true;
     async function load() {
       try {
-        const res = await fetch("/api/channels", { cache: "no-store" });
+        // No cache busting: the route ships a short edge cache, so Vercel serves
+        // the catalogue from the nearest pop instead of hitting Node each visit.
+        const res = await fetch("/api/channels");
         const data = await res.json();
         const list = Array.isArray(data)
           ? data

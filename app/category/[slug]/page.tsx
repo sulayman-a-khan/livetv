@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import Header from "@/components/Header";
 import {
   getCategoryBySlug,
-  isChannelInCategory,
   CATEGORIES,
   GENRE_FILTERS,
   GenreFilter,
@@ -40,7 +39,13 @@ export default function CategoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch("/api/channels");
+        // Ask the API for just this rail: the matching rules live in
+        // lib/categories and run server-side, so the payload is this rail only
+        // instead of the whole catalogue.
+        const url = categoryConfig
+          ? `/api/channels?rail=${encodeURIComponent(slug)}`
+          : "/api/channels";
+        const res = await fetch(url);
         const data = await res.json();
         const list: ChannelItem[] = Array.isArray(data)
           ? data
@@ -52,14 +57,7 @@ export default function CategoryPage() {
           ? data.items
           : [];
 
-        if (categoryConfig) {
-          const filtered = list.filter((ch: ChannelItem) =>
-            isChannelInCategory(ch, categoryConfig)
-          );
-          setCategoryChannels(filtered);
-        } else {
-          setCategoryChannels(list);
-        }
+        setCategoryChannels(list);
       } catch (err: any) {
         setError(err.message || "Network error loading channels");
       } finally {

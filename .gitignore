@@ -41,3 +41,11 @@ Thumbs.db
 .vercel
 .env*
 scratch_channels.json
+
+# Runtime data — local JSON mirror of channels + stream links. Holds live
+# origin URLs and health state, so it stays out of the public repository.
+# lib/inMemoryStore.ts recreates it automatically when it is missing.
+/data/store.json
+
+# Throwaway verification scripts
+/.tmp-verify

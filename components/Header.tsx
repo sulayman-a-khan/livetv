@@ -4,7 +4,16 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { APP_DOWNLOAD_URL, isEmbeddedApp } from "@/lib/appRuntime";
 
-export default function Header() {
+interface HeaderProps {
+  /**
+   * The player and arena pages let their content run to 1400px; without this
+   * the logo and the download CTA stay inset at 1280px and no longer line up
+   * with the edges of the screen below them.
+   */
+  wide?: boolean;
+}
+
+export default function Header({ wide = false }: HeaderProps) {
   const [showPromo, setShowPromo] = useState(false);
 
   useEffect(() => {
@@ -13,7 +22,9 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 bg-[#070d18]/90 backdrop-blur-md border-b border-slate-800/80">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-[72px] lg:h-[80px] flex items-center justify-between gap-3">
+      <div
+        className={`${wide ? "max-w-[1400px]" : "max-w-7xl"} mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-[72px] lg:h-[80px] flex items-center justify-between gap-3`}
+      >
         {/* Brand Logo */}
         <Link href="/" className="flex items-center group shrink-0 py-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}

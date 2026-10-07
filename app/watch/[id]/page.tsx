@@ -675,7 +675,7 @@ export default function WatchPage() {
     <div className="h-[100dvh] overflow-hidden lg:h-auto lg:min-h-screen lg:overflow-visible bg-[#060b13] text-slate-100 flex flex-col">
       {/* Navbar hidden on mobile for the player page; visible from sm breakpoint up */}
       <div className="hidden sm:block shrink-0">
-        <Header />
+        <Header wide />
       </div>
 
       <main className="flex-1 min-h-0 flex flex-col overflow-hidden lg:block lg:overflow-visible max-w-[1400px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 lg:py-6 lg:space-y-5">

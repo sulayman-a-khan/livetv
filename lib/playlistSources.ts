@@ -18,7 +18,12 @@ import PlaylistSource, {
 } from "@/models/PlaylistSource";
 import PlaylistEntry from "@/models/PlaylistEntry";
 import { canonicalStreamUrl } from "./channelIdentity";
-import { DAILY_CHECK_MS, getPlaylistMonitorStatus } from "./playlistMonitor";
+import {
+  FAILED_RETRY_MS,
+  getPlaylistMonitorStatus,
+  lastScheduledSyncAt,
+  nextScheduledSyncAt,
+} from "./playlistMonitor";
 
 export interface PlaylistSourceInput {
   name: string;
@@ -144,7 +149,12 @@ export async function getSourcesPayload() {
     stats.set(key, current);
   }
 
-  const dueBefore = Date.now() - DAILY_CHECK_MS;
+  // Same schedule the monitor itself uses: the daily slot, plus the short retry
+  // window for a source whose last fetch failed.
+  const now = new Date();
+  const slotPassedMs = lastScheduledSyncAt(now).getTime();
+  const nextSlotMs = nextScheduledSyncAt(now).getTime();
+  const retryDueBeforeMs = now.getTime() - FAILED_RETRY_MS;
   const payload: SourcePayload[] = [];
 
   for (const source of sources) {
@@ -158,8 +168,16 @@ export async function getSourcesPayload() {
     });
 
     const lastCheckedMs = source.lastCheckedAt ? new Date(source.lastCheckedAt).getTime() : 0;
+    const fetchFailed = source.lastStatus === "failed" && lastCheckedMs < retryDueBeforeMs;
     const dueNow =
-      source.active && source.monitored && (!lastCheckedMs || lastCheckedMs < dueBefore);
+      source.active &&
+      source.monitored &&
+      (!lastCheckedMs || lastCheckedMs < slotPassedMs || fetchFailed);
+    // A failed source is retried inside the day, so it shows that retry time;
+    // otherwise the next daily slot is when it is looked at.
+    const nextCheckMs = fetchFailed
+      ? Math.min(nextSlotMs, lastCheckedMs + FAILED_RETRY_MS)
+      : nextSlotMs;
 
     payload.push({
       _id: id,
@@ -191,7 +209,7 @@ export async function getSourcesPayload() {
         missing: entryStats.missing,
         channels: channels.length,
       },
-      nextCheckAt: lastCheckedMs ? new Date(lastCheckedMs + DAILY_CHECK_MS).toISOString() : null,
+      nextCheckAt: new Date(nextCheckMs).toISOString(),
       dueNow,
     });
   }

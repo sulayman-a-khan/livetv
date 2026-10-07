@@ -42,7 +42,10 @@ export async function POST(req: NextRequest) {
     const deletedCount = 0;
 
     if (conn) {
+      // Admin-disabled links are excluded: only an admin puts them back in
+      // service, so a batch run has no business re-probing or re-enabling them.
       const pendingFilter = {
+        adminDisabled: { $ne: true },
         $or: [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: cutoff } }],
       };
       const streamsToTest = await StreamLink.find(pendingFilter)
@@ -62,7 +65,8 @@ export async function POST(req: NextRequest) {
           stream.failedAttempts || 0,
           stream.firstFailedAt,
           result,
-          now
+          now,
+          stream.lastCountedFailureDay
         );
 
         stream.status = decision.status;
@@ -70,6 +74,7 @@ export async function POST(req: NextRequest) {
         stream.failedAttempts = decision.failedAttempts;
         stream.firstFailedAt = decision.firstFailedAt;
         stream.lastCheckedAt = decision.lastCheckedAt;
+        stream.lastCountedFailureDay = decision.lastCountedFailureDay;
         await stream.save();
         checkedCount++;
         if (decision.status === "active") activeCount++;
@@ -137,13 +142,15 @@ export async function POST(req: NextRequest) {
               stream.failedAttempts || 0,
               stream.firstFailedAt,
               result,
-              now
+              now,
+              stream.lastCountedFailureDay
             );
             stream.status = decision.status;
             stream.latency = decision.latency;
             stream.failedAttempts = decision.failedAttempts;
             stream.firstFailedAt = decision.firstFailedAt;
             stream.lastCheckedAt = decision.lastCheckedAt;
+            stream.lastCountedFailureDay = decision.lastCountedFailureDay;
             checkedCount++;
             if (decision.status === "active") activeCount++;
             else if (decision.status === "degraded") degradedCount++;

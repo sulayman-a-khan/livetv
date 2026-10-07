@@ -204,11 +204,18 @@ export default function DirectHlsPlayer({
 
       hlsRef.current = hls;
 
+      // Some IPTV boxes mint a fresh variant-playlist filename each time the
+      // master is read, and expire it within seconds. A stalled player then
+      // retries that dead filename forever, so the master is re-read to pick up
+      // a live one — bounded, so a genuinely broken host can't loop us.
+      let masterReresolves = 0;
+
       hls.loadSource(streamUrl);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         setIsLoadingStream(false);
+        masterReresolves = 0;
 
         // Filter and cap levels
         const parsedLevels: LevelInfo[] = data.levels.map((lvl, index) => ({
@@ -249,29 +256,45 @@ export default function DirectHlsPlayer({
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal) {
-          console.warn("[DirectHlsPlayer] Fatal HLS error:", data.type, data.details);
-          callbacksRef.current.onStreamFailed?.(activeStream._id);
+        if (!data.fatal) return;
+        console.warn("[DirectHlsPlayer] Fatal HLS error:", data.type, data.details);
 
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              // Try recovery once, then move to next server
-              hls.startLoad();
-              setTimeout(() => {
-                if (hlsRef.current) {
-                  handleNextServer();
-                }
-              }, 3000);
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              purgeAndDestroyPlayer();
-              setErrorMsg("Direct stream signal interrupted");
-              handleNextServer();
-              break;
-          }
+        // A level/fragment that will not load is usually an expired filename
+        // from a live origin, not a dead link — re-read the master for a fresh
+        // one first. Only once that is used up (or when the master itself never
+        // loaded) do we tell the backend this mirror failed, so a healthy
+        // StreamLink is not retired off a transient hiccup.
+        if (
+          data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+          data.details !== Hls.ErrorDetails.MANIFEST_LOAD_ERROR &&
+          data.details !== Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT &&
+          masterReresolves < 2
+        ) {
+          masterReresolves++;
+          hls.loadSource(streamUrl);
+          return;
+        }
+
+        callbacksRef.current.onStreamFailed?.(activeStream._id);
+
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            // Try recovery once, then move to next server
+            hls.startLoad();
+            setTimeout(() => {
+              if (hlsRef.current) {
+                handleNextServer();
+              }
+            }, 3000);
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            hls.recoverMediaError();
+            break;
+          default:
+            purgeAndDestroyPlayer();
+            setErrorMsg("Direct stream signal interrupted");
+            handleNextServer();
+            break;
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {

@@ -14,6 +14,7 @@
 import { connectToDatabase } from "./db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
+import PlaylistEntry from "@/models/PlaylistEntry";
 import { inMemoryDb, type InMemoryChannel } from "./inMemoryStore";
 import {
   MaintChannel,
@@ -95,6 +96,11 @@ async function applyPlanMongo(plan: MaintenancePlan) {
   }
 
   if (plan.streamsToDelete.length > 0) {
+    console.log(
+      `[Maintenance] Deleting ${plan.streamsToDelete.length} link(s) ` +
+        `— ${plan.stats.deadLinksPurged} dead, ${plan.stats.duplicateLinksRemoved} duplicate, ` +
+        `${plan.stats.placeholderLinksPurged} test, rest orphaned`
+    );
     await StreamLink.deleteMany({ _id: { $in: plan.streamsToDelete } });
   }
 }
@@ -114,6 +120,15 @@ export async function runMaintenance(): Promise<MaintenanceReport> {
     const channelDocs = await Channel.find().lean();
     const streamDocs = await StreamLink.find().lean();
 
+    // A URL some playlist source still lists is not a deletion candidate: the
+    // StreamLink row is the only record that this source owns that link, so the
+    // dead purge leaves it hidden instead of breaking that mapping.
+    const listedCanonicalUrls = new Set(
+      (await PlaylistEntry.find({ status: "present" }).select("canonicalUrl").lean()).map((e) =>
+        String(e.canonicalUrl)
+      )
+    );
+
     const channels: MaintChannel[] = channelDocs.map((c) => ({
       ...c,
       _id: String(c._id),
@@ -124,7 +139,7 @@ export async function runMaintenance(): Promise<MaintenanceReport> {
       channelId: String(s.channelId),
     })) as unknown as MaintStream[];
 
-    const plan = planMaintenance(channels, streams);
+    const plan = planMaintenance(channels, streams, listedCanonicalUrls);
     await applyPlanMongo(plan);
 
     return {

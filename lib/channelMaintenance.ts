@@ -10,7 +10,12 @@
  *   3. Test cleanup — placeholder/demo links are dropped as soon as the channel
  *                     owns at least one real, working link.
  *   4. Manual wins  — anything an admin edited by hand (`isManuallyEdited`) is
- *                     never overwritten by an automated pass.
+ *                     never overwritten by an automated pass, and a `manual`
+ *                     link is never deleted by automation.
+ *   5. Dead purge   — a link that fails the daily health check for
+ *                     `DEAD_LINK_PURGE_DAYS` straight days, is not hand-added and
+ *                     is no longer listed by any source is deleted; until then it
+ *                     is only hidden, so it can recover on its own.
  *
  * The planner returns a `MaintenancePlan` describing the mutations. Storage
  * adapters (in-memory / MongoDB) apply the plan. Keeping the rules pure means
@@ -18,6 +23,7 @@
  */
 
 import { canonicalChannelKey, canonicalStreamUrl, isPlaceholderStream } from "./channelIdentity";
+import { DEAD_LINK_PURGE_DAYS, MAX_CONSECUTIVE_FAILURES } from "./streamHealth";
 
 export interface MaintChannel {
   _id: string;
@@ -43,6 +49,12 @@ export interface MaintStream {
   latency: number;
   failedAttempts?: number;
   lastCheckedAt?: Date | string | null;
+  /** Day the streak last moved — see `streamHealth.ts`. Gates the dead purge. */
+  lastCountedFailureDay?: string | null;
+  /** Hand-added link: never deleted by the automated dead-link purge. */
+  manual?: boolean;
+  /** Admin-disabled link: ranked last, never purged, never auto-restored. */
+  adminDisabled?: boolean;
 }
 
 export interface MaintenancePlan {
@@ -58,6 +70,7 @@ export interface MaintenancePlan {
     channelsMerged: number;
     duplicateLinksRemoved: number;
     placeholderLinksPurged: number;
+    deadLinksPurged: number;
     channelsReordered: number;
   };
 }
@@ -65,33 +78,80 @@ export interface MaintenancePlan {
 /** Links that have never been probed sort last among working links. */
 const UNMEASURED_LATENCY = Number.MAX_SAFE_INTEGER;
 
+/**
+ * RULE 2 — Fastest server becomes Server 1.
+ * Ordering: working links before failing ones, then real links before
+ * placeholders, then a latency score that a reliability penalty inflates. The
+ * penalty (RULE 5) is what keeps a mirror that failed on two of the recent
+ * check days behind a slightly slower but consistently clean one, while still
+ * leaving it in the ladder — slow-but-working links are backups, not garbage.
+ */
 function effectiveLatency(s: MaintStream): number {
   if (!s.latency || s.latency <= 0) return UNMEASURED_LATENCY;
   return s.latency;
 }
 
-/** active → degraded → broken. Lower rank wins. */
-function statusRank(status: MaintStream["status"]): number {
+/** Per-day failure penalty added to a link's measured latency when ranking. */
+const FAILURE_PENALTY_MS = 800;
+
+function rankScore(s: MaintStream): number {
+  const latency = effectiveLatency(s);
+  if (latency === UNMEASURED_LATENCY) return latency;
+  return latency + (s.failedAttempts || 0) * FAILURE_PENALTY_MS;
+}
+
+/** active → degraded → broken → admin-disabled. Lower rank wins. */
+function statusRank(status: MaintStream["status"], adminDisabled?: boolean): number {
+  if (adminDisabled) return 3;
   if (status === "active") return 0;
   if (status === "degraded") return 1;
   return 2;
 }
 
-/**
- * RULE 2 — Fastest server becomes Server 1.
- * Ordering: working links before failing ones, then fastest first, then real
- * links before placeholders so a demo link can never outrank a real broadcast.
- */
 export function sortStreamsBySpeed(streams: MaintStream[]): MaintStream[] {
   return [...streams].sort((a, b) => {
-    const rank = statusRank(a.status) - statusRank(b.status);
+    const rank = statusRank(a.status, a.adminDisabled) - statusRank(b.status, b.adminDisabled);
     if (rank !== 0) return rank;
 
     const placeholder = Number(isPlaceholderStream(a.url)) - Number(isPlaceholderStream(b.url));
     if (placeholder !== 0) return placeholder;
 
-    return effectiveLatency(a) - effectiveLatency(b);
+    return rankScore(a) - rankScore(b);
   });
+}
+
+/**
+ * RULE 5 — Dead-link removal.
+ * A link is deleted only after `DEAD_LINK_PURGE_DAYS` consecutive failed daily
+ * checks, and only when nothing protects it:
+ *   - `manual` links are the admin's, automation never deletes them;
+ *   - `adminDisabled` links are deliberately out of service;
+ *   - a URL a playlist source still lists is left alone, because the row is the
+ *     only record that this source owns that link (deleting it would silently
+ *     drop the mapping until the provider changes the URL again);
+ *   - a streak built without a `lastCountedFailureDay` marker came from the old
+ *     probe-level counter, which could mature 3 "days" in an afternoon, so it is
+ *     not trusted as evidence for a deletion. Such a link has to fail under the
+ *     daily rules afresh before it can go.
+ * Until all of that holds, a dead link is simply hidden and keeps being probed,
+ * so it can come back on its own.
+ */
+export function selectPurgeableDeadLinks(
+  streams: MaintStream[],
+  listedCanonicalUrls: Set<string> | null
+): string[] {
+  if (!listedCanonicalUrls) return [];
+  return streams
+    .filter(
+      (s) =>
+        s.status === "broken" &&
+        !s.manual &&
+        !s.adminDisabled &&
+        Boolean(s.lastCountedFailureDay) &&
+        (s.failedAttempts || 0) >= Math.max(MAX_CONSECUTIVE_FAILURES, DEAD_LINK_PURGE_DAYS) &&
+        !listedCanonicalUrls.has(canonicalStreamUrl(s.url))
+    )
+    .map((s) => s._id);
 }
 
 /**
@@ -167,7 +227,8 @@ function mergeMetadata(survivor: MaintChannel, others: MaintChannel[]): Partial<
  */
 export function planMaintenance(
   channels: MaintChannel[],
-  streams: MaintStream[]
+  streams: MaintStream[],
+  listedCanonicalUrls: Set<string> | null = null
 ): MaintenancePlan {
   const plan: MaintenancePlan = {
     channelsToDelete: [],
@@ -178,6 +239,7 @@ export function planMaintenance(
       channelsMerged: 0,
       duplicateLinksRemoved: 0,
       placeholderLinksPurged: 0,
+      deadLinksPurged: 0,
       channelsReordered: 0,
     },
   };
@@ -234,8 +296,16 @@ export function planMaintenance(
     }
     const survivingLinks = kept.filter((s) => !purgeIds.has(s._id));
 
+    // ---- RULE 5: delete links that stayed dead across the daily window ----
+    const deadIds = new Set(selectPurgeableDeadLinks(survivingLinks, listedCanonicalUrls));
+    if (deadIds.size > 0) {
+      plan.streamsToDelete.push(...Array.from(deadIds));
+      plan.stats.deadLinksPurged += deadIds.size;
+    }
+    const orderedLinks = survivingLinks.filter((s) => !deadIds.has(s._id));
+
     // ---- RULE 2: renumber so the fastest working link is Server 1 ----
-    const ordered = sortStreamsBySpeed(survivingLinks);
+    const ordered = sortStreamsBySpeed(orderedLinks);
     let reordered = false;
     ordered.forEach((s, index) => {
       const priority = index + 1;

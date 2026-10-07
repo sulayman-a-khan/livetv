@@ -56,6 +56,11 @@ export interface ChannelLink {
   latency: number;
   failedAttempts?: number;
   firstFailedAt?: Date | null;
+  lastCountedFailureDay?: string | null;
+  /** Hand-added link: this source may not retire it. */
+  manual?: boolean;
+  /** Taken out of service by an admin: this source may not re-enable it. */
+  adminDisabled?: boolean;
 }
 
 /** The channel record (if any) that a canonical key resolves to. */
@@ -338,16 +343,22 @@ export function planPlaylistSync(
       if (!probe) continue;
       const link = linkByUrl.get(entry.canonicalUrl);
       if (link) {
-        const decision = decideStreamHealth(
-          link.status,
-          link.failedAttempts || 0,
-          link.firstFailedAt,
-          probe,
-          now
-        );
-        const revived = link.status !== "active" && decision.status === "active";
-        if (revived) plan.stats.linksRevived++;
-        plan.linkPatches.push({ _id: link._id, patch: { ...decision } });
+        // An admin-disabled link keeps whatever the admin left on it. A passing
+        // playlist probe must not quietly put a deliberately retired server back
+        // into the ladder.
+        if (!link.adminDisabled) {
+          const decision = decideStreamHealth(
+            link.status,
+            link.failedAttempts || 0,
+            link.firstFailedAt,
+            probe,
+            now,
+            link.lastCountedFailureDay
+          );
+          const revived = link.status !== "active" && decision.status === "active";
+          if (revived) plan.stats.linksRevived++;
+          plan.linkPatches.push({ _id: link._id, patch: { ...decision } });
+        }
       }
       plan.entryPatches.push({ _id: entry._id, patch: { lastProbe: toProbeDetail(probe), lastSeenAt: now } });
     }
@@ -369,6 +380,7 @@ export function planPlaylistSync(
       // Only links this source provided are retirement candidates: a link the
       // admin added by hand, or one another playlist owns, is never touched here.
       if (!group.sourceLinkIds.includes(link._id)) continue;
+      if (link.manual || link.adminDisabled) continue;
       if (desiredUrls.has(link.canonicalUrl)) continue;
       const probe = probes.get(link.canonicalUrl);
       const dead = probe ? !(probe.ok || probe.status === "DEGRADED") : link.status === "broken";

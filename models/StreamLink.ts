@@ -9,6 +9,17 @@ export interface IStreamLink extends Document {
   firstFailedAt: Date | null;
   lastCheckedAt: Date | null;
   latency: number;
+  /**
+   * UTC day (`YYYY-MM-DD`) the failure streak last advanced. `failedAttempts`
+   * counts consecutive failed check DAYS, so repeated probes inside one day
+   * (the 6-hour cycle, player reports, admin runs) move this marker at most
+   * once. Reset to null when a probe succeeds.
+   */
+  lastCountedFailureDay: string | null;
+  /** Hand-added by an admin: automation may test and rank it, never delete it. */
+  manual: boolean;
+  /** Admin took this link out of service: hidden, and automation won't restore it. */
+  adminDisabled: boolean;
   headers?: Record<string, string>;
   lastCheck?: Record<string, unknown>;
   createdAt: Date;
@@ -30,6 +41,9 @@ const StreamLinkSchema = new Schema<IStreamLink>(
     firstFailedAt: { type: Date, default: null },
     lastCheckedAt: { type: Date, default: null },
     latency: { type: Number, default: 0 },
+    lastCountedFailureDay: { type: String, default: null },
+    manual: { type: Boolean, default: false },
+    adminDisabled: { type: Boolean, default: false },
     // Some providers require a Referer or Origin; retain it for probes.
     headers: { type: Schema.Types.Mixed, default: undefined },
     // Flexible diagnostics from the last health check.

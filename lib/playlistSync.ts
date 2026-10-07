@@ -21,6 +21,7 @@
  */
 
 import crypto from "crypto";
+import type { FilterQuery } from "mongoose";
 import { connectToDatabase } from "./db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
@@ -185,6 +186,9 @@ async function loadChannelStates(
         latency: l.latency || 0,
         failedAttempts: l.failedAttempts || 0,
         firstFailedAt: l.firstFailedAt || null,
+        lastCountedFailureDay: l.lastCountedFailureDay ?? null,
+        manual: Boolean(l.manual),
+        adminDisabled: Boolean(l.adminDisabled),
       })),
       sourceLinkIds,
     };
@@ -545,27 +549,43 @@ async function applyPlan(sourceId: string, plan: PlaylistSyncPlan): Promise<void
   }
 }
 
+export interface SyncAllOptions {
+  /** Sync every active source, ignoring the schedule slot and its retry window. */
+  force?: boolean;
+  /** Re-sync sources whose last fetch failed at least this long ago. */
+  failedRetryBefore?: Date;
+  onEvent?: (evt: PlaylistSyncEvent & { sourceId?: string }) => void;
+}
+
 /** Convenience for the monitor and the admin routes. */
 export async function syncAllDueSources(
   dueBefore: Date,
-  onEvent?: (evt: PlaylistSyncEvent & { sourceId?: string }) => void
+  options: SyncAllOptions = {}
 ): Promise<PlaylistSyncSummary[]> {
   const conn = await connectToDatabase();
   if (!conn) throw new Error("MongoDB is unreachable — playlist sources need the database to sync");
 
-  const due = await PlaylistSource.find({
+  const due: FilterQuery<any>[] = [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: dueBefore } }];
+  if (options.failedRetryBefore) {
+    // A source that could not be fetched is retried inside the day instead of
+    // losing a whole schedule slot; the retry only looks at fetch failures.
+    due.push({ lastStatus: "failed", lastCheckedAt: { $lt: options.failedRetryBefore } });
+  }
+
+  const sources = await PlaylistSource.find({
     active: true,
     monitored: true,
-    $or: [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: dueBefore } }],
+    ...(options.force ? {} : { $or: due }),
   }).lean();
 
   const summaries: PlaylistSyncSummary[] = [];
   // Sources run one at a time: each one can probe hundreds of streams, and
   // overlapping two of them would only make both slower.
-  for (const source of due) {
+  for (const source of sources) {
     try {
       const summary = await syncPlaylistSource(String(source._id), {
-        onEvent: onEvent && ((evt) => onEvent({ ...evt, sourceId: String(source._id) })),
+        force: options.force,
+        onEvent: options.onEvent && ((evt) => options.onEvent!({ ...evt, sourceId: String(source._id) })),
       });
       summaries.push(summary);
     } catch (err: any) {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { getCountryFlag } from "@/lib/utils";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
+import LinkHealthBadge, { linkHealthLabel } from "@/components/LinkHealthBadge";
 import HlsPlayer from "@/components/HlsPlayer";
 import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
@@ -17,6 +18,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Play,
+  Activity,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 
 export interface EditableStream {
@@ -25,6 +29,10 @@ export interface EditableStream {
   status: "active" | "degraded" | "broken";
   latency: number;
   priority?: number;
+  failedAttempts?: number;
+  lastCheckedAt?: string | Date | null;
+  manual?: boolean;
+  adminDisabled?: boolean;
 }
 
 export interface EditableChannel {
@@ -81,6 +89,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
   const [newUrl, setNewUrl] = useState("");
   const [addingLink, setAddingLink] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [linkActionId, setLinkActionId] = useState<string | null>(null);
   // Link currently open in the manual test player (null = closed).
   const [testStream, setTestStream] = useState<EditableStream | null>(null);
 
@@ -151,6 +160,50 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
       setMessage({ type: "err", text: err.message || "Network error." });
     } finally {
       setAddingLink(false);
+    }
+  };
+
+  /**
+   * Test now / Disable / Restore — all three go through one PATCH endpoint so
+   * the manual action follows exactly the same day-gated rules as the scheduler.
+   */
+  const handleLinkAction = async (streamId: string, action: "test" | "disable" | "restore") => {
+    setLinkActionId(`${streamId}:${action}`);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/admin/streams/${streamId}`, {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setMessage({ type: "err", text: data.error || "Link action failed." });
+        return;
+      }
+      const label = linkHealthLabel(data.stream?.health || "unverified");
+      if (action === "test") {
+        setMessage({
+          type: data.probe?.ok ? "ok" : "err",
+          text: data.probe?.ok
+            ? `Probe passed (${data.probe.latency}ms). Link is now ${label.toLowerCase()}.`
+            : `Probe failed: ${data.probe?.reason || "unreachable"}. Link is now ${label.toLowerCase()} — a single failure never removes it.`,
+        });
+      } else if (action === "disable") {
+        setMessage({ type: "ok", text: "Link taken out of service. Viewers cannot reach it and the health checker leaves it alone." });
+      } else {
+        setMessage({
+          type: data.probe?.ok ? "ok" : "err",
+          text: data.probe?.ok
+            ? `Restored and verified (${data.probe.latency}ms).`
+            : `Restored, but the verification probe failed: ${data.probe?.reason || "unreachable"}. It stays out of the viewer ladder until it plays.`,
+        });
+      }
+      await onSaved();
+    } catch (err: any) {
+      setMessage({ type: "err", text: err.message || "Network error." });
+    } finally {
+      setLinkActionId(null);
     }
   };
 
@@ -294,7 +347,9 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             {sortedStreams.length === 0 && (
               <p className="text-[11px] text-slate-500">No server links yet.</p>
             )}
-            {sortedStreams.map((st, idx) => (
+            {sortedStreams.map((st, idx) => {
+              const busy = linkActionId !== null && linkActionId.startsWith(`${st._id}:`);
+              return (
               <div
                 key={st._id}
                 className="flex items-center gap-2 px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-800"
@@ -308,15 +363,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                 >
                   #{idx + 1}
                 </span>
-                <span
-                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    st.status === "active"
-                      ? "bg-emerald-400"
-                      : st.status === "degraded"
-                      ? "bg-amber-400"
-                      : "bg-red-400"
-                  }`}
-                />
+                <LinkHealthBadge link={st} />
                 <span className="flex-1 truncate text-[10px] text-slate-300" title={st.url}>
                   {st.url.replace(/^https?:\/\//, "")}
                 </span>
@@ -325,12 +372,51 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                   {st.latency || "—"}ms
                 </span>
                 <button
+                  onClick={() => handleLinkAction(st._id, "test")}
+                  disabled={busy}
+                  className="text-brand-400 hover:text-brand-300 transition-colors shrink-0 disabled:opacity-40"
+                  title="Run the health probe on this link now"
+                >
+                  {linkActionId === `${st._id}:test` ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Activity className="w-3.5 h-3.5" />
+                  )}
+                </button>
+                <button
                   onClick={() => setTestStream(st)}
                   className="text-emerald-400 hover:text-emerald-300 transition-colors shrink-0"
                   title="Play & test this link"
                 >
                   <Play className="w-3.5 h-3.5 fill-current" />
                 </button>
+                {st.adminDisabled ? (
+                  <button
+                    onClick={() => handleLinkAction(st._id, "restore")}
+                    disabled={busy}
+                    className="text-emerald-400 hover:text-emerald-300 transition-colors shrink-0 disabled:opacity-40"
+                    title="Restore this link to service"
+                  >
+                    {linkActionId === `${st._id}:restore` ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleLinkAction(st._id, "disable")}
+                    disabled={busy}
+                    className="text-amber-400 hover:text-amber-300 transition-colors shrink-0 disabled:opacity-40"
+                    title="Take this link out of service (kept, never auto-deleted)"
+                  >
+                    {linkActionId === `${st._id}:disable` ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Ban className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={() => handleDeleteLink(st._id)}
                   disabled={deletingId === st._id}
@@ -340,7 +426,8 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-2">
@@ -364,8 +451,8 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             </button>
           </div>
           <p className="text-[10px] text-slate-500">
-            New links are probed before saving. Once a real working link exists, leftover
-            placeholder/test links on this channel are purged automatically.
+            New links are probed before saving and marked as yours, so no playlist sync or dead-link purge can ever
+            remove them. A link is hidden from viewers after 3 failed daily checks and only deleted after 7.
           </p>
         </div>
       </div>

@@ -72,6 +72,9 @@ export async function POST(
         failedAttempts: probe.ok ? 0 : 1,
         firstFailedAt: probe.ok ? null : now,
         lastCheckedAt: now,
+        // The admin's own link: automation may re-rank and re-probe it, but it
+        // never retires or deletes it because a playlist stopped listing it.
+        manual: true,
       });
 
       await refreshChannelLinks(id);
@@ -107,6 +110,7 @@ export async function POST(
       firstFailedAt: probe.ok ? null : now,
       lastCheckedAt: now,
       latency: probe.latency,
+      manual: true,
       createdAt: now,
       updatedAt: now,
     } as const;

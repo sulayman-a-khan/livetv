@@ -764,7 +764,23 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  {isFrameSwitching ? (
+                  {channel.streams.length === 0 ? (
+                    // The API only lists channels with a verified playable link,
+                    // so getting here means every mirror failed since this page
+                    // loaded. Say so instead of pointing a player at nothing.
+                    <div className="relative w-full aspect-video bg-black flex items-center justify-center px-6">
+                      <div className="flex flex-col items-center text-center">
+                        <AlertCircle className="w-10 h-10 text-slate-500 mb-3" />
+                        <p className="text-sm font-black text-white tracking-tight">
+                          {channel.name} is off air right now
+                        </p>
+                        <p className="text-xs font-medium text-slate-400 mt-1.5 max-w-sm">
+                          Every server for this channel failed its health check. It comes back
+                          automatically as soon as one of them plays again.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isFrameSwitching ? (
                     <div className="relative w-full aspect-video bg-black flex items-center justify-center">
                       <div className="flex flex-col items-center">
                         <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mb-3" />

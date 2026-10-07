@@ -4,15 +4,18 @@
  * The app plays three kinds of source, each through its own player:
  *   - YouTube Live  -> YouTubeLivePlayer (YouTube's IFrame Player API)
  *   - HLS (.m3u8)   -> HlsPlayer (hls.js dual-slot ping-pong)
- *   - MPEG-TS (.ts) -> MpegTsPlayer (mpegts.js via the /api/stream proxy)
+ *   - MPEG-TS (.ts) -> MpegTsPlayer (mpegts.js)
  *
  * Nothing here fetches media — it only classifies a stored URL so the watch
- * page / admin test player can pick the right component, and builds the
- * proxy URL that lets a raw .ts feed be played from the browser.
+ * page / admin test player can pick the right component, and recovers the
+ * origin URL from a link that an older build stored behind our own proxy.
  */
 
-/** The server-side passthrough proxy that adds the IPTV headers + CORS a raw
- *  .ts feed needs. See app/api/stream/route.ts. */
+/** Path of the /api/stream media relay. The direct catalogue never routes
+ *  through it — those feeds play from the origin's own URL. Only the
+ *  secured/forwarded Live Sports Arena path uses it. It lives here so a link
+ *  stored in that wrapped form is still recognised, by the classifier below and
+ *  by toDirectStreamUrl, which reads it back to the origin it wrapped. */
 export const STREAM_PROXY_PATH = "/api/stream";
 
 /** True if the URL is (or points at) a raw MPEG-TS / Xtream .ts feed.
@@ -59,22 +62,21 @@ export function isMpegTsUrl(url: string): boolean {
 }
 
 /**
- * Returns the URL the <video>/mpegts.js element should actually load for a
- * raw .ts feed: routed through our proxy so the browser gets CORS headers and
- * the upstream provider gets the `User-Agent: IPTVSmartersPlayer` it expects.
+ * Returns the origin URL to load directly.
  *
- * Absolute proxy URLs (http://.../api/stream?...) and already-proxied links
- * are passed through untouched.
+ * Links stored while the relay existed (`/api/stream?url=<origin>`, relative or
+ * absolute) are read back to the origin they wrapped; anything else is already
+ * a direct URL and comes back untouched. An opaque `?ref=` child link cannot be
+ * reversed in the browser and is left alone.
  */
-export function buildStreamProxyUrl(rawUrl: string): string {
+export function toDirectStreamUrl(rawUrl: string): string {
   if (!rawUrl) return rawUrl;
   try {
     const u = new URL(rawUrl, "http://_local.invalid");
-    const path = u.pathname.toLowerCase();
-    // Already going through the proxy — leave it alone.
-    if (path.endsWith(STREAM_PROXY_PATH)) return rawUrl;
+    if (!u.pathname.endsWith(STREAM_PROXY_PATH)) return rawUrl;
+    const inner = u.searchParams.get("url");
+    return inner && /^https?:\/\//i.test(inner) ? inner : rawUrl;
   } catch {
-    /* fall through and wrap whatever we were given */
+    return rawUrl;
   }
-  return `${STREAM_PROXY_PATH}?url=${encodeURIComponent(rawUrl)}`;
 }

@@ -38,7 +38,10 @@ import {
   Clock,
   ChevronDown,
   Loader2,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
+import LinkHealthBadge from "@/components/LinkHealthBadge";
 
 interface AdminDashboardProps {
   secretKey: string;
@@ -71,6 +74,9 @@ interface ChannelWithStreams {
     latency: number;
     failedAttempts: number;
     priority?: number;
+    lastCheckedAt?: string | Date | null;
+    manual?: boolean;
+    adminDisabled?: boolean;
   }>;
 }
 
@@ -86,8 +92,7 @@ interface IngestProgress {
 
 interface HealthSchedule {
   running: boolean;
-  pinnedIntervalMinutes: number;
-  fullIntervalMinutes: number;
+  intervalMinutes: number;
   lastCheckAt: string;
   lastFullCheckAt: string;
 }
@@ -117,6 +122,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [channels, setChannels] = useState<ChannelWithStreams[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [linkActionId, setLinkActionId] = useState<string | null>(null);
 
   // Multi-select / Mark & Delete state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -215,8 +221,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Countdown to the next pinned probe (1 hour) and next full scan (24 hours),
-  // derived from the server's last-run timestamps.
+  // Countdown to the next catalogue pass (every 6 hours), derived from the
+  // server's last full-pass timestamp.
   const nextProbe = useMemo(() => {
     const fmt = (ms: number) => {
       const clamped = Math.max(0, ms);
@@ -228,21 +234,16 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       const ss = String(s).padStart(2, "0");
       return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
     };
-    const nextFrom = (lastAt: string, intervalMin: number): number | null => {
-      const t = Date.parse(lastAt);
-      return Number.isNaN(t) ? null : t + intervalMin * 60 * 1000;
-    };
     if (!schedule) {
-      return { pinned: null as string | null, full: null as string | null, soonest: null as string | null, running: false };
+      return { health: null as string | null, running: false };
     }
-    const pinnedNext = schedule.lastCheckAt ? nextFrom(schedule.lastCheckAt, schedule.pinnedIntervalMinutes) : null;
-    const fullNext = schedule.lastFullCheckAt ? nextFrom(schedule.lastFullCheckAt, schedule.fullIntervalMinutes) : null;
-    const candidates = [pinnedNext, fullNext].filter((x): x is number => x !== null);
-    const soonest = candidates.length ? Math.min(...candidates) : null;
+    const last = Date.parse(schedule.lastFullCheckAt);
+    if (Number.isNaN(last)) {
+      // No pass has run on this instance yet — one is due immediately.
+      return { health: "due now", running: schedule.running };
+    }
     return {
-      pinned: pinnedNext !== null ? fmt(pinnedNext - nowTick) : null,
-      full: fullNext !== null ? fmt(fullNext - nowTick) : null,
-      soonest: soonest !== null ? fmt(soonest - nowTick) : null,
+      health: fmt(last + schedule.intervalMinutes * 60 * 1000 - nowTick),
       running: schedule.running,
     };
   }, [schedule, nowTick]);
@@ -617,6 +618,34 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
+  /** Test now / Disable / Restore for one mirror link, from the table row. */
+  const handleLinkAction = async (
+    streamId: string,
+    action: "test" | "disable" | "restore"
+  ) => {
+    setLinkActionId(`${streamId}:${action}`);
+    try {
+      const res = await fetch(`/api/admin/streams/${streamId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-secret": secretKey.trim(),
+        },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchStats();
+      } else {
+        alert(`Failed to ${action} this link: ${data.error}`);
+      }
+    } catch (err: any) {
+      alert(`Error updating stream link: ${err.message}`);
+    } finally {
+      setLinkActionId(null);
+    }
+  };
+
   // Toggle channel pinned status
   const handleTogglePin = async (channelId: string, currentPinned: boolean) => {
     setPinningId(channelId);
@@ -811,28 +840,16 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             <p className="text-xs text-slate-500">
               {nextProbe.running
                 ? "Auto health checker is active on the server."
-                : "Auto health checker not detected on this instance."}
+                : "No server timers here — the scheduled job runs the passes."}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Pinned (1h)</p>
-            <p className="text-lg font-black tabular-nums text-emerald-400 leading-tight">
-              {healthCheckLoading ? "--:--" : nextProbe.pinned ?? "--:--"}
-            </p>
-          </div>
-          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Full (24h)</p>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Health Pass (6h)</p>
             <p className="text-lg font-black tabular-nums text-brand-400 leading-tight">
-              {healthCheckLoading ? "--:--" : nextProbe.full ?? "--:--"}
-            </p>
-          </div>
-          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Next Probe</p>
-            <p className="text-lg font-black tabular-nums text-white leading-tight">
-              {healthCheckLoading ? "--:--" : nextProbe.soonest ?? "--:--"}
+              {healthCheckLoading ? "--:--" : nextProbe.health ?? "--:--"}
             </p>
           </div>
         </div>
@@ -1485,36 +1502,72 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                             <Layers className="w-3 h-3 text-brand-400 inline shrink-0" />
                             <span>{ch.streams.length} Mirrors</span>
                           </div>
-                          {ch.streams.map((st, idx) => (
+                          {ch.streams.map((st, idx) => {
+                            const busy = linkActionId !== null && linkActionId.startsWith(`${st._id}:`);
+                            return (
                             <div
                               key={st._id}
                               className="flex items-center justify-between gap-1.5 px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono min-w-0"
                             >
                               <div className="flex items-center gap-1 min-w-0 truncate">
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                    st.status === "active"
-                                      ? "bg-emerald-400"
-                                      : st.status === "degraded"
-                                      ? "bg-amber-400"
-                                      : "bg-red-400"
-                                  }`}
-                                />
+                                <LinkHealthBadge link={st} />
                                 <span className="truncate text-[10px]" title={st.url}>
                                   #{idx + 1}: {st.url.replace(/^https?:\/\//, "").substring(0, 20)}...
                                 </span>
                               </div>
 
-                              <button
-                                onClick={() => handleDeleteStream(st._id)}
-                                disabled={deletingId === st._id}
-                                className="text-red-400 hover:text-red-300 transition-colors p-0.5 shrink-0"
-                                title="Delete this stream mirror link"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <button
+                                  onClick={() => handleLinkAction(st._id, "test")}
+                                  disabled={busy}
+                                  className="text-brand-400 hover:text-brand-300 transition-colors p-0.5 disabled:opacity-40"
+                                  title="Probe this link now"
+                                >
+                                  {linkActionId === `${st._id}:test` ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Activity className="w-3 h-3" />
+                                  )}
+                                </button>
+                                {st.adminDisabled ? (
+                                  <button
+                                    onClick={() => handleLinkAction(st._id, "restore")}
+                                    disabled={busy}
+                                    className="text-emerald-400 hover:text-emerald-300 transition-colors p-0.5 disabled:opacity-40"
+                                    title="Restore this link to service"
+                                  >
+                                    {linkActionId === `${st._id}:restore` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <RotateCcw className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleLinkAction(st._id, "disable")}
+                                    disabled={busy}
+                                    className="text-amber-400 hover:text-amber-300 transition-colors p-0.5 disabled:opacity-40"
+                                    title="Take this link out of service"
+                                  >
+                                    {linkActionId === `${st._id}:disable` ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Ban className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleDeleteStream(st._id)}
+                                  disabled={deletingId === st._id}
+                                  className="text-red-400 hover:text-red-300 transition-colors p-0.5 disabled:opacity-50"
+                                  title="Delete this stream mirror link"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </td>
 

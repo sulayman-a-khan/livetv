@@ -21,13 +21,21 @@ export async function POST(req: NextRequest) {
     if (conn && mongoose.isValidObjectId(streamId)) {
       const stream = await StreamLink.findById(streamId);
       if (stream) {
+        // A viewer's report may demote a link inside its grace window, but it can
+        // never mark one dead: hiding a channel on a single failed request is how
+        // working channels vanish. The 6-hourly check makes that call.
         const decision = recordStreamFailure(
-          stream.status as StoredStreamStatus, stream.failedAttempts || 0, stream.firstFailedAt, now
+          stream.status as StoredStreamStatus,
+          stream.failedAttempts || 0,
+          stream.firstFailedAt,
+          now,
+          stream.lastCountedFailureDay
         );
         stream.status = decision.status;
         stream.failedAttempts = decision.failedAttempts;
         stream.firstFailedAt = decision.firstFailedAt;
         stream.lastCheckedAt = decision.lastCheckedAt;
+        stream.lastCountedFailureDay = decision.lastCountedFailureDay;
 
         await stream.save();
 
@@ -36,6 +44,7 @@ export async function POST(req: NextRequest) {
         const remainingActive = await StreamLink.countDocuments({
           channelId: stream.channelId,
           status: "active",
+          adminDisabled: { $ne: true },
         });
 
         return NextResponse.json({
@@ -54,16 +63,21 @@ export async function POST(req: NextRequest) {
     const stream = streams.find((s) => s._id === streamId);
     if (stream) {
       const decision = recordStreamFailure(
-        stream.status as StoredStreamStatus, stream.failedAttempts || 0, stream.firstFailedAt, now
+        stream.status as StoredStreamStatus,
+        stream.failedAttempts || 0,
+        stream.firstFailedAt,
+        now,
+        stream.lastCountedFailureDay
       );
       stream.status = decision.status;
       stream.failedAttempts = decision.failedAttempts;
       stream.firstFailedAt = decision.firstFailedAt;
       stream.lastCheckedAt = decision.lastCheckedAt;
+      stream.lastCountedFailureDay = decision.lastCountedFailureDay;
       inMemoryDb.saveState();
 
       const remainingActive = streams.filter(
-        (s) => s.channelId === stream.channelId && s.status === "active"
+        (s) => s.channelId === stream.channelId && s.status === "active" && !s.adminDisabled
       ).length;
 
       return NextResponse.json({

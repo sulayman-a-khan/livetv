@@ -104,6 +104,7 @@ export async function GET(req: NextRequest) {
         ? await StreamLink.find({
             channelId: { $in: channelIds },
             status: { $in: ["active", "degraded"] },
+            adminDisabled: { $ne: true },
           })
             .sort({ priority: 1, latency: 1 })
             .select(STREAM_FIELDS)
@@ -120,21 +121,26 @@ export async function GET(req: NextRequest) {
         streamMap.set(cId, [...streamMap.get(cId)!, stream]);
       }
 
-      const result = channels.map((c) => {
-        const cId = c._id.toString();
-        const streams = pickUsableStreams(streamMap.get(cId) || []);
-        const directUrl = (c as any).streamUrl || (c as any).url;
-        const primaryStream = streams.length > 0 ? toPublicStream(streams[0]) : null;
+      const result = channels
+        .map((c) => {
+          const cId = c._id.toString();
+          const streams = pickUsableStreams(streamMap.get(cId) || []);
+          const directUrl = (c as any).streamUrl || (c as any).url;
+          const primaryStream = streams.length > 0 ? toPublicStream(streams[0]) : null;
 
-        return {
-          ...c,
-          _id: cId,
-          logo: getChannelLogo(c.name, c.logo),
-          ...(directUrl ? { streamUrl: directUrl } : {}),
-          activeStreamCount: streams.length || (directUrl ? 1 : 0),
-          primaryStream,
-        };
-      });
+          return {
+            ...c,
+            _id: cId,
+            logo: getChannelLogo(c.name, c.logo),
+            ...(directUrl ? { streamUrl: directUrl } : {}),
+            activeStreamCount: streams.length || (directUrl ? 1 : 0),
+            primaryStream,
+          };
+        })
+        // A channel whose every link has failed its daily window is hidden, not
+        // listed with an unplayable URL: a tile a viewer can click must be a
+        // tile that plays. It reappears by itself the moment a check passes.
+        .filter((c) => c.primaryStream !== null);
 
       return NextResponse.json(
         { success: true, count: result.length, channels: result },
@@ -163,7 +169,7 @@ export async function GET(req: NextRequest) {
 
       const result = channels
         .map((c) => {
-          const candidates = streams.filter((s) => s.channelId === c._id);
+          const candidates = streams.filter((s) => s.channelId === c._id && !s.adminDisabled);
           const chActiveStreams = pickUsableStreams(candidates);
           const directUrl = (c as any).streamUrl || (c as any).url;
           const primaryStream =
@@ -180,6 +186,7 @@ export async function GET(req: NextRequest) {
             primaryStream,
           };
         })
+        .filter((c) => c.primaryStream !== null)
         .sort((a, b) => {
           // Pinned channels first
           const aPinned = (a as any).isPinned === true ? 1 : 0;

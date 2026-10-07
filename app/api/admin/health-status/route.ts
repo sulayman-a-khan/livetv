@@ -27,8 +27,9 @@ export async function GET(req: NextRequest) {
       success: true,
       autoHealthChecker: {
         running: isRunning,
-        pinnedIntervalMinutes: 60,
-        fullIntervalMinutes: 1440,
+        /** One pass over the catalogue every 6 hours; pinned channels are probed
+         *  first inside each pass, and a skipped or failed pass retries in 15 min. */
+        intervalMinutes: 360,
         lastCheckAt: lastCheck || "Not yet run",
         lastFullCheckAt: lastFullCheck || "Not yet run",
       },

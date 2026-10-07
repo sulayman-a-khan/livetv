@@ -58,18 +58,22 @@ export async function GET(
       if (mongoose.isValidObjectId(id)) {
         const [channel, streams] = await Promise.all([
           Channel.findById(id).lean(),
-          StreamLink.find({ channelId: id })
+          StreamLink.find({ channelId: id, adminDisabled: { $ne: true } })
             .sort({ priority: 1, latency: 1 })
             .select(STREAM_FIELDS)
             .lean(),
         ]);
 
         if (channel) {
+          // Same rule as the catalogue: a viewer is only ever handed a link the
+          // checker believes can play. When every link has failed its daily
+          // window the channel reports `playable: false` — falling back to the
+          // broken rows is what made a listed channel turn out unwatchable.
           const active = streams.filter((stream) => stream.status === "active");
           const degraded = streams.filter(
             (stream) => stream.status === "degraded" && (stream.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES
           );
-          let usableStreams = active.length > 0 ? active : degraded.length > 0 ? degraded : streams;
+          let usableStreams = active.length > 0 ? active : degraded;
 
           const directUrl = (channel as any).streamUrl || (channel as any).url;
           if (usableStreams.length === 0 && directUrl) {
@@ -88,6 +92,7 @@ export async function GET(
           return NextResponse.json(
             {
               success: true,
+              playable: usableStreams.length > 0,
               channel: {
                 ...channel,
                 logo: getChannelLogo(channel.name, channel.logo),
@@ -161,13 +166,13 @@ export async function GET(
     }
 
     const candidates = streams
-      .filter((s) => s.channelId === id)
+      .filter((s) => s.channelId === id && !s.adminDisabled)
       .sort((a, b) => (a.priority || 99) - (b.priority || 99) || (a.latency || 0) - (b.latency || 0));
     const active = candidates.filter((stream) => stream.status === "active");
     const degraded = candidates.filter(
       (stream) => stream.status === "degraded" && (stream.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES
     );
-    let chStreams = active.length > 0 ? active : degraded.length > 0 ? degraded : candidates;
+    let chStreams = active.length > 0 ? active : degraded;
 
     const directUrl = (channel as any).streamUrl || (channel as any).url;
     if (chStreams.length === 0 && directUrl) {
@@ -191,6 +196,7 @@ export async function GET(
     return NextResponse.json(
       {
         success: true,
+        playable: chStreams.length > 0,
         channel: {
           ...channel,
           logo: getChannelLogo(channel.name, channel.logo),

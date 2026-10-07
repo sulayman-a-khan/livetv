@@ -50,6 +50,9 @@ interface MonitorStatus {
   running: boolean;
   dueTickMinutes: number;
   checkIntervalHours: number;
+  /** UTC hour the one daily source check is anchored to. */
+  syncHourUtc: number;
+  nextScheduledSyncAt: string;
   lastTickAt: string | null;
   lastResult: unknown;
 }
@@ -502,9 +505,14 @@ export default function PlaylistSourcePanel({
       {/* Monitor status strip */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-4">
         <div className="px-3 py-2 rounded-xl bg-slate-900/70 border border-slate-800">
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Daily Monitor</p>
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">
+            Daily Sync · {monitor ? `${String(monitor.syncHourUtc).padStart(2, "0")}:00 UTC` : "—"}
+          </p>
           <p className={`text-xs font-bold ${monitor?.running ? "text-emerald-400" : "text-amber-400"}`}>
-            {monitor?.running ? "Active on server" : "Not detected here"}
+            {monitor?.running ? "Active on server" : "Runs from the scheduled job"}
+          </p>
+          <p className="text-[10px] text-slate-500">
+            {monitor ? `next in ${countdown(monitor.nextScheduledSyncAt, nowTick)}` : ""}
           </p>
         </div>
         <div className="px-3 py-2 rounded-xl bg-slate-900/70 border border-slate-800">

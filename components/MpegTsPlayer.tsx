@@ -4,14 +4,14 @@
  * MpegTsPlayer — raw MPEG-TS / Xtream `.ts` live playback.
  *
  * A drop-in sibling of HlsPlayer for channels whose active link is a raw
- * transport stream rather than an HLS `.m3u8` playlist. `.ts` feeds can't be
- * handed straight to a browser <video> (no MSE demuxer for bare TS, and the
- * provider blocks non-IPTV user agents + sends no CORS headers), so:
+ * transport stream rather than an HLS `.m3u8` playlist. `.ts` can't be handed
+ * straight to a browser <video> (no MSE demuxer for bare TS), so mpegts.js
+ * (dynamically imported, so it never runs during SSR) demuxes the TS into fMP4
+ * and feeds it to MediaSource.
  *
- *   - the source is routed through our /api/stream proxy (buildStreamProxyUrl),
- *     which adds `User-Agent: IPTVSmartersPlayer` and CORS server-side;
- *   - mpegts.js (dynamically imported, so it never runs during SSR) demuxes the
- *     TS into fMP4 and feeds it to MediaSource.
+ * What it loads is the origin's own URL. Nothing is relayed through our server,
+ * so a provider that sends no CORS headers or refuses browser user agents will
+ * not play here — that is the cost of zero media bandwidth, taken on purpose.
  *
  * This player mirrors the raw stream 1-to-1 for normal playback: buffering,
  * stalls and a black picture are left to mpegts.js and the <video> element to
@@ -21,13 +21,13 @@
  *
  * The ONE recovery path is a frozen-progress watchdog: only when the video clock
  * has been continuously stuck for 8s (after having played) does it rebuild the
- * player against a fresh cache-busted URL (`_t=<nonce>`) to re-fetch the LIVE
- * edge — which is how the provider's ~25s session expiry is absorbed without
- * replaying the first buffered clip. Frequent mpegts ERROR events from small
- * buffer shifts are logged and ignored, so they never flash the status bar.
+ * player against a fresh connection to re-fetch the LIVE edge — which is how the
+ * provider's ~25s session expiry is absorbed without replaying the first
+ * buffered clip. Frequent mpegts ERROR events from small buffer shifts are
+ * logged and ignored, so they never flash the status bar.
  *
  * The .m3u8 (HlsPlayer) and YouTube (YouTubeLivePlayer) paths are untouched —
- * the watch page picks this component only for `.ts` / proxied sources.
+ * the watch page picks this component only for `.ts` sources.
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -40,7 +40,7 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import { buildStreamProxyUrl } from "@/lib/streamType";
+import { toDirectStreamUrl } from "@/lib/streamType";
 import type mpegtsNamespace from "mpegts.js";
 
 type MpegtsModule = typeof mpegtsNamespace;
@@ -190,18 +190,6 @@ export default function MpegTsPlayer({
   const frozenSinceRef = useRef(0); // when the clock last stopped advancing
   const hasPlayedRef = useRef(false); // reached playback at least once
 
-  /**
-   * Appends a per-load nonce to the proxied URL so every (re)connect is a
-   * brand-new request that hits the live edge — never a browser/edge-cached
-   * copy of the first ~25s. buildStreamProxyUrl already yields `?url=…`, so we
-   * add `&_t=…`; for a bare proxy path we add `?_t=…`.
-   */
-  const buildLiveUrl = useCallback((rawUrl: string) => {
-    const base = buildStreamProxyUrl(rawUrl);
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}_t=${Date.now()}`;
-  }, []);
-
   /** Build the mpegts.js player for a raw feed URL and start playback. */
   const createAndLoad = useCallback(
     (rawUrl: string) => {
@@ -235,12 +223,12 @@ export default function MpegTsPlayer({
           return;
         }
 
-        const proxied = buildLiveUrl(rawUrl);
+        const originUrl = toDirectStreamUrl(rawUrl);
         let player: MpegtsPlayer;
         try {
           player = mpegts.createPlayer(
             // Pure, non-seekable live source.
-            { type: "mpegts", isLive: true, cors: true, url: proxied },
+            { type: "mpegts", isLive: true, cors: true, url: originUrl },
             {
               // Natural live buffer: hold an initial stash before playback so a
               // minor chunk delay doesn't underrun and force an instant drop.
@@ -305,7 +293,7 @@ export default function MpegTsPlayer({
         }
       })();
     },
-    [destroyPlayer, ensureModule, buildLiveUrl]
+    [destroyPlayer, ensureModule]
   );
   createAndLoadRef.current = createAndLoad;
 

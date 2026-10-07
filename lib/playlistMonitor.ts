@@ -6,9 +6,11 @@
  * project's background-job pattern:
  *
  *   - started once from `instrumentation.ts` on server boot;
- *   - an hourly *due* tick rather than a per-source timer, so a restart never
- *     loses a day's check — a source is simply "due" when its last check is
- *     older than 24 hours;
+ *   - a *due* tick every 15 minutes rather than a per-source timer, so a restart
+ *     never loses a day's check — a source is due once the day's scheduled sync
+ *     hour has passed and it has not been checked since;
+ *   - a source whose last fetch failed becomes due again after
+ *     `FAILED_RETRY_MS` instead of waiting for tomorrow's slot;
  *   - a process-wide re-entrancy flag plus a MongoDB `_locks` document, because
  *     Vercel keeps several warm instances and each has its own `global`.
  *
@@ -21,10 +23,35 @@ import { connectToDatabase } from "./db";
 import PlaylistSource from "@/models/PlaylistSource";
 import { syncAllDueSources, type PlaylistSyncSummary } from "./playlistSync";
 
+/** UTC hour every daily source check is anchored to. Change only this. */
+export const SYNC_HOUR_UTC = 20;
+
+/** One source check per day. */
 export const DAILY_CHECK_MS = 24 * 60 * 60 * 1000;
-const DUE_TICK_MS = 60 * 60 * 1000;
+/** A source that failed to fetch retries in this window, not tomorrow. */
+export const FAILED_RETRY_MS = 2 * 60 * 60 * 1000;
+const DUE_TICK_MS = 15 * 60 * 1000;
 const FIRST_TICK_MS = 45_000;
 const STALE_LOCK_MS = 90 * 60 * 1000;
+
+/**
+ * The most recent moment the daily sync was scheduled: today's `SYNC_HOUR_UTC`
+ * if it has passed, otherwise yesterday's. A source whose `lastCheckedAt` is
+ * older than that has missed its slot.
+ */
+export function lastScheduledSyncAt(now: Date = new Date()): Date {
+  const at = new Date(now.getTime());
+  at.setUTCHours(SYNC_HOUR_UTC, 0, 0, 0);
+  if (at.getTime() > now.getTime()) at.setUTCDate(at.getUTCDate() - 1);
+  return at;
+}
+
+/** When the next daily sync is due — shown on the dashboard so the schedule is visible. */
+export function nextScheduledSyncAt(now: Date = new Date()): Date {
+  const next = lastScheduledSyncAt(now);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
 
 declare global {
   // eslint-disable-next-line no-var
@@ -54,6 +81,10 @@ export interface PlaylistMonitorStatus {
   dueTickMinutes: number;
   /** How long a source waits between automatic checks. */
   checkIntervalHours: number;
+  /** UTC hour the daily check is anchored to. */
+  syncHourUtc: number;
+  /** When the next daily window opens. */
+  nextScheduledSyncAt: string;
   lastTickAt: string | null;
   lastResult: PlaylistMonitorResult | null;
 }
@@ -127,8 +158,12 @@ export async function runPlaylistMonitorTick(force = false): Promise<PlaylistMon
       mongoLockHeld = true;
     }
 
-    const dueBefore = force ? new Date() : new Date(Date.now() - DAILY_CHECK_MS);
-    const summaries = await syncAllDueSources(dueBefore);
+    const now = new Date();
+    const dueBefore = force ? now : lastScheduledSyncAt(now);
+    // A source that could not be fetched is retried inside the day rather than
+    // silently skipping a whole schedule slot.
+    const failedRetryBefore = new Date(now.getTime() - FAILED_RETRY_MS);
+    const summaries = await syncAllDueSources(dueBefore, { force, failedRetryBefore });
     const result: PlaylistMonitorResult = {
       at: new Date().toISOString(),
       checked: summaries.length,
@@ -177,7 +212,9 @@ export function startPlaylistMonitor() {
   global.__freetv_playlist_monitor_started = true;
 
   console.log(
-    "[PlaylistMonitor] ✦ Activated — each monitored playlist is checked once per day."
+    `[PlaylistMonitor] ✦ Activated — each monitored playlist is checked once per day at ${String(
+      SYNC_HOUR_UTC
+    ).padStart(2, "0")}:00 UTC (a failed fetch retries after ${FAILED_RETRY_MS / 3_600_000}h).`
   );
 
   setTimeout(() => {
@@ -198,21 +235,28 @@ export function getPlaylistMonitorStatus(): PlaylistMonitorStatus {
     running: Boolean(global.__freetv_playlist_monitor_started),
     dueTickMinutes: DUE_TICK_MS / 60_000,
     checkIntervalHours: DAILY_CHECK_MS / 3_600_000,
+    syncHourUtc: SYNC_HOUR_UTC,
+    nextScheduledSyncAt: nextScheduledSyncAt().toISOString(),
     lastTickAt: global.__freetv_playlist_last_tick || null,
     lastResult: global.__freetv_playlist_last_result || null,
   };
 }
 
-/** Sources that are past their daily check right now. */
+/** Sources that are past their daily check, or due for a fetch retry, right now. */
 export async function countDueSources(): Promise<number> {
   const conn = await connectToDatabase();
   if (!conn) return 0;
+  const now = new Date();
   return PlaylistSource.countDocuments({
     active: true,
     monitored: true,
     $or: [
       { lastCheckedAt: null },
-      { lastCheckedAt: { $lt: new Date(Date.now() - DAILY_CHECK_MS) } },
+      { lastCheckedAt: { $lt: lastScheduledSyncAt(now) } },
+      {
+        lastStatus: "failed",
+        lastCheckedAt: { $lt: new Date(now.getTime() - FAILED_RETRY_MS) },
+      },
     ],
   });
 }

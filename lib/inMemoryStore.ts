@@ -39,6 +39,15 @@ export interface InMemoryStreamLink {
   firstFailedAt: Date | null;
   lastCheckedAt: Date | null;
   latency: number;
+  /**
+   * Consecutive-failure streak bookkeeping (see `lib/streamHealth.ts`). The
+   * streak advances at most once per UTC day, and this is the day it last moved.
+   */
+  lastCountedFailureDay?: string | null;
+  /** Hand-added link: automation may probe and rank it, never delete it. */
+  manual?: boolean;
+  /** Admin took the link out of service; hidden until an admin restores it. */
+  adminDisabled?: boolean;
   createdAt: Date;
   updatedAt: Date;
   /**

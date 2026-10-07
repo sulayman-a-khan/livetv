@@ -832,7 +832,7 @@ export default function WatchPage() {
                 </div>
 
                 {/* Category Filter Pills in Sidebar */}
-                <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-2.5 overflow-x-auto scrollbar-none shrink-0">
+                <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-2.5 justify-between overflow-x-auto scrollbar-none shrink-0">
                   {["all", ...CATEGORIES.map((c) => c.slug)].map((slug) => {
                     const isActive = activeCategorySlug === slug;
                     const label =

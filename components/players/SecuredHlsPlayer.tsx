@@ -75,6 +75,36 @@ function pickCapLevel(levels: { height?: number }[], maxHeight: number): number 
   return cap === -1 ? 0 : cap;
 }
 
+const FWD_STREAM_ID_RE = /\/live\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:\.m3u8(?:[?#]|$)|\/)/;
+
+function extractStreamId(url: string): string | null {
+  const m = FWD_STREAM_ID_RE.exec(url || "");
+  return m ? m[1] : null;
+}
+
+function withToken(url: string, token: string): string {
+  if (!token) return url;
+  const clean = url.replace(/([?&])token=[^&#]*/, "$1").replace(/\?$/, "");
+  const sep = clean.includes("?") ? "&" : "?";
+  return `${clean}${sep}token=${encodeURIComponent(token)}`;
+}
+
+/** Short-lived signed token from the forwarder. On any failure (CORS, tunnel
+ *  restart, non-forwarder URL) we fall back to the token-less entry, which the
+ *  guard still serves — playback must never hard-fail on the mint step. */
+async function fetchStreamToken(streamUrl: string, streamId: string): Promise<string> {
+  try {
+    const base = new URL(streamUrl);
+    const mintUrl = `${base.origin}/live/${encodeURIComponent(streamId)}/token`;
+    const res = await fetch(mintUrl, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return typeof data?.token === "string" ? data.token : "";
+  } catch {
+    return "";
+  }
+}
+
 export default function SecuredHlsPlayer({
   matchTitle,
   sportType = "Live Sports",
@@ -88,6 +118,8 @@ export default function SecuredHlsPlayer({
   // Same feed, two transports: direct first, then the site proxy as an
   // invisible fallback for hosts that block non-player clients or CORS.
   const canProxy = /^https?:\/\//i.test(cleanUrl) && !cleanUrl.includes("/api/stream");
+  // Forwarder streams demand a short-lived signed token on every request.
+  const streamId = extractStreamId(cleanUrl);
 
   // Playback & UI states
   const [isPlaying, setIsPlaying] = useState(false);
@@ -205,11 +237,11 @@ export default function SecuredHlsPlayer({
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = setTimeout(() => {
         retryTimer = null;
-        if (!disposed) start();
+        if (!disposed) void start();
       }, attempt === 0 ? RETRY_DELAY_MS * 2 : 1200);
     }
 
-    function start() {
+    async function start() {
       if (disposed) return;
       const video = videoRef.current;
       if (!video) return;
@@ -222,10 +254,13 @@ export default function SecuredHlsPlayer({
       setIsReconnecting(false);
       setFatalError(null);
 
+      const token = streamId ? await fetchStreamToken(cleanUrl, streamId) : "";
+      if (disposed) return;
+      const entryUrl = streamId && token ? withToken(cleanUrl, token) : cleanUrl;
       const playUrl =
         attempt === 0
-          ? cleanUrl
-          : `/api/stream?url=${encodeURIComponent(cleanUrl)}&_t=${Date.now()}`;
+          ? entryUrl
+          : `/api/stream?url=${encodeURIComponent(entryUrl)}&_t=${Date.now()}`;
 
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -342,7 +377,7 @@ export default function SecuredHlsPlayer({
       }
     }
 
-    start();
+    void start();
 
     return () => {
       disposed = true;
@@ -350,7 +385,7 @@ export default function SecuredHlsPlayer({
       destroyCurrent();
       resetVideoElement();
     };
-  }, [cleanUrl, canProxy]);
+  }, [cleanUrl, canProxy, streamId]);
 
   const handleMouseMove = () => {
     setControlsVisible(true);

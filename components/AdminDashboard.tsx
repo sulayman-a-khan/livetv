@@ -4,6 +4,7 @@ import "@/lib/tvPolyfills";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { getChannelLogo, getCountryFlag } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
+import PlaylistSourcePanel from "@/components/PlaylistSourcePanel";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
 import {
   ShieldAlert,
@@ -750,7 +751,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             <h1 className="text-xl font-bold text-white tracking-tight">Admin Secret Gate & Controls</h1>
           </div>
           <p className="text-xs text-slate-400">
-            Automated Channel Deduplication, M3U Playlist Ingestion & Batch Health Checker.
+            Automated Channel Deduplication, M3U Playlist Ingestion, Daily Playlist Source Sync &amp; Batch Health Checker.
           </p>
         </div>
 
@@ -1018,6 +1019,9 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           </div>
         )}
       </div>
+
+      {/* Direct HLS playlist source monitoring */}
+      <PlaylistSourcePanel secretKey={secretKey} onCatalogueChanged={fetchStats} />
 
 
 

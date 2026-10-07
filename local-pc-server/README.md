@@ -28,6 +28,20 @@ Requires Node.js 18.17+.
 | `CLOUD_APP_URL` + `LOCAL_SERVER_SECRET` | Heartbeat via the app's `POST /api/sports/health-check`. The secret must equal `LOCAL_SERVER_SECRET` in the Next.js env. If empty, the heartbeat writes to MongoDB directly. |
 | `PUBLIC_PORT` | Port to expose publicly (default 5001) |
 | `ADMIN_UI_PASSWORD` | Optional Basic-auth for the admin UI |
+| `STREAM_TOKEN_SECRET` | HMAC key for the short-lived `/live/*` stream tokens. Defaults to `LOCAL_SERVER_SECRET`; if neither is set a random key is generated per boot (tokens die on restart). Set a fixed long random value. |
+| `STREAM_TOKEN_TTL_SEC` | Token lifetime in seconds (default 55, max 300). Every playlist response re-stamps fresh tokens on its children, so a playing client never expires mid-match. |
+| `STREAM_GUARD_MODE` | `permissive` (default): token problems are logged as `[stream-guard:permissive]`, never blocked. `strict`: expired/invalid tokens on segments, sub-playlists and keys are denied with 403; foreign browser origins are flagged. Flip on after watching the logs on a real match day. |
+| `ALLOWED_ORIGINS` | Extra comma-separated browser-origin hosts allowed to mint tokens and dial token-less entry playlists (in addition to localhost, `CLOUD_APP_URL` and `*.vercel.app`). |
+| `SOURCES_FILE` | Where the live-source registry is stored on this PC (default `data/sources.json`). |
+| `SOURCE_VAULT_SECRET` | Key used to AES-256-GCM encrypt Xtream passwords before they are mirrored to MongoDB (`hlsources.secret`). Defaults to `LOCAL_SERVER_SECRET`; with neither set, passwords are **not** written to Mongo at all. |
+
+### Live sources
+
+Sources (Xtream accounts, M3U/M3U8 feeds, direct HLS, OBS relays) are managed in the admin UI under the
+**Live Source** stat card and stored in `SOURCES_FILE`. Each event card selects **one** source; a selection
+is never global, and a card whose source is deactivated or removed keeps its assignment and simply refuses
+to serve (`503 SOURCE_NOT_AVAILABLE`) until the source is available again. Provider passwords stay on this
+PC: only `passwordSet` leaves the admin API, and the viewer-facing URL is always the forwarder path.
 
 ## 3. Run
 

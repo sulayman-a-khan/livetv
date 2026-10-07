@@ -6356,15 +6356,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 496,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 18,
       "createdAt": "2026-09-19T09:04:59.230Z",
       "updatedAt": "2026-10-02T08:35:08.588Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 496,
+        "responseTime": 18,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
@@ -6374,9 +6374,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:08.587Z"
+        "checkedAt": "2026-10-06T18:21:09.571Z"
       }
     },
     {
@@ -6387,27 +6387,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 1108,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 161,
       "createdAt": "2026-09-19T09:05:00.313Z",
       "updatedAt": "2026-10-02T02:43:39.686Z",
       "lastCheck": {
-        "healthStatus": "DEGRADED",
-        "errorCode": "PARTIAL_SEGMENTS_UNAVAILABLE",
+        "healthStatus": "ONLINE",
+        "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 1108,
+        "responseTime": 161,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 19,
-        "newSegmentDetected": null,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": "1/2 sampled segments failed",
-        "checkedAt": "2026-10-02T02:43:39.686Z"
+        "attempts": 2,
+        "error": null,
+        "checkedAt": "2026-10-06T18:21:10.535Z"
       }
     },
     {
@@ -6509,17 +6509,17 @@
       "url": "https://mytvbangla.com/0.m3u8",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 30,
+      "failedAttempts": 32,
       "firstFailedAt": "2026-09-19T09:05:05.174Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:05.175Z",
       "updatedAt": "2026-10-02T02:45:01.665Z",
       "lastCheck": {
-        "healthStatus": "TIMEOUT",
-        "errorCode": "TIMEOUT",
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
         "httpStatus": null,
-        "responseTime": 25984,
+        "responseTime": 10664,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -6530,8 +6530,8 @@
         "codec": null,
         "fps": null,
         "attempts": 3,
-        "error": "Request timed out",
-        "checkedAt": "2026-10-02T02:45:01.661Z"
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:21:30.148Z"
       }
     },
     {
@@ -6573,15 +6573,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 846,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 160,
       "createdAt": "2026-09-19T09:05:06.547Z",
       "updatedAt": "2026-10-02T02:42:59.460Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 846,
+        "responseTime": 160,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -6591,9 +6591,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.459Z"
+        "checkedAt": "2026-10-06T18:21:10.475Z"
       }
     },
     {
@@ -6604,27 +6604,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 841,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 113,
       "createdAt": "2026-09-19T09:05:07.305Z",
       "updatedAt": "2026-10-02T02:42:59.523Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 841,
+        "responseTime": 113,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.522Z"
+        "checkedAt": "2026-10-06T18:21:09.676Z"
       }
     },
     {
@@ -6635,27 +6635,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 853,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 45,
       "createdAt": "2026-09-19T09:05:07.570Z",
       "updatedAt": "2026-10-02T02:42:59.498Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 853,
+        "responseTime": 45,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.498Z"
+        "checkedAt": "2026-10-06T18:21:09.890Z"
       }
     },
     {
@@ -6666,15 +6666,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 826,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 43,
       "createdAt": "2026-09-19T09:05:07.837Z",
       "updatedAt": "2026-10-02T02:49:23.527Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 826,
+        "responseTime": 43,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -6684,9 +6684,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.526Z"
+        "checkedAt": "2026-10-06T18:21:09.890Z"
       }
     },
     {
@@ -6697,27 +6697,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 870,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 51,
       "createdAt": "2026-09-19T09:05:08.106Z",
       "updatedAt": "2026-10-02T02:49:23.528Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 870,
+        "responseTime": 51,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.527Z"
+        "checkedAt": "2026-10-06T18:21:10.397Z"
       }
     },
     {
@@ -6728,15 +6728,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 874,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 70,
       "createdAt": "2026-09-19T09:05:08.368Z",
       "updatedAt": "2026-10-02T02:43:40.556Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 874,
+        "responseTime": 70,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -6746,9 +6746,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.556Z"
+        "checkedAt": "2026-10-06T18:21:09.747Z"
       }
     },
     {
@@ -6759,15 +6759,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 278,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 163,
       "createdAt": "2026-09-19T09:05:08.633Z",
       "updatedAt": "2026-10-02T02:43:40.519Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 278,
+        "responseTime": 163,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -6777,9 +6777,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.518Z"
+        "checkedAt": "2026-10-06T18:21:09.697Z"
       }
     },
     {
@@ -6790,27 +6790,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 263,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 10,
       "createdAt": "2026-09-19T09:05:08.896Z",
       "updatedAt": "2026-10-02T02:43:39.688Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 263,
+        "responseTime": 10,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": null,
+        "newSegmentDetected": true,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:39.688Z"
+        "checkedAt": "2026-10-06T18:21:09.678Z"
       }
     },
     {
@@ -6821,27 +6821,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 827,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 33,
       "createdAt": "2026-09-19T09:05:09.156Z",
       "updatedAt": "2026-10-02T02:42:59.510Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 827,
+        "responseTime": 33,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.509Z"
+        "checkedAt": "2026-10-06T18:21:10.285Z"
       }
     },
     {
@@ -6852,15 +6852,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 876,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 32,
       "createdAt": "2026-09-19T09:05:09.420Z",
       "updatedAt": "2026-10-02T02:38:57.619Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 876,
+        "responseTime": 32,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -6870,9 +6870,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.618Z"
+        "checkedAt": "2026-10-06T18:21:09.844Z"
       }
     },
     {
@@ -6883,27 +6883,27 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 843,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 32,
       "createdAt": "2026-09-19T09:05:09.682Z",
       "updatedAt": "2026-10-02T02:38:57.596Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 843,
+        "responseTime": 32,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
+        "attempts": 2,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.595Z"
+        "checkedAt": "2026-10-06T18:21:09.859Z"
       }
     },
     {
@@ -6912,48 +6912,17 @@
       "url": "https://tvsen5.aynaott.com/Ravc7gPCZpxk/index.m3u8?e=1784102565&u=ee5437a7-c16b-4700-b317-a41b77d5cba9&token=36497099fc726a799b13d41016259efc",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 33,
+      "failedAttempts": 35,
       "firstFailedAt": "2026-09-19T09:05:13.704Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:13.704Z",
       "updatedAt": "2026-10-02T02:40:32.667Z",
-      "lastCheck": {
-        "healthStatus": "TIMEOUT",
-        "errorCode": "TIMEOUT",
-        "httpStatus": null,
-        "responseTime": 34999,
-        "playlistType": null,
-        "isLive": null,
-        "segmentCount": null,
-        "newSegmentDetected": null,
-        "video": null,
-        "audio": null,
-        "resolution": null,
-        "codec": null,
-        "fps": null,
-        "attempts": 3,
-        "error": "Request timed out",
-        "checkedAt": "2026-10-02T02:40:32.666Z"
-      }
-    },
-    {
-      "_id": "6aae504a92777412c50840e7",
-      "channelId": "6aae504992777412c50840e3",
-      "url": "https://tvsen6.aynaott.com/kajlsd57jnkdf/index.m3u8?e=1784102566&u=ee5437a7-c16b-4700-b317-a41b77d5cba9&token=de9d33cfd8daf9a7f2e56a88534d0548",
-      "priority": 1,
-      "status": "broken",
-      "failedAttempts": 36,
-      "firstFailedAt": "2026-09-19T09:05:14.456Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
-      "createdAt": "2026-09-19T09:05:14.457Z",
-      "updatedAt": "2026-10-02T02:39:32.488Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "PLAYLIST_NOT_FOUND",
         "httpStatus": 404,
-        "responseTime": 824,
+        "responseTime": 10047,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -6965,7 +6934,38 @@
         "fps": null,
         "attempts": 3,
         "error": "HTTP 404",
-        "checkedAt": "2026-10-02T02:39:32.487Z"
+        "checkedAt": "2026-10-06T18:21:29.733Z"
+      }
+    },
+    {
+      "_id": "6aae504a92777412c50840e7",
+      "channelId": "6aae504992777412c50840e3",
+      "url": "https://tvsen6.aynaott.com/kajlsd57jnkdf/index.m3u8?e=1784102566&u=ee5437a7-c16b-4700-b317-a41b77d5cba9&token=de9d33cfd8daf9a7f2e56a88534d0548",
+      "priority": 1,
+      "status": "broken",
+      "failedAttempts": 38,
+      "firstFailedAt": "2026-09-19T09:05:14.456Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
+      "createdAt": "2026-09-19T09:05:14.457Z",
+      "updatedAt": "2026-10-02T02:39:32.488Z",
+      "lastCheck": {
+        "healthStatus": "OFFLINE",
+        "errorCode": "PLAYLIST_NOT_FOUND",
+        "httpStatus": 404,
+        "responseTime": 5,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
+        "video": null,
+        "audio": null,
+        "resolution": null,
+        "codec": null,
+        "fps": null,
+        "attempts": 3,
+        "error": "HTTP 404",
+        "checkedAt": "2026-10-06T18:21:34.292Z"
       }
     },
     {
@@ -7100,19 +7100,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 887,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 33,
       "createdAt": "2026-09-19T09:05:16.787Z",
       "updatedAt": "2026-10-02T02:38:57.637Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 887,
+        "responseTime": 33,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7120,7 +7120,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.636Z"
+        "checkedAt": "2026-10-06T18:21:33.800Z"
       }
     },
     {
@@ -7131,15 +7131,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 810,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 31,
       "createdAt": "2026-09-19T09:05:17.059Z",
       "updatedAt": "2026-10-02T08:40:02.651Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 810,
+        "responseTime": 31,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -7151,7 +7151,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.650Z"
+        "checkedAt": "2026-10-06T18:21:33.799Z"
       }
     },
     {
@@ -7162,19 +7162,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 822,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 32,
       "createdAt": "2026-09-19T09:05:17.329Z",
       "updatedAt": "2026-10-02T08:40:02.667Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 822,
+        "responseTime": 32,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7182,7 +7182,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.666Z"
+        "checkedAt": "2026-10-06T18:21:33.716Z"
       }
     },
     {
@@ -7193,15 +7193,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 840,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 35,
       "createdAt": "2026-09-19T09:05:17.601Z",
       "updatedAt": "2026-10-02T08:40:02.652Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 840,
+        "responseTime": 35,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -7213,7 +7213,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.651Z"
+        "checkedAt": "2026-10-06T18:21:33.780Z"
       }
     },
     {
@@ -7255,19 +7255,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 819,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 31,
       "createdAt": "2026-09-19T09:05:18.153Z",
       "updatedAt": "2026-10-02T08:40:02.655Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 819,
+        "responseTime": 31,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7275,7 +7275,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.655Z"
+        "checkedAt": "2026-10-06T18:21:33.799Z"
       }
     },
     {
@@ -7317,19 +7317,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 824,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 31,
       "createdAt": "2026-09-19T09:05:18.697Z",
       "updatedAt": "2026-10-02T02:43:40.560Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 824,
+        "responseTime": 31,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7337,7 +7337,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.559Z"
+        "checkedAt": "2026-10-06T18:21:33.799Z"
       }
     },
     {
@@ -7658,19 +7658,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 876,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 37,
       "createdAt": "2026-09-19T09:05:23.357Z",
       "updatedAt": "2026-10-02T02:38:57.627Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 876,
+        "responseTime": 37,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7678,7 +7678,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.626Z"
+        "checkedAt": "2026-10-06T18:21:33.800Z"
       }
     },
     {
@@ -7689,15 +7689,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 569,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 75,
       "createdAt": "2026-09-19T09:05:23.915Z",
       "updatedAt": "2026-10-02T02:43:40.258Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 569,
+        "responseTime": 75,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -7709,7 +7709,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.257Z"
+        "checkedAt": "2026-10-06T18:21:33.848Z"
       }
     },
     {
@@ -7751,19 +7751,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 846,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 9,
       "createdAt": "2026-09-19T09:05:24.813Z",
       "updatedAt": "2026-10-02T02:42:59.514Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 846,
+        "responseTime": 9,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7771,7 +7771,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.514Z"
+        "checkedAt": "2026-10-06T18:21:33.801Z"
       }
     },
     {
@@ -7813,19 +7813,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 822,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 34,
       "createdAt": "2026-09-19T09:05:26.194Z",
       "updatedAt": "2026-10-02T08:40:02.657Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 822,
+        "responseTime": 34,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -7833,7 +7833,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.656Z"
+        "checkedAt": "2026-10-06T18:21:33.801Z"
       }
     },
     {
@@ -7875,15 +7875,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 256,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 337,
       "createdAt": "2026-09-19T09:05:26.360Z",
       "updatedAt": "2026-10-02T08:34:54.759Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 256,
+        "responseTime": 337,
         "playlistType": "MASTER",
         "isLive": false,
         "segmentCount": 75,
@@ -7895,7 +7895,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:34:54.754Z"
+        "checkedAt": "2026-10-06T18:21:31.368Z"
       }
     },
     {
@@ -7906,15 +7906,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 236,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 496,
       "createdAt": "2026-09-19T09:05:26.386Z",
       "updatedAt": "2026-10-02T08:34:54.806Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 236,
+        "responseTime": 496,
         "playlistType": "MASTER",
         "isLive": false,
         "segmentCount": 75,
@@ -7926,7 +7926,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:34:54.805Z"
+        "checkedAt": "2026-10-06T18:21:32.624Z"
       }
     },
     {
@@ -7935,29 +7935,29 @@
       "url": "http://202.70.146.135:8000/play/a05z/index.m3u8",
       "priority": 1,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 465,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:26.873Z",
       "updatedAt": "2026-10-02T02:48:46.106Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 465,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 4,
-        "newSegmentDetected": true,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 268,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T02:48:46.106Z"
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:21:30.423Z"
       }
     },
     {
@@ -8154,15 +8154,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 824,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 114,
       "createdAt": "2026-09-19T09:05:30.179Z",
       "updatedAt": "2026-10-02T08:40:02.664Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 824,
+        "responseTime": 114,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -8174,7 +8174,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.663Z"
+        "checkedAt": "2026-10-06T18:21:33.824Z"
       }
     },
     {
@@ -8619,15 +8619,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 72,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 326,
       "createdAt": "2026-09-19T09:05:36.274Z",
       "updatedAt": "2026-10-02T08:00:33.270Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 72,
+        "responseTime": 326,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 8,
@@ -8639,7 +8639,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:00:33.269Z"
+        "checkedAt": "2026-10-06T18:21:39.219Z"
       }
     },
     {
@@ -8741,17 +8741,17 @@
       "url": "https://cdn2.zohanayaan.com:1686/hls/ptvpk.m3u8?md5=gq1y7oqGy6g9U97VHXqZGA&expires=1789780831",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 18,
+      "failedAttempts": 20,
       "firstFailedAt": "2026-09-19T09:05:49.383Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:49.383Z",
       "updatedAt": "2026-10-02T07:59:54.144Z",
       "lastCheck": {
-        "healthStatus": "TIMEOUT",
-        "errorCode": "TIMEOUT",
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
         "httpStatus": null,
-        "responseTime": 31821,
+        "responseTime": 10612,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -8762,8 +8762,8 @@
         "codec": null,
         "fps": null,
         "attempts": 3,
-        "error": "Request timed out",
-        "checkedAt": "2026-10-02T07:59:54.143Z"
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:22:09.921Z"
       }
     },
     {
@@ -8772,17 +8772,17 @@
       "url": "https://cdn1.zohanayaan.com:1686/hls/willowusa.m3u8?md5=-8wG9zZhSLxM-GoGEg-0Kw&expires=1789780831",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 24,
+      "failedAttempts": 26,
       "firstFailedAt": "2026-09-19T09:05:53.403Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:53.403Z",
       "updatedAt": "2026-10-02T08:00:33.246Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "CONNECTION_REFUSED",
         "httpStatus": null,
-        "responseTime": 104,
+        "responseTime": 3035,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -8794,7 +8794,7 @@
         "fps": null,
         "attempts": 3,
         "error": "Connection failed (ECONNREFUSED)",
-        "checkedAt": "2026-10-02T08:00:33.245Z"
+        "checkedAt": "2026-10-06T18:21:53.658Z"
       }
     },
     {
@@ -8803,17 +8803,17 @@
       "url": "https://cdn2.zohanayaan.com:1686/hls/willowextra.m3u8?md5=5DYmSaqlapnnrEsb5PFcig&expires=1789780832",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 26,
+      "failedAttempts": 28,
       "firstFailedAt": "2026-09-19T09:05:57.417Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:05:57.418Z",
       "updatedAt": "2026-10-02T08:36:33.937Z",
       "lastCheck": {
-        "healthStatus": "TIMEOUT",
-        "errorCode": "TIMEOUT",
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
         "httpStatus": null,
-        "responseTime": 35093,
+        "responseTime": 10549,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -8824,8 +8824,8 @@
         "codec": null,
         "fps": null,
         "attempts": 3,
-        "error": "Request timed out",
-        "checkedAt": "2026-10-02T08:36:33.936Z"
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:22:09.921Z"
       }
     },
     {
@@ -10942,29 +10942,29 @@
       "url": "http://tvsen5.aynascope.net/cXPB2LKkErN9/index.m3u8",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 3,
+      "failedAttempts": 5,
       "firstFailedAt": "2026-09-30T15:59:25.015Z",
-      "lastCheckedAt": "2026-10-02T03:40:28.059Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T09:08:33.304Z",
       "updatedAt": "2026-10-02T03:44:14.466Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 554,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 6,
-        "newSegmentDetected": false,
+        "healthStatus": "OFFLINE",
+        "errorCode": "PLAYLIST_NOT_FOUND",
+        "httpStatus": 404,
+        "responseTime": 6,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-09-22T18:00:54.523Z"
+        "attempts": 3,
+        "error": "HTTP 404",
+        "checkedAt": "2026-10-06T18:21:38.319Z"
       }
     },
     {
@@ -11097,9 +11097,9 @@
       "url": "https://stream.ottplus.live/live/ten_2_hd_abr/live/ten_2_hd_720/chunks.m3u8",
       "priority": 2,
       "status": "active",
-      "failedAttempts": 2,
-      "firstFailedAt": "2026-09-30T16:02:23.176Z",
-      "lastCheckedAt": "2026-10-02T03:46:35.580Z",
+      "failedAttempts": 0,
+      "firstFailedAt": null,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 100,
       "createdAt": "2026-09-19T09:08:35.671Z",
       "updatedAt": "2026-10-02T03:47:40.292Z",
@@ -11107,7 +11107,7 @@
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 749,
+        "responseTime": 100,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 3,
@@ -11119,7 +11119,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-09-22T18:00:55.488Z"
+        "checkedAt": "2026-10-06T18:21:38.128Z"
       }
     },
     {
@@ -11967,19 +11967,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 816,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 8,
       "createdAt": "2026-09-19T10:47:05.083Z",
       "updatedAt": "2026-10-02T02:49:23.482Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 816,
+        "responseTime": 8,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -11987,7 +11987,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.481Z"
+        "checkedAt": "2026-10-06T18:21:38.138Z"
       }
     },
     {
@@ -12029,15 +12029,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 532,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 478,
       "createdAt": "2026-09-19T10:47:05.765Z",
       "updatedAt": "2026-10-02T08:36:51.378Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 532,
+        "responseTime": 478,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 10,
@@ -12049,7 +12049,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:36:51.378Z"
+        "checkedAt": "2026-10-06T18:21:39.107Z"
       }
     },
     {
@@ -12089,17 +12089,17 @@
       "url": "http://tvn3.chowdhury-shaheb.com/dbc/index.m3u8",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 32,
+      "failedAttempts": 34,
       "firstFailedAt": "2026-09-19T10:47:09.925Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:47:09.926Z",
       "updatedAt": "2026-10-02T07:59:20.708Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "PLAYLIST_NOT_FOUND",
         "httpStatus": 404,
-        "responseTime": 568,
+        "responseTime": 7,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -12111,7 +12111,7 @@
         "fps": null,
         "attempts": 3,
         "error": "HTTP 404",
-        "checkedAt": "2026-10-02T07:59:20.708Z"
+        "checkedAt": "2026-10-06T18:21:38.695Z"
       }
     },
     {
@@ -12151,17 +12151,17 @@
       "url": "https://tplay.live/out/bangladesh/ekhontv.index.m3u8",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 29,
+      "failedAttempts": 31,
       "firstFailedAt": "2026-09-19T10:47:10.120Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:47:10.120Z",
       "updatedAt": "2026-10-02T02:43:03.874Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "UNKNOWN_ERROR",
         "httpStatus": null,
-        "responseTime": 38,
+        "responseTime": 8461,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -12173,7 +12173,7 @@
         "fps": null,
         "attempts": 3,
         "error": "fetch failed",
-        "checkedAt": "2026-10-02T02:43:03.873Z"
+        "checkedAt": "2026-10-06T18:21:51.627Z"
       }
     },
     {
@@ -12184,19 +12184,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 1235,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 246,
       "createdAt": "2026-09-19T10:47:11.387Z",
       "updatedAt": "2026-10-02T02:41:13.896Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 1235,
+        "responseTime": 246,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12204,7 +12204,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:41:13.896Z"
+        "checkedAt": "2026-10-06T18:21:38.201Z"
       }
     },
     {
@@ -12213,17 +12213,17 @@
       "url": "http://tvn1.chowdhury-shaheb.com/gazitv/index.m3u8",
       "priority": 5,
       "status": "broken",
-      "failedAttempts": 30,
+      "failedAttempts": 32,
       "firstFailedAt": "2026-09-19T10:47:15.401Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:47:15.402Z",
       "updatedAt": "2026-10-02T02:38:57.648Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "PLAYLIST_NOT_FOUND",
         "httpStatus": 404,
-        "responseTime": 863,
+        "responseTime": 28,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -12235,7 +12235,7 @@
         "fps": null,
         "attempts": 3,
         "error": "HTTP 404",
-        "checkedAt": "2026-10-02T02:38:57.647Z"
+        "checkedAt": "2026-10-06T18:21:38.856Z"
       }
     },
     {
@@ -12277,19 +12277,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 596,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 292,
       "createdAt": "2026-09-19T10:47:16.239Z",
       "updatedAt": "2026-10-02T02:43:40.265Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 596,
+        "responseTime": 292,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12297,7 +12297,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.265Z"
+        "checkedAt": "2026-10-06T18:21:38.118Z"
       }
     },
     {
@@ -12308,19 +12308,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 276,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 294,
       "createdAt": "2026-09-19T10:47:17.056Z",
       "updatedAt": "2026-10-02T02:43:40.504Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 276,
+        "responseTime": 294,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12328,7 +12328,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.503Z"
+        "checkedAt": "2026-10-06T18:21:38.226Z"
       }
     },
     {
@@ -12370,15 +12370,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 145,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 571,
       "createdAt": "2026-09-19T10:47:17.729Z",
       "updatedAt": "2026-10-02T02:43:03.938Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 145,
+        "responseTime": 571,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 4,
@@ -12390,7 +12390,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:03.937Z"
+        "checkedAt": "2026-10-06T18:21:38.771Z"
       }
     },
     {
@@ -12463,15 +12463,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 846,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 34,
       "createdAt": "2026-09-19T10:47:18.949Z",
       "updatedAt": "2026-10-02T02:42:59.517Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 846,
+        "responseTime": 34,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -12483,7 +12483,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.516Z"
+        "checkedAt": "2026-10-06T18:22:13.687Z"
       }
     },
     {
@@ -12525,19 +12525,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 572,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 60,
       "createdAt": "2026-09-19T10:47:21.242Z",
       "updatedAt": "2026-10-02T02:49:23.252Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 572,
+        "responseTime": 60,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12545,7 +12545,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.251Z"
+        "checkedAt": "2026-10-06T18:22:13.723Z"
       }
     },
     {
@@ -12554,29 +12554,29 @@
       "url": "https://app24.jagobd.com.bd/c3VydmVyX8RpbEU9Mi8xNy8yMFDEEHGcfRgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcEdsEfeDeKiNkVN3PTOmdFseWRtaW51aiPhnPTI2/rtv-sg.stream/index.m3u8",
       "priority": 5,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 292,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:47:21.470Z",
       "updatedAt": "2026-10-02T02:49:22.877Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 292,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 4,
+        "healthStatus": "OFFLINE",
+        "errorCode": "TLS_FAILURE",
+        "httpStatus": null,
+        "responseTime": 391,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
         "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T02:49:22.877Z"
+        "attempts": 3,
+        "error": "TLS error (CERT_HAS_EXPIRED)",
+        "checkedAt": "2026-10-06T18:22:15.232Z"
       }
     },
     {
@@ -12587,19 +12587,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 870,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 76,
       "createdAt": "2026-09-19T10:47:21.759Z",
       "updatedAt": "2026-10-02T02:49:23.484Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 870,
+        "responseTime": 76,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12607,7 +12607,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.483Z"
+        "checkedAt": "2026-10-06T18:22:13.701Z"
       }
     },
     {
@@ -12616,17 +12616,17 @@
       "url": "http://tvn3.chowdhury-shaheb.com/rtv/index.m3u8",
       "priority": 6,
       "status": "broken",
-      "failedAttempts": 28,
+      "failedAttempts": 30,
       "firstFailedAt": "2026-09-19T10:47:25.774Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:47:25.774Z",
       "updatedAt": "2026-10-02T02:49:23.197Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "PLAYLIST_NOT_FOUND",
         "httpStatus": 404,
-        "responseTime": 523,
+        "responseTime": 8,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -12638,7 +12638,7 @@
         "fps": null,
         "attempts": 3,
         "error": "HTTP 404",
-        "checkedAt": "2026-10-02T02:49:23.196Z"
+        "checkedAt": "2026-10-06T18:22:14.078Z"
       }
     },
     {
@@ -12802,29 +12802,29 @@
       "url": "https://warm-caverns-48629-92fab798385f.herokuapp.com/https://d36r8jifhgsk5j.cloudfront.net/Willow_TV540p.m3u8",
       "priority": 1,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 71,
+      "failedAttempts": 1,
+      "firstFailedAt": "2026-10-06T18:21:04.845Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:15.677Z",
       "updatedAt": "2026-10-02T07:58:50.353Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
+        "healthStatus": "OFFLINE",
+        "errorCode": "SEGMENTS_UNAVAILABLE",
         "httpStatus": 200,
-        "responseTime": 71,
+        "responseTime": 5993,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 10,
-        "newSegmentDetected": true,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T07:58:50.352Z"
+        "attempts": 3,
+        "error": "Playlist is valid but none of its media segments are downloadable",
+        "checkedAt": "2026-10-06T18:23:08.048Z"
       }
     },
     {
@@ -12895,29 +12895,29 @@
       "url": "https://s1.itcnbd.live/PTV-Sports/tracks-v1a1/mono.m3u8?nocache=1785582200018",
       "priority": 3,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 817,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:17.385Z",
       "updatedAt": "2026-10-02T07:59:20.950Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 817,
-        "playlistType": "MEDIA",
-        "isLive": true,
-        "segmentCount": 4,
-        "newSegmentDetected": true,
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
+        "httpStatus": null,
+        "responseTime": 10391,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T07:59:20.949Z"
+        "attempts": 3,
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:22:45.928Z"
       }
     },
     {
@@ -12928,15 +12928,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 815,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 235,
       "createdAt": "2026-09-19T10:50:17.673Z",
       "updatedAt": "2026-10-02T07:59:20.992Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 815,
+        "responseTime": 235,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -12948,7 +12948,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:20.992Z"
+        "checkedAt": "2026-10-06T18:22:13.738Z"
       }
     },
     {
@@ -12959,19 +12959,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 859,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 234,
       "createdAt": "2026-09-19T10:50:17.964Z",
       "updatedAt": "2026-10-02T07:59:20.957Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 859,
+        "responseTime": 234,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -12979,7 +12979,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:20.957Z"
+        "checkedAt": "2026-10-06T18:22:13.738Z"
       }
     },
     {
@@ -12990,19 +12990,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 837,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 239,
       "createdAt": "2026-09-19T10:50:18.256Z",
       "updatedAt": "2026-10-02T02:42:59.495Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 837,
+        "responseTime": 239,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13010,7 +13010,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.494Z"
+        "checkedAt": "2026-10-06T18:22:13.739Z"
       }
     },
     {
@@ -13021,15 +13021,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 840,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 235,
       "createdAt": "2026-09-19T10:50:19.087Z",
       "updatedAt": "2026-10-02T02:42:59.463Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 840,
+        "responseTime": 235,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -13041,7 +13041,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.462Z"
+        "checkedAt": "2026-10-06T18:22:13.742Z"
       }
     },
     {
@@ -13052,19 +13052,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 852,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 237,
       "createdAt": "2026-09-19T10:50:19.368Z",
       "updatedAt": "2026-10-02T08:37:11.697Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 852,
+        "responseTime": 237,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13072,7 +13072,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:37:11.697Z"
+        "checkedAt": "2026-10-06T18:22:13.904Z"
       }
     },
     {
@@ -13114,19 +13114,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 567,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 235,
       "createdAt": "2026-09-19T10:50:20.202Z",
       "updatedAt": "2026-10-02T02:43:40.262Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 567,
+        "responseTime": 235,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13134,7 +13134,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.262Z"
+        "checkedAt": "2026-10-06T18:22:13.740Z"
       }
     },
     {
@@ -13145,15 +13145,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 299,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 771,
       "createdAt": "2026-09-19T10:50:20.693Z",
       "updatedAt": "2026-10-02T07:59:20.911Z",
       "lastCheck": {
         "healthStatus": "DEGRADED",
         "errorCode": "PARTIAL_SEGMENTS_UNAVAILABLE",
         "httpStatus": 200,
-        "responseTime": 299,
+        "responseTime": 771,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 4,
@@ -13163,9 +13163,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
+        "attempts": 1,
         "error": "1/2 sampled segments failed",
-        "checkedAt": "2026-10-02T07:59:20.911Z"
+        "checkedAt": "2026-10-06T18:22:12.025Z"
       }
     },
     {
@@ -13176,15 +13176,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 814,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 231,
       "createdAt": "2026-09-19T10:50:20.974Z",
       "updatedAt": "2026-10-02T08:00:33.969Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 814,
+        "responseTime": 231,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -13196,7 +13196,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:00:33.969Z"
+        "checkedAt": "2026-10-06T18:22:13.740Z"
       }
     },
     {
@@ -13205,29 +13205,29 @@
       "url": "https://app24.jagobd.com.bd/c3VydmVyX8RpbEU9Mi8xNy8yMFDEEHGcfRgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcEdsEfeDeKiNkVN3PTOmdFseWRtaW51aiPhnPTI2/independent-8-org.stream/tracks-v1a1/mono.m3u8",
       "priority": 2,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 318,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:21.305Z",
       "updatedAt": "2026-10-02T07:59:20.341Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 318,
-        "playlistType": "MEDIA",
-        "isLive": true,
-        "segmentCount": 4,
+        "healthStatus": "OFFLINE",
+        "errorCode": "PLAYLIST_NOT_FOUND",
+        "httpStatus": 404,
+        "responseTime": 10604,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
         "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 2,
-        "error": null,
-        "checkedAt": "2026-10-02T07:59:20.341Z"
+        "attempts": 3,
+        "error": "HTTP 404",
+        "checkedAt": "2026-10-06T18:23:33.669Z"
       }
     },
     {
@@ -13238,19 +13238,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 861,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 59,
       "createdAt": "2026-09-19T10:50:21.591Z",
       "updatedAt": "2026-10-02T08:00:33.949Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 861,
+        "responseTime": 59,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13258,7 +13258,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:00:33.948Z"
+        "checkedAt": "2026-10-06T18:23:11.749Z"
       }
     },
     {
@@ -13267,29 +13267,29 @@
       "url": "http://premiumtvs.space/live/YqXTywueEV/damp2purchase/391.ts",
       "priority": 2,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 680,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:24.770Z",
       "updatedAt": "2026-10-02T08:34:54.765Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 680,
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
+        "httpStatus": null,
+        "responseTime": 10574,
         "playlistType": null,
         "isLive": true,
         "segmentCount": null,
         "newSegmentDetected": null,
-        "video": true,
-        "audio": true,
+        "video": null,
+        "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T08:34:54.764Z"
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:23:18.628Z"
       }
     },
     {
@@ -13300,19 +13300,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 835,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 70,
       "createdAt": "2026-09-19T10:50:25.076Z",
       "updatedAt": "2026-10-02T08:35:32.654Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 835,
+        "responseTime": 70,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13320,7 +13320,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:32.654Z"
+        "checkedAt": "2026-10-06T18:23:11.749Z"
       }
     },
     {
@@ -13331,15 +13331,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 294,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 220,
       "createdAt": "2026-09-19T10:50:25.207Z",
       "updatedAt": "2026-10-02T02:38:57.020Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 294,
+        "responseTime": 220,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 4,
@@ -13351,7 +13351,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.018Z"
+        "checkedAt": "2026-10-06T18:23:12.389Z"
       }
     },
     {
@@ -13362,19 +13362,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 796,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 51,
       "createdAt": "2026-09-19T10:50:25.493Z",
       "updatedAt": "2026-10-02T02:43:40.545Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 796,
+        "responseTime": 51,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13382,7 +13382,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.544Z"
+        "checkedAt": "2026-10-06T18:23:11.706Z"
       }
     },
     {
@@ -13393,15 +13393,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 872,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 51,
       "createdAt": "2026-09-19T10:50:25.773Z",
       "updatedAt": "2026-10-02T02:38:57.631Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 872,
+        "responseTime": 51,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -13413,7 +13413,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.630Z"
+        "checkedAt": "2026-10-06T18:23:11.729Z"
       }
     },
     {
@@ -13424,19 +13424,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 820,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 51,
       "createdAt": "2026-09-19T10:50:26.058Z",
       "updatedAt": "2026-10-02T08:40:02.646Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 820,
+        "responseTime": 51,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13444,7 +13444,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.645Z"
+        "checkedAt": "2026-10-06T18:23:11.729Z"
       }
     },
     {
@@ -13455,15 +13455,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 736,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 46,
       "createdAt": "2026-09-19T10:50:26.798Z",
       "updatedAt": "2026-10-02T08:37:11.577Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 736,
+        "responseTime": 46,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 3,
@@ -13475,7 +13475,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:37:11.576Z"
+        "checkedAt": "2026-10-06T18:23:11.696Z"
       }
     },
     {
@@ -13486,19 +13486,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 887,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 55,
       "createdAt": "2026-09-19T10:50:27.077Z",
       "updatedAt": "2026-10-02T02:38:57.633Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 887,
+        "responseTime": 55,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13506,7 +13506,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.633Z"
+        "checkedAt": "2026-10-06T18:23:11.701Z"
       }
     },
     {
@@ -13546,29 +13546,29 @@
       "url": "http://premiumtvs.space/live/YqXTywueEV/damp2purchase/434.ts",
       "priority": 2,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T09:38:36.366Z",
-      "latency": 1604,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:28.745Z",
       "updatedAt": "2026-10-02T09:38:38.355Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 1604,
+        "healthStatus": "OFFLINE",
+        "errorCode": "UNKNOWN_ERROR",
+        "httpStatus": null,
+        "responseTime": 10558,
         "playlistType": null,
         "isLive": true,
         "segmentCount": null,
         "newSegmentDetected": null,
-        "video": true,
-        "audio": true,
+        "video": null,
+        "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T09:38:38.349Z"
+        "error": "fetch failed",
+        "checkedAt": "2026-10-06T18:23:18.627Z"
       }
     },
     {
@@ -13672,19 +13672,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 833,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 89,
       "createdAt": "2026-09-19T10:50:31.175Z",
       "updatedAt": "2026-10-02T02:42:59.492Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 833,
+        "responseTime": 89,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13692,7 +13692,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:59.491Z"
+        "checkedAt": "2026-10-06T18:23:11.976Z"
       }
     },
     {
@@ -13703,19 +13703,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 893,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 87,
       "createdAt": "2026-09-19T10:50:31.455Z",
       "updatedAt": "2026-10-02T07:59:20.974Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 893,
+        "responseTime": 87,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -13723,7 +13723,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:20.974Z"
+        "checkedAt": "2026-10-06T18:23:11.773Z"
       }
     },
     {
@@ -13887,29 +13887,29 @@
       "url": "https://app24.jagobd.com.bd/c3VydmVyX8RpbEU9Mi8xNy8yMFDEEHGcfRgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcEdsEfeDeKiNkVN3PTOmdFseWRtaW51aiPhnPTI2/starnewsbd.stream/playlist.m3u8",
       "priority": 1,
       "status": "active",
-      "failedAttempts": 2,
-      "firstFailedAt": "2026-10-02T02:38:12.912Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "failedAttempts": 0,
+      "firstFailedAt": null,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 569,
       "createdAt": "2026-09-19T10:50:34.082Z",
       "updatedAt": "2026-10-02T08:35:10.930Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "TLS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 211,
-        "playlistType": null,
-        "isLive": null,
-        "segmentCount": null,
-        "newSegmentDetected": null,
+        "healthStatus": "ONLINE",
+        "errorCode": "OK",
+        "httpStatus": 200,
+        "responseTime": 569,
+        "playlistType": "MASTER",
+        "isLive": true,
+        "segmentCount": 4,
+        "newSegmentDetected": true,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "TLS error (CERT_HAS_EXPIRED)",
-        "checkedAt": "2026-10-02T08:35:10.929Z"
+        "attempts": 2,
+        "error": null,
+        "checkedAt": "2026-10-06T18:23:15.300Z"
       }
     },
     {
@@ -14817,29 +14817,29 @@
       "url": "http://202.70.146.135:8000/play/a009/index.m3u8",
       "priority": 2,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 453,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:50:54.630Z",
       "updatedAt": "2026-10-02T08:35:32.281Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 453,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 4,
-        "newSegmentDetected": true,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 277,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T08:35:32.281Z"
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:23:08.348Z"
       }
     },
     {
@@ -15034,29 +15034,29 @@
       "url": "http://flowutc.com/live/MAGTF8AV71/bUiJLEJKG5/78981.ts",
       "priority": 4,
       "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 886,
+      "failedAttempts": 2,
+      "firstFailedAt": "2026-10-06T15:42:43.715Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-19T10:51:01.495Z",
       "updatedAt": "2026-10-02T07:59:55.052Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 886,
+        "healthStatus": "OFFLINE",
+        "errorCode": "SERVER_ERROR",
+        "httpStatus": 401,
+        "responseTime": 900,
         "playlistType": null,
         "isLive": true,
         "segmentCount": null,
         "newSegmentDetected": null,
-        "video": true,
-        "audio": true,
+        "video": null,
+        "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T07:59:55.052Z"
+        "error": "HTTP 401",
+        "checkedAt": "2026-10-06T18:23:34.569Z"
       }
     },
     {
@@ -15157,30 +15157,30 @@
       "channelId": "6aae505692777412c50841b7",
       "url": "http://elitenova.net/live/MAGTF8AV71/bUiJLEJKG5/510485.ts",
       "priority": 2,
-      "status": "broken",
-      "failedAttempts": 32,
-      "firstFailedAt": "2026-09-19T10:51:03.906Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "status": "active",
+      "failedAttempts": 0,
+      "firstFailedAt": null,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1524,
       "createdAt": "2026-09-19T10:51:03.906Z",
       "updatedAt": "2026-10-02T07:59:54.409Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "CONNECTION_REFUSED",
-        "httpStatus": null,
-        "responseTime": 241,
+        "healthStatus": "ONLINE",
+        "errorCode": "OK",
+        "httpStatus": 200,
+        "responseTime": 1524,
         "playlistType": null,
         "isLive": true,
         "segmentCount": null,
         "newSegmentDetected": null,
-        "video": null,
-        "audio": null,
+        "video": true,
+        "audio": true,
         "resolution": null,
         "codec": null,
         "fps": null,
         "attempts": 1,
-        "error": "Connection failed (ECONNRESET)",
-        "checkedAt": "2026-10-02T07:59:54.408Z"
+        "error": null,
+        "checkedAt": "2026-10-06T18:23:35.196Z"
       }
     },
     {
@@ -16553,17 +16553,17 @@
       "url": "http://92news.vdn.dstreamone.net/92newshd/92hd/playlist.m3u8",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 17,
+      "failedAttempts": 19,
       "firstFailedAt": "2026-09-21T14:46:54.054Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-21T14:46:54.055Z",
       "updatedAt": "2026-10-02T02:42:24.668Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "NO_PLAYABLE_VARIANT",
         "httpStatus": 200,
-        "responseTime": 37,
+        "responseTime": 839,
         "playlistType": "MASTER",
         "isLive": null,
         "segmentCount": null,
@@ -16575,7 +16575,7 @@
         "fps": null,
         "attempts": 3,
         "error": "None of the declared variant streams were reachable",
-        "checkedAt": "2026-10-02T02:42:24.667Z"
+        "checkedAt": "2026-10-06T18:24:05.124Z"
       }
     },
     {
@@ -16586,15 +16586,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 578,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1497,
       "createdAt": "2026-09-21T14:46:59.114Z",
       "updatedAt": "2026-10-02T02:45:44.227Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 578,
+        "responseTime": 1497,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 4,
@@ -16606,7 +16606,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:45:44.226Z"
+        "checkedAt": "2026-10-06T18:23:41.157Z"
       }
     },
     {
@@ -16615,17 +16615,17 @@
       "url": "http://115.42.65.142:9981/stream/channelid/750987367",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 18,
+      "failedAttempts": 20,
       "firstFailedAt": "2026-09-21T14:47:27.052Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-21T14:47:27.053Z",
       "updatedAt": "2026-10-02T02:47:00.681Z",
       "lastCheck": {
-        "healthStatus": "TIMEOUT",
-        "errorCode": "TIMEOUT",
-        "httpStatus": null,
-        "responseTime": 32587,
+        "healthStatus": "OFFLINE",
+        "errorCode": "SERVER_ERROR",
+        "httpStatus": 400,
+        "responseTime": 293,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -16636,8 +16636,8 @@
         "codec": null,
         "fps": null,
         "attempts": 3,
-        "error": "Request timed out",
-        "checkedAt": "2026-10-02T02:47:00.680Z"
+        "error": "HTTP 400",
+        "checkedAt": "2026-10-06T18:23:38.572Z"
       }
     },
     {
@@ -16739,17 +16739,17 @@
       "url": "https://cdn07lhr.tamashaweb.com:8087/jazzauth/vsat-arynews-abr/live/vsat-arynews-H/chunks_dvr_timeshift-0-3600.m3u8",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 19,
+      "failedAttempts": 21,
       "firstFailedAt": "2026-09-21T14:48:32.372Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-21T14:48:32.373Z",
       "updatedAt": "2026-10-02T02:45:02.720Z",
       "lastCheck": {
         "healthStatus": "BLOCKED",
         "errorCode": "ACCESS_DENIED",
         "httpStatus": 403,
-        "responseTime": 1047,
+        "responseTime": 1014,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -16761,7 +16761,7 @@
         "fps": null,
         "attempts": 1,
         "error": "HTTP 403",
-        "checkedAt": "2026-10-02T02:45:02.719Z"
+        "checkedAt": "2026-10-06T18:23:34.688Z"
       }
     },
     {
@@ -16834,15 +16834,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 780,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1210,
       "createdAt": "2026-09-21T14:49:11.378Z",
       "updatedAt": "2026-10-02T02:48:46.104Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 780,
+        "responseTime": 1210,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 3,
@@ -16854,7 +16854,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:48:46.104Z"
+        "checkedAt": "2026-10-06T18:23:40.780Z"
       }
     },
     {
@@ -16863,17 +16863,17 @@
       "url": "http://103.86.135.164:9981/stream/channelid/2024790699?profile=pass&ticket=CAC87CD3CF8747A13FB03B91C9BE860F93CD615C",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 18,
+      "failedAttempts": 20,
       "firstFailedAt": "2026-09-21T14:49:16.944Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-21T14:49:16.945Z",
       "updatedAt": "2026-10-02T02:45:44.101Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "SERVER_ERROR",
         "httpStatus": 400,
-        "responseTime": 442,
+        "responseTime": 297,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -16885,7 +16885,7 @@
         "fps": null,
         "attempts": 3,
         "error": "HTTP 400",
-        "checkedAt": "2026-10-02T02:45:44.101Z"
+        "checkedAt": "2026-10-06T18:23:38.998Z"
       }
     },
     {
@@ -16958,19 +16958,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 524,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1565,
       "createdAt": "2026-09-21T14:49:56.075Z",
       "updatedAt": "2026-10-02T08:40:14.280Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 524,
+        "responseTime": 1565,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 3,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -16978,7 +16978,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:14.279Z"
+        "checkedAt": "2026-10-06T18:23:41.234Z"
       }
     },
     {
@@ -17578,46 +17578,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 1600,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1576,
       "createdAt": "2026-09-21T14:55:28.589Z",
       "updatedAt": "2026-10-02T02:48:46.775Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 1600,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 32,
-        "newSegmentDetected": true,
-        "video": null,
-        "audio": null,
-        "resolution": null,
-        "codec": null,
-        "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T02:48:46.775Z"
-      }
-    },
-    {
-      "_id": "6ab145671c1c145dc3d92631",
-      "channelId": "6ab143e290368a7c0a0e4698",
-      "url": "https://ukintl.dunyanews.tv/liveuk/ngrp:dunyalive_all/playlist.m3u8",
-      "priority": 4,
-      "status": "active",
-      "failedAttempts": 0,
-      "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 713,
-      "createdAt": "2026-09-21T14:55:35.784Z",
-      "updatedAt": "2026-10-02T08:40:14.281Z",
-      "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 713,
+        "responseTime": 1576,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 3,
@@ -17629,7 +17598,38 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:14.281Z"
+        "checkedAt": "2026-10-06T18:23:41.213Z"
+      }
+    },
+    {
+      "_id": "6ab145671c1c145dc3d92631",
+      "channelId": "6ab143e290368a7c0a0e4698",
+      "url": "https://ukintl.dunyanews.tv/liveuk/ngrp:dunyalive_all/playlist.m3u8",
+      "priority": 4,
+      "status": "active",
+      "failedAttempts": 0,
+      "firstFailedAt": null,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 1893,
+      "createdAt": "2026-09-21T14:55:35.784Z",
+      "updatedAt": "2026-10-02T08:40:14.281Z",
+      "lastCheck": {
+        "healthStatus": "ONLINE",
+        "errorCode": "OK",
+        "httpStatus": 200,
+        "responseTime": 1893,
+        "playlistType": "MASTER",
+        "isLive": true,
+        "segmentCount": 3,
+        "newSegmentDetected": true,
+        "video": null,
+        "audio": null,
+        "resolution": null,
+        "codec": null,
+        "fps": null,
+        "attempts": 1,
+        "error": null,
+        "checkedAt": "2026-10-06T18:23:41.466Z"
       }
     },
     {
@@ -18167,15 +18167,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 895,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 640,
       "createdAt": "2026-09-22T08:30:14.282Z",
       "updatedAt": "2026-10-02T08:35:32.652Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 895,
+        "responseTime": 640,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
@@ -18187,7 +18187,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:32.651Z"
+        "checkedAt": "2026-10-06T18:23:37.936Z"
       }
     },
     {
@@ -18198,15 +18198,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 219,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 695,
       "createdAt": "2026-09-22T08:32:04.242Z",
       "updatedAt": "2026-10-02T08:35:59.083Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 219,
+        "responseTime": 695,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 3,
@@ -18216,9 +18216,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 2,
+        "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:59.083Z"
+        "checkedAt": "2026-10-06T18:23:37.932Z"
       }
     },
     {
@@ -18229,15 +18229,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 214,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 693,
       "createdAt": "2026-09-22T08:33:05.245Z",
       "updatedAt": "2026-10-02T08:35:59.086Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 214,
+        "responseTime": 693,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 3,
@@ -18247,9 +18247,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 2,
+        "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:59.086Z"
+        "checkedAt": "2026-10-06T18:23:37.935Z"
       }
     },
     {
@@ -18260,15 +18260,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 838,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 696,
       "createdAt": "2026-09-22T08:34:13.882Z",
       "updatedAt": "2026-10-02T08:40:02.686Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 838,
+        "responseTime": 696,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 6,
@@ -18280,7 +18280,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.686Z"
+        "checkedAt": "2026-10-06T18:23:37.976Z"
       }
     },
     {
@@ -18291,15 +18291,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 810,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 29,
       "createdAt": "2026-09-22T08:36:25.817Z",
       "updatedAt": "2026-10-02T02:41:13.517Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 810,
+        "responseTime": 29,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 3,
@@ -18311,7 +18311,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:41:13.517Z"
+        "checkedAt": "2026-10-06T18:24:08.823Z"
       }
     },
     {
@@ -18322,19 +18322,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 885,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 31,
       "createdAt": "2026-09-22T08:39:00.414Z",
       "updatedAt": "2026-10-02T07:59:20.954Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 885,
+        "responseTime": 31,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18342,7 +18342,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:20.954Z"
+        "checkedAt": "2026-10-06T18:24:08.710Z"
       }
     },
     {
@@ -18353,19 +18353,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 811,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 33,
       "createdAt": "2026-09-22T08:39:38.900Z",
       "updatedAt": "2026-10-02T08:00:33.971Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 811,
+        "responseTime": 33,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18373,7 +18373,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:00:33.971Z"
+        "checkedAt": "2026-10-06T18:24:08.828Z"
       }
     },
     {
@@ -18384,15 +18384,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 1198,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 150,
       "createdAt": "2026-09-22T08:40:39.877Z",
       "updatedAt": "2026-10-02T02:43:40.927Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 1198,
+        "responseTime": 150,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 4,
@@ -18404,7 +18404,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:43:40.926Z"
+        "checkedAt": "2026-10-06T18:24:08.940Z"
       }
     },
     {
@@ -18415,19 +18415,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 828,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 34,
       "createdAt": "2026-09-22T08:41:48.336Z",
       "updatedAt": "2026-10-02T02:42:58.675Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 828,
+        "responseTime": 34,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": null,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18435,7 +18435,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:42:58.674Z"
+        "checkedAt": "2026-10-06T18:24:08.798Z"
       }
     },
     {
@@ -18446,19 +18446,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 870,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 98,
       "createdAt": "2026-09-22T08:42:27.361Z",
       "updatedAt": "2026-10-02T07:59:21.001Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 870,
+        "responseTime": 98,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18466,7 +18466,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:21.001Z"
+        "checkedAt": "2026-10-06T18:24:08.913Z"
       }
     },
     {
@@ -18477,15 +18477,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 182,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 241,
       "createdAt": "2026-09-22T08:43:16.620Z",
       "updatedAt": "2026-10-02T02:38:57.078Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 182,
+        "responseTime": 241,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 4,
@@ -18497,7 +18497,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.077Z"
+        "checkedAt": "2026-10-06T18:24:09.418Z"
       }
     },
     {
@@ -18508,15 +18508,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 869,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 79,
       "createdAt": "2026-09-22T08:43:47.781Z",
       "updatedAt": "2026-10-02T02:49:23.525Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 869,
+        "responseTime": 79,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
@@ -18528,7 +18528,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:49:23.524Z"
+        "checkedAt": "2026-10-06T18:24:08.827Z"
       }
     },
     {
@@ -18537,17 +18537,17 @@
       "url": "https://footfytv.pro/proxy/direct?url=https%3A%2F%2Fapp.ncare.live%2Fc3VydmVyX8RpbEU9Mi8xNy8yMDE0GIDU6RgzQ6NTAgdEoaeFzbF92YWxIZTO0U0ezN1IzMyfvcGVMZEJCTEFWeVN3PTOmdFsaWRtaW51aiPhnPTI2%2Fgazibdz.stream%2Flive-orgin%2Fgazibdz.stream%2Fchunks.m3u8%3Fnimblesessionid%3D1217941325",
       "priority": 6,
       "status": "broken",
-      "failedAttempts": 14,
+      "failedAttempts": 16,
       "firstFailedAt": "2026-09-22T10:11:32.309Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-22T08:54:33.642Z",
       "updatedAt": "2026-10-02T02:38:57.180Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "SERVER_ERROR",
-        "httpStatus": 503,
-        "responseTime": 395,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 880,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -18557,9 +18557,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "HTTP 503",
-        "checkedAt": "2026-10-02T02:38:57.179Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:06.014Z"
       }
     },
     {
@@ -18570,19 +18570,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 869,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 97,
       "createdAt": "2026-09-22T08:59:58.234Z",
       "updatedAt": "2026-10-02T07:58:51.046Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 869,
+        "responseTime": 97,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18590,7 +18590,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:58:51.045Z"
+        "checkedAt": "2026-10-06T18:24:08.847Z"
       }
     },
     {
@@ -18601,19 +18601,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 835,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 105,
       "createdAt": "2026-09-22T09:00:59.824Z",
       "updatedAt": "2026-10-02T07:59:20.952Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 835,
+        "responseTime": 105,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -18621,7 +18621,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T07:59:20.952Z"
+        "checkedAt": "2026-10-06T18:24:08.851Z"
       }
     },
     {
@@ -18663,15 +18663,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 610,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 710,
       "createdAt": "2026-09-22T09:31:39.386Z",
       "updatedAt": "2026-10-02T08:34:55.328Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 610,
+        "responseTime": 710,
         "playlistType": "MEDIA",
         "isLive": false,
         "segmentCount": 75,
@@ -18683,7 +18683,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:34:55.327Z"
+        "checkedAt": "2026-10-06T18:24:06.822Z"
       }
     },
     {
@@ -18694,15 +18694,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 310,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 324,
       "createdAt": "2026-09-22T18:57:14.903Z",
       "updatedAt": "2026-10-02T02:38:57.030Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 310,
+        "responseTime": 324,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 4,
@@ -18714,7 +18714,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:38:57.029Z"
+        "checkedAt": "2026-10-06T18:24:09.418Z"
       }
     },
     {
@@ -19934,7 +19934,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T22:58:26.951Z",
       "updatedAt": "2026-10-02T02:47:00.698Z",
@@ -19954,7 +19954,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:47:00.697Z"
+        "checkedAt": "2026-10-06T18:24:05.136Z"
       }
     },
     {
@@ -19965,7 +19965,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.789Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -19985,7 +19985,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:05.136Z"
       }
     },
     {
@@ -19996,7 +19996,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.802Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20016,7 +20016,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.733Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20027,7 +20027,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.832Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20047,7 +20047,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20058,7 +20058,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.846Z",
       "updatedAt": "2026-10-02T08:36:33.969Z",
@@ -20078,7 +20078,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:36:33.967Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20089,7 +20089,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.863Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20109,7 +20109,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20120,7 +20120,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:05:22.875Z",
       "updatedAt": "2026-10-02T02:45:01.682Z",
@@ -20140,7 +20140,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:45:01.674Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20151,7 +20151,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:35:35.111Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20171,7 +20171,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20182,7 +20182,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:35:35.129Z",
       "updatedAt": "2026-10-02T02:45:01.682Z",
@@ -20202,7 +20202,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T02:45:01.676Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20213,7 +20213,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:35:35.144Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20233,7 +20233,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20244,7 +20244,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:35:35.162Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20264,7 +20264,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20275,7 +20275,7 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
       "latency": 1,
       "createdAt": "2026-09-23T23:35:35.180Z",
       "updatedAt": "2026-10-02T08:40:02.736Z",
@@ -20295,7 +20295,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:02.731Z"
+        "checkedAt": "2026-10-06T18:24:09.419Z"
       }
     },
     {
@@ -20676,17 +20676,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/fifa_world_cup/playlist.m3u8?edge-cache-token=Expires=1790298033~Starts=1790294433~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=r-eAnyerykuFQ-OokUwStd47Uta00ll5PQf8InGr8TDtsBcdCHth2yEfpHwXAJt946UR-es9v5Xk0pel9jn4AA",
       "priority": 1,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T10:08:10.341Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:55:08.103Z",
       "updatedAt": "2026-10-02T08:40:13.847Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 5,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 378,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -20696,9 +20696,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:40:13.847Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.797Z"
       }
     },
     {
@@ -20738,17 +20738,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/somoy_tv/playlist.m3u8?edge-cache-token=Expires=1790298033~Starts=1790294433~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=r-eAnyerykuFQ-OokUwStd47Uta00ll5PQf8InGr8TDtsBcdCHth2yEfpHwXAJt946UR-es9v5Xk0pel9jn4AA",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:55:19.943Z",
       "updatedAt": "2026-10-02T07:59:20.151Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 13,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 389,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -20758,9 +20758,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T07:59:20.150Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.810Z"
       }
     },
     {
@@ -20769,17 +20769,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/jamuna_tv/playlist.m3u8?edge-cache-token=Expires=1790298033~Starts=1790294433~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=r-eAnyerykuFQ-OokUwStd47Uta00ll5PQf8InGr8TDtsBcdCHth2yEfpHwXAJt946UR-es9v5Xk0pel9jn4AA",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:55:26.657Z",
       "updatedAt": "2026-10-02T08:35:10.703Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 3,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 382,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -20789,9 +20789,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:35:10.702Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.805Z"
       }
     },
     {
@@ -20831,17 +20831,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/bijoytv/playlist.m3u8?edge-cache-token=Expires=1790298034~Starts=1790294434~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=kb9SuQ0TDkIDvHvGJ-BGZ9Qif1FMLJXewH6yu7Z-p__lN06Gie9WWwO0SoLOQRp4b1MtEemTFF83OGUpgjNXBg",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 10,
+      "failedAttempts": 12,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:55:38.481Z",
       "updatedAt": "2026-10-02T08:35:10.215Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 2,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 380,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -20851,9 +20851,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:35:10.214Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.802Z"
       }
     },
     {
@@ -20862,17 +20862,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/n_tv/playlist.m3u8?edge-cache-token=Expires=1790298034~Starts=1790294434~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=kb9SuQ0TDkIDvHvGJ-BGZ9Qif1FMLJXewH6yu7Z-p__lN06Gie9WWwO0SoLOQRp4b1MtEemTFF83OGUpgjNXBg",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 9,
+      "failedAttempts": 11,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:55:43.832Z",
       "updatedAt": "2026-10-02T02:42:28.068Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 3,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 369,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -20882,9 +20882,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T02:42:28.067Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.792Z"
       }
     },
     {
@@ -20986,17 +20986,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/bangla_tv/playlist.m3u8?edge-cache-token=Expires=1790298034~Starts=1790294434~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=kb9SuQ0TDkIDvHvGJ-BGZ9Qif1FMLJXewH6yu7Z-p__lN06Gie9WWwO0SoLOQRp4b1MtEemTFF83OGUpgjNXBg",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 9,
+      "failedAttempts": 11,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:00.458Z",
       "updatedAt": "2026-10-02T02:42:29.413Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 3,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 132,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21006,9 +21006,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T02:42:29.413Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.942Z"
       }
     },
     {
@@ -21017,17 +21017,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/asian_tv/playlist.m3u8?edge-cache-token=Expires=1790298035~Starts=1790294435~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=v9gpIBUm_UUER7OAaCCOFd7b57kaXchx-KUg2gTwOtmEGQJHm45Aj7q8XS29p7O7Nnc8PRxS4uAqHldSNrNiAw",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 10,
+      "failedAttempts": 12,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-03T01:54:42.133Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:05.287Z",
       "updatedAt": "2026-10-03T01:58:23.533Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 18,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 134,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21037,9 +21037,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-03T01:58:23.526Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.945Z"
       }
     },
     {
@@ -21048,17 +21048,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/channel_i/playlist.m3u8?edge-cache-token=Expires=1790298035~Starts=1790294435~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=v9gpIBUm_UUER7OAaCCOFd7b57kaXchx-KUg2gTwOtmEGQJHm45Aj7q8XS29p7O7Nnc8PRxS4uAqHldSNrNiAw",
       "priority": 4,
       "status": "broken",
-      "failedAttempts": 9,
+      "failedAttempts": 11,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:10.553Z",
       "updatedAt": "2026-10-02T02:42:28.964Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 3,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 134,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21068,9 +21068,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T02:42:28.964Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.945Z"
       }
     },
     {
@@ -21172,17 +21172,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/desh_tv/playlist.m3u8?edge-cache-token=Expires=1790298035~Starts=1790294435~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=v9gpIBUm_UUER7OAaCCOFd7b57kaXchx-KUg2gTwOtmEGQJHm45Aj7q8XS29p7O7Nnc8PRxS4uAqHldSNrNiAw",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 10,
+      "failedAttempts": 12,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:33.204Z",
       "updatedAt": "2026-10-02T08:37:10.868Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 15,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 130,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21192,9 +21192,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:37:10.867Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:09.941Z"
       }
     },
     {
@@ -21203,17 +21203,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/independent_tv/playlist.m3u8?edge-cache-token=Expires=1790298036~Starts=1790294436~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=K1Q1v-NPYhygvUtJIBd4R41ab4MrApn_r8DhzQsekV2GCRyddFp-uIIDxl_RbzSdbqh901GY-fkfi9D0V3NAAg",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:38.103Z",
       "updatedAt": "2026-10-02T08:00:33.166Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 23,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 353,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21223,9 +21223,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:00:33.166Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:10.165Z"
       }
     },
     {
@@ -21234,17 +21234,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/ekhon_tv/playlist.m3u8?edge-cache-token=Expires=1790298036~Starts=1790294436~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=K1Q1v-NPYhygvUtJIBd4R41ab4MrApn_r8DhzQsekV2GCRyddFp-uIIDxl_RbzSdbqh901GY-fkfi9D0V3NAAg",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 10,
+      "failedAttempts": 12,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-03T01:54:42.133Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:43.514Z",
       "updatedAt": "2026-10-03T01:58:23.538Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 34,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 356,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21254,9 +21254,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-03T01:58:23.537Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:10.170Z"
       }
     },
     {
@@ -21265,17 +21265,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/ekattor_tv/playlist.m3u8?edge-cache-token=Expires=1790298036~Starts=1790294436~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=K1Q1v-NPYhygvUtJIBd4R41ab4MrApn_r8DhzQsekV2GCRyddFp-uIIDxl_RbzSdbqh901GY-fkfi9D0V3NAAg",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:56:48.349Z",
       "updatedAt": "2026-10-02T07:58:50.259Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 27,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 353,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21285,9 +21285,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T07:58:50.248Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:10.169Z"
       }
     },
     {
@@ -21836,17 +21836,17 @@
       "url": "https://prod-linear-media.toffeelive.com/cdn/live/zee_bangla/playlist.m3u8?edge-cache-token=Expires=1790298039~Starts=1790294439~URLPrefix=aHR0cHM6Ly9wcm9kLWxpbmVhci1tZWRpYS50b2ZmZWVsaXZlLmNvbQ~Data=eyJzdWJzY3JpYmVyX2lkIjoiMmYyNmEyZmYtODRkYS00NzRiLWJiN2EtMjFlY2VhZTIyNDBmIn0~Signature=O7VivSmqmWlqktDk6ODdOP7hFH6BbHxhIdOpUJww2GIBmgwLRNk3MvetAGn9ugf9Mbb0s07tAp5Jp-sQMQugBg",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T02:37:28.548Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T00:58:21.144Z",
       "updatedAt": "2026-10-02T08:00:33.164Z",
       "lastCheck": {
-        "healthStatus": "OFFLINE",
-        "errorCode": "DNS_FAILURE",
-        "httpStatus": null,
-        "responseTime": 20,
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 335,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -21856,9 +21856,9 @@
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 3,
-        "error": "DNS lookup failed",
-        "checkedAt": "2026-10-02T08:00:33.163Z"
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:10.152Z"
       }
     },
     {
@@ -22841,17 +22841,17 @@
       "url": "https://103.112.63.114:8880/play/6dmTFv8M3ZFF4eiyKkdiKarijYFS7nJrkCZLm532krY/ts",
       "priority": 2,
       "status": "broken",
-      "failedAttempts": 10,
+      "failedAttempts": 12,
       "firstFailedAt": "2026-09-25T15:14:18.095Z",
-      "lastCheckedAt": "2026-10-02T02:38:12.912Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T15:14:18.095Z",
       "updatedAt": "2026-10-02T02:48:09.175Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "TLS_FAILURE",
         "httpStatus": null,
-        "responseTime": 516,
+        "responseTime": 19,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -22863,7 +22863,7 @@
         "fps": null,
         "attempts": 3,
         "error": "TLS error (ERR_TLS_CERT_ALTNAME_INVALID)",
-        "checkedAt": "2026-10-02T02:48:09.175Z"
+        "checkedAt": "2026-10-06T18:24:13.493Z"
       }
     },
     {
@@ -22872,17 +22872,17 @@
       "url": "https://103.112.63.114:8880/play/6dmTFv8M3ZFF4eiyKkdiKVi3Yx9bUDDwS_gARz23eh0/ts",
       "priority": 3,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T15:14:30.791Z",
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T15:14:30.791Z",
       "updatedAt": "2026-10-02T08:37:11.400Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "TLS_FAILURE",
         "httpStatus": null,
-        "responseTime": 546,
+        "responseTime": 18,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -22894,7 +22894,7 @@
         "fps": null,
         "attempts": 3,
         "error": "TLS error (ERR_TLS_CERT_ALTNAME_INVALID)",
-        "checkedAt": "2026-10-02T08:37:11.400Z"
+        "checkedAt": "2026-10-06T18:24:14.376Z"
       }
     },
     {
@@ -23058,17 +23058,17 @@
       "url": "https://103.112.63.114:8880/play/6dmTFv8M3ZFF4eiyKkdiKQ2QCS7Puw1ypCdRF3i3T58/ts",
       "priority": 5,
       "status": "broken",
-      "failedAttempts": 11,
+      "failedAttempts": 13,
       "firstFailedAt": "2026-09-25T15:15:12.540Z",
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 100,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-25T15:15:12.541Z",
       "updatedAt": "2026-10-02T08:00:33.678Z",
       "lastCheck": {
         "healthStatus": "OFFLINE",
         "errorCode": "TLS_FAILURE",
         "httpStatus": null,
-        "responseTime": 532,
+        "responseTime": 15,
         "playlistType": null,
         "isLive": null,
         "segmentCount": null,
@@ -23080,7 +23080,7 @@
         "fps": null,
         "attempts": 3,
         "error": "TLS error (ERR_TLS_CERT_ALTNAME_INVALID)",
-        "checkedAt": "2026-10-02T08:00:33.678Z"
+        "checkedAt": "2026-10-06T18:24:13.405Z"
       }
     },
     {
@@ -23370,19 +23370,19 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T07:58:28.362Z",
-      "latency": 832,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 12,
       "createdAt": "2026-09-26T06:38:38.559Z",
       "updatedAt": "2026-10-02T08:00:33.947Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 832,
+        "responseTime": 12,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
-        "newSegmentDetected": true,
+        "newSegmentDetected": false,
         "video": null,
         "audio": null,
         "resolution": null,
@@ -23390,7 +23390,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:00:33.946Z"
+        "checkedAt": "2026-10-06T18:24:13.396Z"
       }
     },
     {
@@ -23401,15 +23401,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 791,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 647,
       "createdAt": "2026-09-26T06:39:28.645Z",
       "updatedAt": "2026-10-02T08:35:32.433Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 791,
+        "responseTime": 647,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 6,
@@ -23421,7 +23421,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:35:32.433Z"
+        "checkedAt": "2026-10-06T18:24:15.635Z"
       }
     },
     {
@@ -23442,30 +23442,30 @@
       "channelId": "6aae690e973811fdd7f8b834",
       "url": "http://41.205.93.154/STAR-PLUS/index.m3u8",
       "priority": 1,
-      "status": "active",
-      "failedAttempts": 1,
+      "status": "broken",
+      "failedAttempts": 3,
       "firstFailedAt": "2026-10-02T04:08:19.836Z",
-      "lastCheckedAt": "2026-10-02T04:08:19.836Z",
-      "latency": 339,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-09-26T06:44:12.568Z",
       "updatedAt": "2026-10-02T04:08:19.840Z",
       "lastCheck": {
-        "healthStatus": "ONLINE",
-        "errorCode": "OK",
-        "httpStatus": 200,
-        "responseTime": 339,
-        "playlistType": "MASTER",
-        "isLive": true,
-        "segmentCount": 4,
-        "newSegmentDetected": true,
+        "healthStatus": "OFFLINE",
+        "errorCode": "PLAYLIST_NOT_FOUND",
+        "httpStatus": 404,
+        "responseTime": 307,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
         "video": null,
         "audio": null,
         "resolution": null,
         "codec": null,
         "fps": null,
-        "attempts": 1,
-        "error": null,
-        "checkedAt": "2026-10-02T02:45:43.985Z"
+        "attempts": 3,
+        "error": "HTTP 404",
+        "checkedAt": "2026-10-06T18:24:14.930Z"
       }
     },
     {
@@ -23476,15 +23476,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 335,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 642,
       "createdAt": "2026-09-26T06:45:20.260Z",
       "updatedAt": "2026-10-02T08:40:14.172Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 335,
+        "responseTime": 642,
         "playlistType": "MASTER",
         "isLive": true,
         "segmentCount": 4,
@@ -23496,7 +23496,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:40:14.171Z"
+        "checkedAt": "2026-10-06T18:24:15.548Z"
       }
     },
     {
@@ -23507,15 +23507,15 @@
       "status": "active",
       "failedAttempts": 0,
       "firstFailedAt": null,
-      "lastCheckedAt": "2026-10-02T08:34:54.015Z",
-      "latency": 95,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 101,
       "createdAt": "2026-09-26T06:47:07.520Z",
       "updatedAt": "2026-10-02T08:36:50.985Z",
       "lastCheck": {
         "healthStatus": "ONLINE",
         "errorCode": "OK",
         "httpStatus": 200,
-        "responseTime": 95,
+        "responseTime": 101,
         "playlistType": "MEDIA",
         "isLive": true,
         "segmentCount": 8,
@@ -23527,7 +23527,7 @@
         "fps": null,
         "attempts": 1,
         "error": null,
-        "checkedAt": "2026-10-02T08:36:50.985Z"
+        "checkedAt": "2026-10-06T18:24:19.801Z"
       }
     },
     {
@@ -23536,12 +23536,30 @@
       "url": "https://static.wikia.nocookie.net/logopedia/images/f/ff/Sony_Sports_Ten_3.png/revision/latest/scale-to-width-down/340?cb=20260818053736",
       "priority": 1,
       "status": "broken",
-      "failedAttempts": 1,
+      "failedAttempts": 3,
       "firstFailedAt": "2026-10-02T04:02:59.342Z",
-      "lastCheckedAt": "2026-10-02T04:02:59.342Z",
-      "latency": 36,
+      "lastCheckedAt": "2026-10-06T18:21:04.845Z",
+      "latency": 0,
       "createdAt": "2026-10-02T04:02:59.358Z",
-      "updatedAt": "2026-10-02T04:02:59.358Z"
+      "updatedAt": "2026-10-02T04:02:59.358Z",
+      "lastCheck": {
+        "healthStatus": "BLOCKED",
+        "errorCode": "ACCESS_DENIED",
+        "httpStatus": 403,
+        "responseTime": 79,
+        "playlistType": null,
+        "isLive": null,
+        "segmentCount": null,
+        "newSegmentDetected": null,
+        "video": null,
+        "audio": null,
+        "resolution": null,
+        "codec": null,
+        "fps": null,
+        "attempts": 1,
+        "error": "HTTP 403",
+        "checkedAt": "2026-10-06T18:24:15.717Z"
+      }
     }
   ]
 }

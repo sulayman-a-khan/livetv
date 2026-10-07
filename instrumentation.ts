@@ -1,7 +1,7 @@
 /**
  * Next.js Instrumentation Hook
  * Runs once when the server starts up.
- * Used to auto-start the background health checker.
+ * Used to auto-start the background health checker and playlist monitor.
  */
 
 export async function register() {
@@ -9,5 +9,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     const { startAutoHealthChecker } = await import("@/lib/autoHealthChecker");
     startAutoHealthChecker();
+
+    const { startPlaylistMonitor } = await import("@/lib/playlistMonitor");
+    startPlaylistMonitor();
   }
 }

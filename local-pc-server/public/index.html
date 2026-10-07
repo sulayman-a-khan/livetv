@@ -150,6 +150,10 @@ body{
 .stat-body{min-width:0;flex:1}
 .stat-label{font-size:clamp(8.2px,.6vw,9.6px);font-weight:700;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat-value{font-size:clamp(9.6px,.72vw,10.6px);font-weight:650;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-card.clickable{cursor:pointer}
+.stat-card.clickable:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.src-detail{font:12px var(--mono);color:#bcd0ef;word-break:break-all;margin-top:4px}
+.src-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
 .stat-dot{width:7px;height:7px;border-radius:50%;background:var(--st);box-shadow:0 0 8px var(--st);flex:none;margin-left:auto}
 
 /* ---------- panels ---------- */
@@ -255,6 +259,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 .pill-scheduled{color:#7dd3fc;border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.08)}
 .pill-ended{color:var(--faint)}
 .pill-forwarder{color:#ffc45e;border-color:rgba(245,165,36,.35);background:rgba(245,165,36,.07)}
+.pill-warn{color:#ff8a92;border-color:rgba(242,85,95,.4);background:rgba(242,85,95,.08)}
 .pill-mono{font-family:var(--mono);font-size:10.5px}
 @keyframes pulse{
   0%{box-shadow:0 0 0 0 rgba(242,85,95,.55)}
@@ -475,11 +480,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 
   <!-- ============================ stat cards ============================ -->
   <section class="stats-grid" aria-label="Server status">
-    <article class="stat-card" data-state="idle">
+    <article class="stat-card clickable" data-state="idle" id="sourceCard" role="button" tabindex="0" title="Manage live sources">
       <div class="stat-icon tint-sky"><svg class="ic"><use href="#i-server"/></svg></div>
       <div class="stat-body">
         <div class="stat-label">Live Source</div>
-        <div class="stat-value" id="xtreamStat">—</div>
+        <div class="stat-value" id="sourceStat">—</div>
       </div>
       <span class="stat-dot"></span>
     </article>
@@ -606,6 +611,10 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 
       <fieldset>
         <legend>Stream Sources</legend>
+        <label class="field">Source — this card only
+          <select id="fSource"></select>
+        </label>
+        <div class="form-hint" id="fSourceHint" style="padding:8px 0 14px">A source belongs to this card alone — it never becomes the global feed.</div>
         <label class="field">Primary Stream URL / Channel #
           <input id="fPrimary" maxlength="2048" placeholder="e.g. 206 or https://…/live/…m3u8" required>
         </label>
@@ -650,6 +659,72 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     <div class="modal-foot">
       <button id="btnTestDone" class="btn ghost" type="button">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- ============================ live sources dialog ============================ -->
+<div id="srcDlg" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <svg class="ic title-ic"><use href="#i-server"/></svg>
+      <h3 id="srcTitle">Live Sources</h3>
+      <span id="srcCountChip" class="chip">—</span>
+      <button id="btnSrcClose" class="icon-btn" type="button" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="srcBody" class="res-body"></div>
+    <div class="modal-foot">
+      <button id="btnSrcAdd" class="btn primary" type="button"><svg class="ic"><use href="#i-plus"/></svg><span class="btn-label">Add Source</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ source form dialog ============================ -->
+<div id="srcFormDlg" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="srcFormTitle">
+  <div class="modal-backdrop"></div>
+  <div class="modal-card narrow">
+    <div class="modal-head">
+      <svg class="ic title-ic"><use href="#i-edit"/></svg>
+      <h3 id="srcFormTitle">New Source</h3>
+      <button id="btnSrcFormClose" class="icon-btn" type="button" title="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </div>
+    <form id="srcForm" novalidate>
+      <fieldset>
+        <legend>Provider</legend>
+        <div class="grid-2">
+          <label class="field">Name
+            <input id="sName" maxlength="80" placeholder="e.g. Sky Xtream" autocomplete="off">
+          </label>
+          <label class="field">Type
+            <select id="sType"></select>
+          </label>
+        </div>
+        <div id="sXtreamFields" class="grid-2" style="margin-top:12px">
+          <label class="field span-2">Server URL
+            <input id="sServerUrl" maxlength="2048" placeholder="http://provider-host:80" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="field">Username
+            <input id="sUsername" maxlength="200" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="field">Password
+            <input id="sPassword" type="password" maxlength="200" autocomplete="new-password">
+          </label>
+        </div>
+        <label class="field" id="sUrlField" style="margin-top:12px">Feed URL
+          <input id="sUrl" maxlength="2048" placeholder="https://…/stream.m3u8" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field" style="margin-top:12px">Notes
+          <input id="sNotes" maxlength="200" placeholder="Optional">
+        </label>
+        <label class="check" style="margin-top:12px"><input id="sActive" type="checkbox" checked> Active — selectable by cards</label>
+      </fieldset>
+      <div class="form-hint" id="sTypeHint"></div>
+      <div id="srcFormError" class="form-error hidden"></div>
+      <div class="modal-foot">
+        <button type="button" id="btnSrcCancel" class="btn ghost">Cancel</button>
+        <button type="submit" id="btnSrcSave" class="btn primary"><svg class="ic"><use href="#i-check"/></svg><span class="btn-label">Create Source</span></button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -725,6 +800,8 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
   /* ======================= state ======================= */
   var eventsCache = [];
   var statusCache = {};
+  var sourcesCache = { types: [], sources: [], activeCount: 0, total: 0 };
+  var editingSourceId = null;
   var editingId = null;
   var draggingId = null;
   var lastAutoFilled = "";
@@ -869,10 +946,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       : "Connecting to server…");
   }
 
-  function renderStatus(st, xt) {
+  function renderStatus(st, src) {
     st = st || {};
     statusCache = st;
-    xt = xt || {};
+    src = src || {};
+    sourcesCache = src;
 
     var node = $("nodeChip");
     if (st.nodeId) {
@@ -883,15 +961,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     }
     setConn(st.nodeId ? "ok" : "warn");
 
-    if (xt.serverUrl) {
-      var host = String(xt.serverUrl).replace(/^https?:\/\//, "");
-      var label = host + (xt.username ? " (" + xt.username + ")" : "");
-      var active = xt.activeStream;
-      if (active) label += " · live: " + compactLabel(active.label);
-      setStat("xtreamStat", xt.passwordSet ? "ok" : "warn", label, xt.serverUrl);
-    } else {
-      setStat("xtreamStat", "bad", "Not configured", "XTREAM_* env vars are missing");
-    }
+    var activeSrc = Number(src.activeCount || 0);
+    var lockedOn = src.activeStream ? " · locked on " + compactLabel(src.activeStream.label) : "";
+    setStat("sourceStat", activeSrc > 0 ? "ok" : "bad",
+      activeSrc + (activeSrc === 1 ? " Active Source" : " Active Sources"),
+      (src.total || 0) + " source(s) configured" + lockedOn + " · click to manage live sources");
 
     var db = st.cloud || {};
     setStat("dbStat",
@@ -933,6 +1007,219 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       " · admin UI is local-only · public port " + (st.publicPort || 5001) + " serves /live and /healthz";
   }
 
+  /* ======================= live sources ======================= */
+  function sourceTypeDef(type) {
+    var list = sourcesCache.types || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === type) return list[i];
+    return { id: type, label: type, needs: [] };
+  }
+
+  function openSources() {
+    renderSourcesBody();
+    openModal($("srcDlg"));
+  }
+
+  function renderSourcesBody() {
+    var body = $("srcBody");
+    body.textContent = "";
+    var list = sourcesCache.sources || [];
+    var chip = $("srcCountChip");
+    chip.className = "chip " + ((sourcesCache.activeCount || 0) > 0 ? "chip-ok" : "chip-bad");
+    chip.textContent = (sourcesCache.activeCount || 0) + " active of " + list.length;
+    if (!list.length) {
+      body.append(el("div", { class: "res" },
+        el("div", { class: "res-value muted", text: "No sources yet. Add a provider here, then assign it to individual cards — a source is never global." })
+      ));
+      return;
+    }
+    list.forEach(function (s) { body.append(sourceRow(s)); });
+  }
+
+  function sourceRow(s) {
+    var on = s.active !== false;
+    var detail = s.type === "xtream"
+      ? String(s.serverUrl || "").replace(/^https?:\/\//, "") + " · " + (s.username || "no username") + " · " + (s.passwordSet ? "password saved" : "password missing")
+      : (s.url || "no feed URL set");
+    var value = el("div", { class: "res-value" },
+      el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" },
+        el("span", { class: "badge " + (on ? "badge-ok" : "badge-warn") }, icon(on ? "check" : "stop"), el("span", { text: on ? "Active" : "Inactive" })),
+        el("span", { class: "pill", text: s.typeLabel || sourceTypeDef(s.type).label }),
+        el("span", { class: "pill pill-mono", title: "Cards using this source", text: (s.cardCount || 0) + " card" + (s.cardCount === 1 ? "" : "s") })
+      ),
+      el("div", { class: "src-detail", text: detail })
+    );
+    value.append(el("div", { class: "src-actions" },
+      el("button", { class: "btn tiny ghost", type: "button", title: on ? "Deactivate — cards keep this assignment and show it as unavailable" : "Activate", onclick: function () { toggleSource(s); } },
+        icon(on ? "stop" : "play"), el("span", { class: "btn-label", text: on ? "Deactivate" : "Activate" })),
+      el("button", { class: "btn tiny ghost", type: "button", onclick: function () { testSource(s); } }, icon("flask"), el("span", { class: "btn-label", text: "Test" })),
+      el("button", { class: "btn tiny ghost", type: "button", onclick: function () { openSourceForm(s); } }, icon("edit"), el("span", { class: "btn-label", text: "Edit" })),
+      el("button", { class: "btn tiny danger-ghost", type: "button", onclick: function () { removeSource(s); } }, icon("trash"), el("span", { class: "btn-label", text: "Remove" }))
+    ));
+    return el("div", { class: "res" }, el("div", { class: "res-label", text: s.name, title: s.name }), value);
+  }
+
+  function applySourcesPayload(data) {
+    if (data && data.types) sourcesCache = data;
+  }
+
+  function afterSourceChange(data, msg) {
+    applySourcesPayload(data);
+    toast(msg, "success");
+    return refresh();
+  }
+
+  function toggleSource(s) {
+    api("PUT", "/api/sources/" + encodeURIComponent(s.id), { active: s.active === false })
+      .then(function (data) { return afterSourceChange(data, '"' + s.name + '" is now ' + (s.active === false ? "active" : "inactive") + " — only its own cards are affected"); })
+      .catch(function (err) { toast("Update failed: " + err.message, "error"); });
+  }
+
+  function removeSource(s) {
+    var using = s.cardCount || 0;
+    if (!confirm('Remove source "' + s.name + '"?\n\n' + (using ? using + " card(s) keep this assignment and will show \"source missing\" until you pick another — they are never reassigned automatically." : "No card uses it right now.") + "\n\nThis cannot be undone.")) return;
+    api("DELETE", "/api/sources/" + encodeURIComponent(s.id))
+      .then(function (data) { return afterSourceChange(data, 'Removed "' + s.name + '"'); })
+      .catch(function (err) { toast("Remove failed: " + err.message, "error"); });
+  }
+
+  function testSource(s) {
+    toast('Testing "' + s.name + '"…', "");
+    api("POST", "/api/sources/" + encodeURIComponent(s.id) + "/test")
+      .then(function (r) {
+        showTestModal("Source Test — " + s.name, [
+          { label: "Type", text: s.typeLabel || sourceTypeDef(s.type).label },
+          { label: "Result", state: r.ok ? "ok" : "bad", text: r.ok ? ("Reachable · " + (r.message || "HTTP " + r.status)) : (r.error || "HTTP " + (r.status || "no response")) },
+          { label: "Latency", text: r.latencyMs != null ? r.latencyMs + " ms" : "—" },
+          { label: "Probe URL", mono: true, text: r.url }
+        ]);
+      })
+      .catch(function (err) { toast("Source test failed: " + err.message, "error"); });
+  }
+
+  function sourceTypeFields() {
+    var type = $("sType").value;
+    var xtream = type === "xtream";
+    $("sXtreamFields").style.display = xtream ? "" : "none";
+    $("sUrlField").style.display = xtream ? "none" : "";
+    $("sTypeHint").textContent = xtream
+      ? "Cards on an Xtream source store only the channel number (e.g. 206); the forwarder builds the credentialed URL."
+      : "No playlist parsing: cards on this source must carry the full stream URL you paste here or type per card.";
+  }
+
+  function openSourceForm(s) {
+    editingSourceId = s ? s.id : null;
+    $("srcFormTitle").textContent = s ? "Edit Source" : "New Source";
+    var sel = $("sType");
+    sel.textContent = "";
+    (sourcesCache.types || []).forEach(function (t) {
+      sel.append(el("option", { value: t.id, text: t.label }));
+    });
+    sel.value = s ? s.type : ((sourcesCache.types || [])[0] || {}).id || "xtream";
+    $("sName").value = s ? s.name : "";
+    $("sServerUrl").value = s ? (s.serverUrl || "") : "";
+    $("sUsername").value = s ? (s.username || "") : "";
+    $("sPassword").value = "";
+    $("sPassword").placeholder = s && s.passwordSet ? "•••••••• (unchanged)" : "Provider password";
+    $("sUrl").value = s ? (s.url || "") : "";
+    $("sNotes").value = s ? (s.notes || "") : "";
+    $("sActive").checked = s ? s.active !== false : true;
+    sourceTypeFields();
+    $("srcFormError").classList.add("hidden");
+    $("btnSrcSave").querySelector(".btn-label").textContent = s ? "Save Source" : "Create Source";
+    openModal($("srcFormDlg"));
+    setTimeout(function () { $("sName").focus(); }, 40);
+  }
+
+  function closeSourceForm() {
+    closeModal($("srcFormDlg"));
+    editingSourceId = null;
+  }
+
+  function showSourceError(msg) {
+    var box = $("srcFormError");
+    box.textContent = msg;
+    box.classList.remove("hidden");
+    box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function submitSourceForm(evt) {
+    evt.preventDefault();
+    var wasEdit = !!editingSourceId;
+    var type = $("sType").value;
+    var password = $("sPassword").value;
+    var payload = {
+      name: $("sName").value.trim(),
+      type: type,
+      notes: $("sNotes").value.trim(),
+      active: $("sActive").checked
+    };
+    if (type === "xtream") {
+      payload.serverUrl = $("sServerUrl").value.trim();
+      payload.username = $("sUsername").value.trim();
+      // A blank password on edit means "keep the stored credential".
+      if (password || !wasEdit) payload.password = password;
+    } else {
+      payload.url = $("sUrl").value.trim();
+    }
+
+    if (!payload.name) return showSourceError("Source name is required.");
+    if (type === "xtream" && (!payload.serverUrl || !payload.username || (!wasEdit && !payload.password))) {
+      return showSourceError("Xtream sources need a server URL, username and password.");
+    }
+    if (type !== "xtream" && !payload.url) return showSourceError("This source type needs a feed URL.");
+
+    busy($("btnSrcSave"), "Saving…", function () {
+      var request = wasEdit
+        ? api("PUT", "/api/sources/" + encodeURIComponent(editingSourceId), payload)
+        : api("POST", "/api/sources", payload);
+      return request.then(function (data) {
+        closeSourceForm();
+        if (!$("srcDlg").classList.contains("hidden")) applySourcesPayload(data);
+        toast(wasEdit ? "Source updated" : "Source created", "success");
+        return refresh();
+      }).catch(function (err) {
+        showSourceError(err.message + (err.details && err.details.length ? "\n— " + err.details.join("\n— ") : ""));
+      });
+    });
+  }
+
+  /* Per-card source picker in the event form */
+  function fillSourceSelect(selectedId, allowInactiveId) {
+    var sel = $("fSource");
+    sel.textContent = "";
+    var list = sourcesCache.sources || [];
+    sel.append(el("option", { value: "", text: list.length ? "— select a source —" : "no sources yet (add one from the Live Source card)" }));
+    list.forEach(function (s) {
+      var usable = s.active !== false || s.id === allowInactiveId;
+      if (!usable) return;
+      sel.append(el("option", { value: s.id, text: s.name + " · " + (s.typeLabel || sourceTypeDef(s.type).label) + " · " + (s.cardCount || 0) + " card(s)" }));
+    });
+    sel.value = selectedId || "";
+    if (sel.value !== (selectedId || "")) sel.value = "";
+    sourcePickerHint();
+    if (selectedId && !sel.value) {
+      $("fSourceHint").textContent = "The source this card used no longer exists — pick another one. Nothing was reassigned automatically.";
+    }
+  }
+
+  function sourcePickerHint() {
+    var s = (sourcesCache.sources || []).filter(function (x) { return x.id === $("fSource").value; })[0];
+    var hint = $("fSourceHint");
+    var primary = $("fPrimary");
+    if (!s) {
+      hint.textContent = "A source belongs to this card alone — it never becomes the global feed.";
+      primary.placeholder = "Pick a source first";
+      return;
+    }
+    if (s.type === "xtream") {
+      hint.textContent = '"' + s.name + '" is an Xtream provider: enter only the channel number (e.g. 206). Credentials stay on this PC.';
+      primary.placeholder = "Xtream channel number, e.g. 206";
+    } else {
+      hint.textContent = '"' + s.name + '" is a ' + (s.typeLabel || s.type) + " feed: type the full stream URL for this card — playlists are never parsed.";
+      primary.placeholder = "https://host/path/stream.m3u8";
+    }
+  }
+
   function updateTunnelChip() {
     var chip = $("tunnelStatusChip");
     return api("GET", "/api/tunnel/status").then(function (t) {
@@ -957,6 +1244,33 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     if (status === "live") return el("span", { class: "pill pill-live" }, el("span", { class: "dot" }), el("span", { text: "LIVE" }));
     if (status === "scheduled") return el("span", { class: "pill pill-scheduled", text: "Scheduled" });
     return el("span", { class: "pill pill-ended", text: "Ended" });
+  }
+
+  function sourceInfo(ev) {
+    var rel = ev.sourceRelation || {};
+    var cand = (ev.candidates || [])[0] || {};
+    return {
+      status: rel.status || cand.sourceStatus || "unassigned",
+      name: rel.name || cand.sourceName || "",
+      reason: rel.reason || ""
+    };
+  }
+
+  function sourcePill(ev) {
+    var info = sourceInfo(ev);
+    if (info.status === "ok") return el("span", { class: "pill", title: "Source for this card only" }, icon("server"), el("span", { text: info.name }));
+    var label = info.status === "inactive" ? "Source inactive" : info.status === "missing" ? "Source missing" : "No source";
+    return el("span", { class: "pill pill-warn", title: info.reason || label }, icon("alert"), el("span", { text: label }));
+  }
+
+  function sourceAlert(ev) {
+    var info = sourceInfo(ev);
+    if (info.status === "ok" || info.status === "unassigned") return null;
+    return el("div", { class: "alert" },
+      icon("alert"),
+      el("span", { text: (info.reason || "This card's source is unavailable") + " — the card keeps its assignment; nothing is reassigned." }),
+      el("button", { class: "btn tiny ghost", type: "button", onclick: function () { openForm(ev); } }, icon("edit"), el("span", { class: "btn-label", text: "Pick source" }))
+    );
   }
 
   function buildTile(label, iconName, state, value, title) {
@@ -992,6 +1306,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         el("div", { class: "card-sub" },
           el("span", { class: "pill" }, icon("trophy"), el("span", { text: ev.sportType || "Other" })),
           statusPill(ev.status),
+          sourcePill(ev),
           ev.useForwarder ? el("span", { class: "pill pill-forwarder", title: "Viewers use the public forwarder URL" }, icon("zap"), el("span", { text: "Forwarder" })) : null,
           el("span", { class: "pill pill-mono", title: "Stream ID", text: ev.streamId })
         )
@@ -1016,17 +1331,21 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         c ? (c.direct ? "direct (no proxy)" : (c.online ? (c.latencyMs != null ? c.latencyMs + " ms" : "reachable") : (c.error || "down"))) : "not probed",
         c && c.url ? "URL " + c.url : "Cloud URL health for this card"),
       buildTile("Channel Lock", "shuffle",
-        active ? "ok" : "idle",
+        active && !active.blocked ? "ok" : "idle",
         active ? compactLabel(active.label) : "none",
-        active ? maskUrl(active.maskedUrl) : "No stream candidates configured"),
+        active ? (active.blocked ? active.blockedReason : maskUrl(active.maskedUrl)) : "No stream candidates configured"),
       buildTile("Viewers", "eye",
         ev.viewersCount > 0 ? "ok" : "idle",
         String(ev.viewersCount || 0),
         "Active HLS viewers on the forwarder")
     ));
 
-    /* cloud dead alert */
-    if (ev.status !== "ended" && c && !c.online && ev.useForwarder) {
+    /* source availability alert (this card only) */
+    var srcAlert = sourceAlert(ev);
+    if (srcAlert) card.append(srcAlert);
+
+    /* cloud dead alert — only when the card's own source is healthy */
+    if (ev.status !== "ended" && c && !c.online && ev.useForwarder && sourceInfo(ev).status === "ok") {
       card.append(el("div", { class: "alert" },
         icon("alert"),
         el("span", { text: "CDN unreachable for this card" + (c.error ? " — " + c.error : "") + "." }),
@@ -1045,9 +1364,10 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         el("a", { class: "btn tiny ghost", href: viewerUrl, target: "_blank", rel: "noopener", title: "Open in a new tab" }, icon("external"), el("span", { class: "btn-label", text: "Open" }))
       )
     ));
+    var srcLine = active && !active.blocked ? maskUrl(active.maskedUrl) : (sourceInfo(ev).reason || "—");
     box.append(el("div", { class: "srow" },
       el("span", { class: "srow-label", text: "Source" }),
-      el("code", { text: active ? maskUrl(active.maskedUrl) : "—", title: active ? maskUrl(active.maskedUrl) : "" }),
+      el("code", { text: srcLine, title: srcLine }),
       el("div", { class: "srow-actions" },
         el("button", { class: "btn tiny ghost", type: "button", title: "Reveal the raw source URL (credentials included — admin only)", onclick: function () { testRawSource(ev); } }, icon("flask"), el("span", { class: "btn-label", text: "Test Raw" })),
         el("button", { class: "btn tiny ghost", type: "button", title: "Probe the live source and the local forwarder pipe", onclick: function () { testProxyPipe(ev); } }, icon("activity"), el("span", { class: "btn-label", text: "Test Pipe" }))
@@ -1062,8 +1382,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
         seg.append(el("button", {
           class: "seg-btn" + (isActive ? " active" : ""),
           type: "button",
-          title: isActive ? "Currently locked on this channel" : "Switch & lock on " + cand.label,
-          onclick: function () { if (!isActive) switchChannel(ev, i); }
+          title: cand.blocked ? (cand.blockedReason || "Unavailable for this card's source") : (isActive ? "Currently locked on this channel" : "Switch & lock on " + cand.label),
+          onclick: function () {
+            if (cand.blocked) { toast(cand.blockedReason || "This channel is unavailable for the card's source", "warn"); return; }
+            if (!isActive) switchChannel(ev, i);
+          }
         },
           isActive ? icon("check") : null,
           el("span", { text: compactLabel(cand.label) })
@@ -1136,10 +1459,11 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     return Promise.all([
       api("GET", "/api/events"),
       api("GET", "/api/status"),
-      api("GET", "/api/xtream/status")
+      api("GET", "/api/sources")
     ]).then(function (out) {
       renderStatus(out[1], out[2]);
       renderCards(out[0] && out[0].events);
+      if (!$("srcDlg").classList.contains("hidden")) renderSourcesBody();
     }).catch(function (err) {
       setConn("bad");
       toast("Refresh failed: " + err.message, "error");
@@ -1272,6 +1596,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     $("fStatus").value = ev ? ev.status : "scheduled";
     $("fStart").value = toInputValue(ev && ev.startTime);
     $("fEnd").value = toInputValue(ev && ev.endTime);
+    fillSourceSelect(ev ? ev.sourceId : "", ev ? ev.sourceId : "");
     $("fPrimary").value = ev ? ev.primaryStreamUrl : "";
     $("fForward").checked = ev ? !!ev.useForwarder : true;
     $("fBackups").value = ev && ev.backupStreamUrls && ev.backupStreamUrls.length ? ev.backupStreamUrls.join("\n") : "";
@@ -1306,6 +1631,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
       startTime: fromInputValue($("fStart").value),
       endTime: fromInputValue($("fEnd").value),
       primaryStreamUrl: $("fPrimary").value.trim(),
+      sourceId: $("fSource").value,
       stagedSource: "", /* empty string clears any lingering draft server-side */
       useForwarder: $("fForward").checked,
       backupStreamUrls: $("fBackups").value.split(/[\n,]+/).map(function (s) { return s.trim(); }).filter(Boolean),
@@ -1316,6 +1642,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
     if (!payload.sportType) return showFormError("Sport type is required.");
     if (!payload.startTime || !payload.endTime) return showFormError("Start and end times are required.");
     if (new Date(payload.endTime).getTime() <= new Date(payload.startTime).getTime()) return showFormError("End time must be later than start time.");
+    if (!payload.sourceId) return showFormError("Select the source for this card — sources are assigned per card, never globally.");
     if (!payload.primaryStreamUrl) return showFormError("Primary stream URL or channel is required.");
 
     busy($("btnSave"), "Saving…", function () {
@@ -1438,11 +1765,28 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weigh
 
   $("form").addEventListener("submit", submitForm);
   $("form").addEventListener("input", function () { $("formError").classList.add("hidden"); });
+  $("fSource").addEventListener("change", sourcePickerHint);
+
+  $("sourceCard").addEventListener("click", openSources);
+  $("sourceCard").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSources(); }
+  });
+  $("btnSrcClose").addEventListener("click", function () { closeModal($("srcDlg")); });
+  $("srcDlg").querySelector(".modal-backdrop").addEventListener("click", function () { closeModal($("srcDlg")); });
+  $("btnSrcAdd").addEventListener("click", function () { openSourceForm(null); });
+  $("btnSrcFormClose").addEventListener("click", closeSourceForm);
+  $("btnSrcCancel").addEventListener("click", closeSourceForm);
+  $("srcFormDlg").querySelector(".modal-backdrop").addEventListener("click", closeSourceForm);
+  $("sType").addEventListener("change", sourceTypeFields);
+  $("srcForm").addEventListener("submit", submitSourceForm);
+  $("srcForm").addEventListener("input", function () { $("srcFormError").classList.add("hidden"); });
 
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
-    if (!$("testDlg").classList.contains("hidden")) closeTest();
+    if (!$("srcFormDlg").classList.contains("hidden")) closeSourceForm();
+    else if (!$("testDlg").classList.contains("hidden")) closeTest();
     else if (!$("dlg").classList.contains("hidden")) closeForm();
+    else if (!$("srcDlg").classList.contains("hidden")) closeModal($("srcDlg"));
   });
 
   function skeleton() {

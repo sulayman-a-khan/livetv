@@ -137,13 +137,14 @@ function loadConfig(env) {
     localServerSecret: (env.LOCAL_SERVER_SECRET || "").trim(),
     streamTokenSecret: (env.STREAM_TOKEN_SECRET || env.LOCAL_SERVER_SECRET || crypto.randomBytes(32).toString("hex")).trim(),
     streamTokenTtlSec: envInt(env, "STREAM_TOKEN_TTL_SEC", 55, 15, 300),
+    // 'strict' denies expired/foreign tokens at the forwarder; 'permissive' only logs.
+    streamGuardMode: String(env.STREAM_GUARD_MODE || "permissive").trim().toLowerCase() === "strict" ? "strict" : "permissive",
     allowedOrigins: (env.ALLOWED_ORIGINS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
     autoHeartbeat: envBool(env, "AUTO_HEARTBEAT", true),
     heartbeatIntervalSec: envInt(env, "HEARTBEAT_INTERVAL_SEC", 30, 5, 3600),
 
-    xtreamServerUrl: trimSlash(env.XTREAM_SERVER_URL || ""),
-    xtreamUsername: (env.XTREAM_USERNAME || "").trim(),
-    xtreamPassword: (env.XTREAM_PASSWORD || "").trim(),
+    // Live source registry (per-card providers) — optionally encrypted at rest in Mongo.
+    sourceVaultKey: (env.SOURCE_VAULT_SECRET || env.LOCAL_SERVER_SECRET || "").trim(),
 
     corsOrigins: (env.CORS_ORIGINS || "*").split(",").map((s) => s.trim()).filter(Boolean),
     upstreamHeaders: envHeaders(env, "UPSTREAM_HEADERS_JSON"),
@@ -151,31 +152,11 @@ function loadConfig(env) {
     upstreamTimeoutMs: envInt(env, "UPSTREAM_TIMEOUT_SEC", 10, 1, 120) * 1000,
 
     dataFile: path.resolve(__dirname, env.DATA_FILE || "data/events.json"),
+    sourcesFile: path.resolve(__dirname, env.SOURCES_FILE || "data/sources.json"),
   };
 }
 
 const CONFIG = loadConfig(process.env);
-
-/* ---------- Startup env validation for Xtream Codes credentials ---------- */
-(function validateXtreamEnv() {
-  const missing = [];
-  if (!CONFIG.xtreamServerUrl) missing.push("XTREAM_SERVER_URL");
-  if (!CONFIG.xtreamUsername)  missing.push("XTREAM_USERNAME");
-  if (!CONFIG.xtreamPassword)  missing.push("XTREAM_PASSWORD");
-  if (missing.length) {
-    console.error("╔══════════════════════════════════════════════════════════════╗");
-    console.error("║  ⚠️  CRITICAL: Missing Xtream Codes env variable(s):        ║");
-    missing.forEach((v) => {
-      console.error(`║    → ${v.padEnd(50)}     ║`);
-    });
-    console.error("║                                                              ║");
-    console.error("║  Xtream stream URLs will be BROKEN without these values.     ║");
-    console.error("║  Set them in  local-pc-server/.env  and restart the server.  ║");
-    console.error("╚══════════════════════════════════════════════════════════════╝");
-  } else {
-    console.log(`[xtream:env] ✅ Xtream credentials loaded — Server: ${CONFIG.xtreamServerUrl}, User: ${CONFIG.xtreamUsername}, Password: ${"•".repeat(CONFIG.xtreamPassword.length)} (${CONFIG.xtreamPassword.length} chars)`);
-  }
-})();
 
 /* ========================================================================== *
  * Small utilities
@@ -407,10 +388,27 @@ function validateEventInput(body, existing, takenStreamIds) {
     else errors.push("status must be one of: " + STATUSES.join(", "));
   }
 
+  if (has("sourceId")) {
+    const sid = typeof src.sourceId === "string" ? src.sourceId.trim() : "";
+    if (!sid) {
+      if (creating) errors.push("sourceId is required — each card must select its own source");
+      else v.sourceId = "";
+    } else if (!sourceStore.byId(sid)) {
+      errors.push('sourceId "' + sid + '" does not match a saved source');
+    } else {
+      const chosen = sourceStore.byId(sid);
+      const unchanged = Boolean(existing) && existing.sourceId === sid;
+      if (chosen.active === false && !unchanged) errors.push('source "' + chosen.name + '" is deactivated – activate it before assigning it to a card');
+      v.sourceId = sid;
+    }
+  } else if (creating) {
+    errors.push("sourceId is required — each card must select its own source");
+  }
+
   if (has("primaryStreamUrl")) {
     const u = typeof src.primaryStreamUrl === "string" ? src.primaryStreamUrl.trim() : "";
     if (u && u.length <= 2048 && isValidStreamInput(u)) v.primaryStreamUrl = u;
-    else errors.push("primaryStreamUrl must be an absolute http(s) URL or Xtream Stream ID");
+    else errors.push("primaryStreamUrl must be an Xtream channel number or a full http(s) stream URL");
   } else if (creating) {
     errors.push("primaryStreamUrl is required");
   }
@@ -487,62 +485,428 @@ function newStreamId(title, taken) {
  * ========================================================================== */
 
 /* ========================================================================== *
- * Xtream Codes & URL helpers
- * ========================================================================== */
+ * Live sources (per-card providers) & URL helpers
+ * ========================================================================== *
+ * A source is a named provider (Xtream account, M3U playlist feed, direct HLS
+ * or personal OBS relay). Cards reference ONE source; nothing here is global —
+ * assigning a source to a card never changes any other card.
+ */
+
+const SOURCE_TYPES = {
+  xtream: { label: "Xtream Codes", needs: ["serverUrl", "username", "password"] },
+  m3u: { label: "M3U / M3U8 feed", needs: ["url"] },
+  hls: { label: "Direct HLS", needs: ["url"] },
+  obs: { label: "OBS / personal feed", needs: ["url"] },
+};
+
+const SOURCE_ID_RE = /^[a-z0-9][a-z0-9_-]{1,63}$/;
+
+class SourceStore {
+  constructor(file) {
+    this.file = file;
+    this.sources = [];
+    this._chain = Promise.resolve();
+  }
+
+  load() {
+    try {
+      const raw = fs.readFileSync(this.file, "utf8");
+      const parsed = JSON.parse(raw);
+      this.sources = Array.isArray(parsed.sources) ? parsed.sources : [];
+    } catch (e) {
+      if (e.code === "ENOENT") return;
+      const backup = this.file + ".corrupt-" + Date.now();
+      try {
+        fs.renameSync(this.file, backup);
+        console.error("[sources] " + this.file + " was unreadable (" + e.message + "). Moved to " + backup + " – starting empty.");
+      } catch (e2) {
+        console.error("[sources] could not read " + this.file + ": " + e.message);
+      }
+      this.sources = [];
+    }
+  }
+
+  save() {
+    const snapshot = JSON.stringify({ version: 1, sources: this.sources }, null, 2);
+    const run = async () => {
+      await fs.promises.mkdir(path.dirname(this.file), { recursive: true });
+      const tmp = this.file + "." + process.pid + ".tmp";
+      await fs.promises.writeFile(tmp, snapshot, "utf8");
+      await fs.promises.rename(tmp, this.file);
+    };
+    this._chain = this._chain.catch(() => {}).then(run);
+    return this._chain;
+  }
+
+  byId(id) {
+    if (!id) return null;
+    return this.sources.find((s) => s.id === id) || null;
+  }
+
+  cardsUsing(id) {
+    return store.events.filter((e) => e.sourceId === id);
+  }
+
+  activeCount() {
+    return this.sources.filter((s) => s.active !== false).length;
+  }
+}
+
+const sourceStore = new SourceStore(CONFIG.sourcesFile);
+
+/** How one card relates to its assigned source. Only that card is affected. */
+function cardSourceState(ev) {
+  if (!ev.sourceId) return { status: "unassigned", source: null, reason: "No source selected for this card" };
+  const source = sourceStore.byId(ev.sourceId);
+  if (!source) return { status: "missing", source: null, reason: 'Selected source "' + ev.sourceId + '" no longer exists' };
+  if (source.active === false) return { status: "inactive", source: source, reason: 'Source "' + source.name + '" is deactivated' };
+  return { status: "ok", source: source, reason: "" };
+}
+
+/** Resolves one card input (Xtream channel #, template or URL) through THAT card's source. */
+function resolveSourceStreamUrl(source, input) {
+  if (!source) return { url: "", error: "no source assigned" };
+  if (!input || typeof input !== "string") return { url: "", error: "empty input" };
+  const raw = input.trim();
+  if (!raw) return { url: "", error: "empty input" };
+
+  if (source.type === "xtream") {
+    if (!source.serverUrl || !source.username || !source.password) {
+      return { url: "", error: 'source "' + source.name + '" is missing Xtream credentials' };
+    }
+    const server = trimSlash(source.serverUrl);
+
+    // Pure numeric Xtream stream ID
+    if (/^\d+$/.test(raw)) {
+      return { url: server + "/live/" + encodeURIComponent(source.username) + "/" + encodeURIComponent(source.password) + "/" + raw + ".m3u8" };
+    }
+
+    // Template with placeholders, or a plain absolute URL
+    const filled = raw
+      .replace(/\{SERVER\}/gi, server).replace(/\[SERVER\]/gi, server)
+      .replace(/\{USER\}/gi, source.username).replace(/\[USER\]/gi, source.username).replace(/\{USERNAME\}/gi, source.username)
+      .replace(/\{PASS\}/gi, source.password).replace(/\[PASS\]/gi, source.password).replace(/\{PASSWORD\}/gi, source.password);
+    return isHttpUrl(filled) ? { url: filled } : { url: "", error: "resolved URL is not a valid http(s) URL" };
+  }
+
+  // m3u / hls / obs: the card carries the full stream URL for this provider.
+  return isHttpUrl(raw) ? { url: raw } : { url: "", error: 'source type "' + source.type + '" needs a full http(s) stream URL' };
+}
+
+/** Masks raw credentials in URLs to prevent exposure */
+function maskCredentials(url) {
+  if (!url || typeof url !== "string") return "";
+  return url
+    .replace(/\/live\/([^/]+)\/([^/]+)\//g, (m, u, p) => `/live/${u}/••••••••/`)
+    .replace(/([?&](?:password|pass|pwd)=)[^&]*/gi, "$1••••••••");
+}
+
+/** Returns all candidate stream channels for an event, via that event's own source. */
+function getEventCandidates(ev) {
+  const rel = cardSourceState(ev);
+  const list = [ev.primaryStreamUrl].concat(ev.backupStreamUrls || []).filter(Boolean);
+  return list.map((raw, idx) => {
+    const out = rel.status === "ok" ? resolveSourceStreamUrl(rel.source, raw) : { url: "", error: rel.reason };
+    return {
+      index: idx,
+      label: idx === 0 ? "Channel 1 (Primary)" : `Channel ${idx + 1} (Backup ${idx})`,
+      rawUrl: raw,
+      resolvedUrl: out.url,
+      maskedUrl: maskCredentials(out.url),
+      blocked: !out.url,
+      blockedReason: out.error || "",
+      sourceId: ev.sourceId || "",
+      sourceName: rel.source ? rel.source.name : "",
+      sourceStatus: rel.status,
+    };
+  });
+}
+
+/** Resolves a card's staged draft through THAT card's source. */
+function resolveStagedSource(ev) {
+  if (!ev.stagedSource) return { url: "", error: "No staged source for this card" };
+  const rel = cardSourceState(ev);
+  return rel.status === "ok" ? resolveSourceStreamUrl(rel.source, ev.stagedSource) : { url: "", error: rel.reason };
+}
 
 function localForwarderBase() {
   const port = CONFIG.publicPort > 0 ? CONFIG.publicPort : 5001;
   return "http://localhost:" + port;
 }
 
-/** Resolves an Xtream Stream ID or URL template into a valid upstream stream URL */
-function resolveXtreamUrl(input) {
-  if (!input || typeof input !== "string") return "";
-  let raw = input.trim();
-  if (!raw) return "";
-
-  // Pure numeric stream ID (e.g., "98231")
-  if (/^\d+$/.test(raw)) {
-    const srv = CONFIG.xtreamServerUrl || "http://play.dgix.top:8080";
-    const usr = CONFIG.xtreamUsername || "sulayman9991";
-    const pwd = CONFIG.xtreamPassword || "";
-    return `${srv}/live/${usr}/${pwd}/${raw}.m3u8`;
-  }
-
-  // Replace placeholders if used
-  if (CONFIG.xtreamServerUrl) {
-    raw = raw.replace(/\{SERVER\}/gi, CONFIG.xtreamServerUrl).replace(/\[SERVER\]/gi, CONFIG.xtreamServerUrl);
-  }
-  if (CONFIG.xtreamUsername) {
-    raw = raw.replace(/\{USER\}/gi, CONFIG.xtreamUsername).replace(/\[USER\]/gi, CONFIG.xtreamUsername).replace(/\{USERNAME\}/gi, CONFIG.xtreamUsername);
-  }
-  if (CONFIG.xtreamPassword) {
-    raw = raw.replace(/\{PASS\}/gi, CONFIG.xtreamPassword).replace(/\[PASS\]/gi, CONFIG.xtreamPassword).replace(/\{PASSWORD\}/gi, CONFIG.xtreamPassword);
-  }
-
-  return raw;
+/** Admin-facing view: password never leaves the server, only `passwordSet`. */
+function sourceViewOf(src) {
+  return {
+    id: src.id,
+    name: src.name,
+    type: src.type,
+    typeLabel: (SOURCE_TYPES[src.type] || {}).label || src.type,
+    active: src.active !== false,
+    serverUrl: src.type === "xtream" ? src.serverUrl || "" : "",
+    username: src.type === "xtream" ? src.username || "" : "",
+    passwordSet: src.type === "xtream" ? Boolean(src.password) : false,
+    url: src.type === "xtream" ? "" : src.url || "",
+    headers: src.headers || {},
+    notes: src.notes || "",
+    cardCount: sourceStore.cardsUsing(src.id).length,
+    createdAt: src.createdAt,
+    updatedAt: src.updatedAt,
+  };
 }
 
-/** Masks raw credentials in URLs to prevent exposure */
-function maskCredentials(url) {
-  if (!url || typeof url !== "string") return "";
-  return url.replace(/\/live\/([^/]+)\/([^/]+)\//g, (m, u, p) => `/live/${u}/••••••••/`);
-}
+function validateSourceInput(body, existing) {
+  const errors = [];
+  const src = body && typeof body === "object" && !Array.isArray(body) ? body : null;
+  if (!src) return { errors: ["Request body must be a JSON object"], value: {} };
+  const creating = !existing;
+  const has = (k) => src[k] !== undefined;
 
-/** Returns all candidate stream channels for an event */
-function getEventCandidates(ev) {
-  const list = [ev.primaryStreamUrl].concat(ev.backupStreamUrls || []).filter(Boolean);
-  return list.map((raw, idx) => {
-    const resolved = resolveXtreamUrl(raw);
-    return {
-      index: idx,
-      label: idx === 0 ? "Channel 1 (Primary)" : `Channel ${idx + 1} (Backup ${idx})`,
-      rawUrl: raw,
-      resolvedUrl: resolved,
-      maskedUrl: maskCredentials(resolved),
-    };
+  function text(key, max, required) {
+    if (!has(key)) {
+      if (required) errors.push(key + " is required");
+      return undefined;
+    }
+    if (typeof src[key] !== "string") {
+      errors.push(key + " must be a string");
+      return undefined;
+    }
+    const s = src[key].trim();
+    if (s.length > max) {
+      errors.push(key + " must be at most " + max + " characters");
+      return undefined;
+    }
+    return s;
+  }
+
+  const v = {};
+
+  const name = text("name", 80, creating);
+  if (name !== undefined) {
+    if (!name) {
+      errors.push("name must not be empty");
+    } else {
+      const clash = sourceStore.sources.some((s) => s.id !== (existing && existing.id) && s.name.toLowerCase() === name.toLowerCase());
+      if (clash) errors.push('a source named "' + name + '" already exists');
+      else v.name = name;
+    }
+  }
+
+  let type = existing ? existing.type : "";
+  if (has("type")) {
+    if (typeof src.type !== "string" || !SOURCE_TYPES[src.type.trim().toLowerCase()]) {
+      errors.push("type must be one of: " + Object.keys(SOURCE_TYPES).join(", "));
+    } else {
+      type = src.type.trim().toLowerCase();
+    }
+  } else if (creating) {
+    errors.push("type is required");
+  }
+
+  if (type) v.type = type;
+
+  if (has("active")) {
+    if (typeof src.active !== "boolean") errors.push("active must be true or false");
+    else v.active = src.active;
+  }
+
+  ["serverUrl", "username", "password", "url", "notes"].forEach((key) => {
+    if (!has(key)) return;
+    const s = text(key, key === "serverUrl" || key === "url" ? 2048 : 200, false);
+    if (s === undefined) return;
+    // An empty password on an update means "keep the stored credential".
+    if (key === "password" && !s && !creating) return;
+    v[key] = s;
   });
+
+  if (has("headers")) {
+    let h = src.headers;
+    if (typeof h === "string") {
+      if (!h.trim()) h = {};
+      else {
+        try {
+          h = JSON.parse(h);
+        } catch (e) {
+          errors.push("headers must be valid JSON");
+          h = null;
+        }
+      }
+    }
+    if (h !== null) v.headers = sanitizeHeaderMap(h, errors);
+  }
+
+  // Cross-field: a source must be complete for its own type (checked on the merged view).
+  const merged = Object.assign({}, existing || {}, v);
+  const req = (SOURCE_TYPES[merged.type] || { needs: [] }).needs;
+  req.forEach((field) => {
+    if (!merged[field]) errors.push(field + " is required for a " + (SOURCE_TYPES[merged.type] || {}).label + " source");
+  });
+  if (merged.serverUrl && !isHttpUrl(merged.serverUrl)) errors.push("serverUrl must be an absolute http(s) URL");
+  if (merged.url && !isHttpUrl(merged.url)) errors.push("url must be an absolute http(s) URL");
+
+  return { errors: errors, value: v };
 }
+
+function newSourceId(name) {
+  const base = slugify(name, 40) || "source";
+  for (let i = 0; i < 20; i++) {
+    const candidate = base + "-" + crypto.randomBytes(2).toString("hex");
+    if (SOURCE_ID_RE.test(candidate) && !sourceStore.byId(candidate)) return candidate;
+  }
+  return base + "-" + crypto.randomBytes(6).toString("hex");
+}
+
+/* ---------- Source registry helpers (admin-facing) ---------- */
+
+function sourcesPayload(extra) {
+  return Object.assign(
+    {
+      types: Object.keys(SOURCE_TYPES).map((k) => ({ id: k, label: SOURCE_TYPES[k].label, needs: SOURCE_TYPES[k].needs.slice() })),
+      sources: sourceStore.sources.map(sourceViewOf),
+      total: sourceStore.sources.length,
+      activeCount: sourceStore.activeCount(),
+      vaultEnabled: Boolean(vaultKey()),
+      activeStream: strictStreamManager.getActiveInfo(),
+    },
+    extra || {}
+  );
+}
+
+/** A card's upstream session must not outlive its source being removed/deactivated. */
+async function dropUpstreamForSource(sourceId, reason) {
+  const cards = sourceStore.cardsUsing(sourceId);
+  cards.forEach((e) => {
+    originState.delete(e.id);
+    cloudState.delete(e.id);
+  });
+  const active = strictStreamManager.activeStream;
+  if (!active) return;
+  if (cards.some((e) => e.streamId === active.streamId)) {
+    await strictStreamManager.closeActiveStream(reason);
+  }
+}
+
+/** Best reachable endpoint for a "does this provider work?" check. */
+function sourceProbeUrl(source) {
+  if (source.type === "xtream") {
+    if (!source.serverUrl || !source.username || !source.password) return "";
+    return trimSlash(source.serverUrl) + "/player_api.php?username=" + encodeURIComponent(source.username) + "&password=" + encodeURIComponent(source.password);
+  }
+  return isHttpUrl(source.url) ? source.url : "";
+}
+
+function describeSourceProbe(source, head) {
+  if (source.type !== "xtream") {
+    return head.trimStart().startsWith("#EXTM3U") ? "Playlist reachable" : "Reachable (not an m3u8 — fine for a direct feed URL)";
+  }
+  const parts = [];
+  const status = /"account_status"\s*:\s*"([^"]*)"/.exec(head);
+  const cons = /"active_cons"\s*:\s*"?(\d+)"?/.exec(head);
+  if (status) parts.push("account " + status[1]);
+  if (cons) parts.push("active connections " + cons[1]);
+  return parts.length ? parts.join(" · ") : "Account endpoint reachable";
+}
+
+/* ---------- Source registry in the cloud ---------- */
+
+let SourceModel = null;
+
+function getSourceModel() {
+  if (SourceModel) return SourceModel;
+  const schema = new mongoose.Schema(
+    {
+      name: String,
+      type: String,
+      serverUrl: String,
+      username: String,
+      secret: { type: String, default: "" },
+      url: String,
+      active: { type: Boolean, default: true },
+      externalId: String,
+      sourceNode: String,
+      lastSeenAt: Date,
+    },
+    { timestamps: true, collection: "hlsources", autoIndex: false }
+  );
+  SourceModel = mongoose.models.HlSource || mongoose.model("HlSource", schema);
+  return SourceModel;
+}
+
+/** Passwords leave this PC only as AES-256-GCM ciphertext (never plaintext). */
+async function syncSourcesToCloud() {
+  if (!CONFIG.mongoUri) return null;
+  await ensureMongo();
+  const Model = getSourceModel();
+  const now = new Date();
+  const extId = (id) => CONFIG.nodeId + ":" + id;
+  const ops = sourceStore.sources.map((s) => ({
+    updateOne: {
+      filter: { externalId: extId(s.id) },
+      update: {
+        $set: {
+          name: s.name,
+          type: s.type,
+          serverUrl: s.type === "xtream" ? s.serverUrl || "" : "",
+          username: s.type === "xtream" ? s.username || "" : "",
+          secret: s.type === "xtream" ? encryptVaultSecret(s.password || "") : "",
+          url: s.type === "xtream" ? "" : s.url || "",
+          active: s.active !== false,
+          sourceNode: CONFIG.nodeId,
+          lastSeenAt: now,
+        },
+      },
+      upsert: true,
+    },
+  }));
+  if (ops.length) await Model.bulkWrite(ops, { ordered: false });
+  await Model.deleteMany({ sourceNode: CONFIG.nodeId, externalId: { $nin: sourceStore.sources.map((s) => extId(s.id)) } });
+  return { sources: sourceStore.sources.length, vaultEnabled: Boolean(vaultKey()) };
+}
+
+let sourceSyncChain = Promise.resolve();
+
+function queueSourceSync(reason) {
+  if (!CONFIG.mongoUri) return;
+  sourceSyncChain = sourceSyncChain
+    .catch(() => {})
+    .then(() => syncSourcesToCloud())
+    .then((r) => console.log("[source-sync] " + reason + " → " + (r ? r.sources + " source(s) synced" : "no mongo")))
+    .catch((e) => console.warn("[source-sync] " + reason + " failed: " + scrub(e.message)));
+}
+
+/* ---------- Credentials at rest in the cloud ---------- */
+
+function vaultKey() {
+  if (!CONFIG.sourceVaultKey) return null;
+  return crypto.createHash("sha256").update(CONFIG.sourceVaultKey).digest();
+}
+
+/** Encrypts a source password for the Mongo copy; never stores plaintext creds. */
+function encryptVaultSecret(plain) {
+  const key = vaultKey();
+  if (!plain) return "";
+  if (!key) return ""; // no key configured -> creds are NOT written to the cloud
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const enc = Buffer.concat([cipher.update(String(plain), "utf8"), cipher.final()]);
+  return "v1." + iv.toString("base64") + "." + cipher.getAuthTag().toString("base64") + "." + enc.toString("base64");
+}
+
+function decryptVaultSecret(stored) {
+  const key = vaultKey();
+  if (!stored || !key || !String(stored).startsWith("v1.")) return "";
+  try {
+    const [, ivB, tagB, dataB] = String(stored).split(".");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB, "base64"));
+    decipher.setAuthTag(Buffer.from(tagB, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(dataB, "base64")), decipher.final()]).toString("utf8");
+  } catch (e) {
+    return "";
+  }
+}
+
+/* ========================================================================== *
+ * Forwarder URL helpers
+ * ========================================================================== */
 
 /** URL viewers should use for a forwarded stream. */
 function forwarderPath(ev) {
@@ -630,6 +994,7 @@ class StrictStreamManager {
       if (!candidates.length) throw new Error("No stream candidates available for event");
       const targetIndex = ((candidateIndex % candidates.length) + candidates.length) % candidates.length;
       const target = candidates[targetIndex];
+      if (target.blocked) throw new Error(target.blockedReason || "This card's source is unavailable");
 
       // If already connected to this target with exact same URL, keep it!
       if (
@@ -675,7 +1040,18 @@ class StrictStreamManager {
       }
 
       const currentIndex = this.activeStream ? this.activeStream.candidateIndex : (ev.activeStreamIndex || 0);
-      const nextIndex = (currentIndex + 1) % candidates.length;
+      let nextIndex = -1;
+      for (let step = 1; step <= candidates.length; step++) {
+        const idx = (currentIndex + step) % candidates.length;
+        if (!candidates[idx].blocked) {
+          nextIndex = idx;
+          break;
+        }
+      }
+      if (nextIndex === -1) {
+        console.warn(`[xtream:failover] ⚠️ Stream issue detected (${reason}), but every channel on this card's source is unavailable.`);
+        return null;
+      }
       const nextCandidate = candidates[nextIndex];
 
       console.warn(`[xtream:failover] ⚡ Stream failure on Channel #${currentIndex + 1} (${reason})! Auto-switching to ${nextCandidate.label}...`);
@@ -815,7 +1191,9 @@ function basicAuthFrom(url) {
 function buildUpstreamHeaders(ev, req, primaryUrl) {
   const defaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
   const h = { "user-agent": CONFIG.upstreamUserAgent || defaultUA, accept: "*/*", "accept-encoding": "identity" };
-  Object.assign(h, lowerKeys(CONFIG.upstreamHeaders), lowerKeys(ev.headers));
+  const source = sourceStore.byId(ev.sourceId);
+  // Precedence: server default < provider headers < this card's headers.
+  Object.assign(h, lowerKeys(CONFIG.upstreamHeaders), lowerKeys(source && source.headers), lowerKeys(ev.headers));
   FORBIDDEN_UPSTREAM_HEADERS.forEach((k) => delete h[k]);
   if (req && req.headers && req.headers.range) h.range = req.headers.range;
   if (!h.referer && primaryUrl) {
@@ -851,7 +1229,8 @@ async function probeOrigin(ev) {
   try {
     const candidates = getEventCandidates(ev);
     const activeCandidate = candidates[ev.activeStreamIndex || 0] || candidates[0];
-    if (!activeCandidate || !activeCandidate.resolvedUrl) throw new Error("No stream URL configured");
+    if (!activeCandidate) throw new Error("No stream URL configured");
+    if (!activeCandidate.resolvedUrl) throw new Error(activeCandidate.blockedReason || "Source unavailable for this card");
 
     const primary = new URL(activeCandidate.resolvedUrl);
     const target = new URL(primary.href);
@@ -969,6 +1348,18 @@ function verifyStreamToken(streamId, tokenStr) {
   return crypto.timingSafeEqual(sigBuf, expBuf);
 }
 
+function hasBrowserHeaders(req) {
+  return Boolean(req.headers.origin || req.headers.referer);
+}
+
+/** True when the request carries an Origin/Referer that is NOT on the allowlist.
+ *  Used as a soft risk signal — headers are spoofable, so this never gates alone. */
+function isForeignBrowserRequest(req) {
+  const candidate = req.headers.origin || req.headers.referer || "";
+  if (!candidate) return false;
+  return !isAuthorizedOrigin(req);
+}
+
 function isAuthorizedOrigin(req) {
   // 1. Shared secret for server-to-server or automated probe requests
   const secretHeader = req.headers["x-local-server-secret"] || req.headers["x-server-secret"];
@@ -979,7 +1370,7 @@ function isAuthorizedOrigin(req) {
   const origin = req.headers.origin || "";
   const referer = req.headers.referer || "";
   const candidate = origin || referer;
-  if (!candidate) return true; // Direct media players, curl, or server proxies
+  if (!candidate) return false; // headerless: decided by validateStreamAccess, never by this list
 
   try {
     const u = new URL(candidate);
@@ -1019,23 +1410,42 @@ function isAuthorizedOrigin(req) {
       } catch (e) {}
     }
   } catch (e) {
-    return true;
+    return false;
   }
-  return true;
+  return false;
 }
 
-function validateStreamAccess(req, streamId) {
-  // 1. Valid token allows immediately
+function validateStreamAccess(req, streamId, isEntryPlaylist) {
+  // 1. Shared secret (panel probes / server-to-server) allows immediately
+  const secretHeader = req.headers["x-local-server-secret"] || req.headers["x-server-secret"];
+  if (CONFIG.localServerSecret && secretHeader === CONFIG.localServerSecret) {
+    return { authorized: true, reason: "server_secret" };
+  }
+
+  // 2. Signed token is the PRIMARY mechanism. Children of a served playlist
+  //    (segments, sub-playlists, keys) ALWAYS carry a fresh one.
   const token = req.query.token || req.headers["x-stream-token"] || "";
-  if (token && verifyStreamToken(streamId, token)) {
-    return { authorized: true, reason: "valid_token" };
+  if (token) {
+    if (verifyStreamToken(streamId, token)) {
+      return { authorized: true, reason: "valid_token" };
+    }
+    return { authorized: false, reason: isForeignBrowserRequest(req) ? "expired_token_foreign_origin" : "expired_or_invalid_token" };
   }
-  // 2. Authorized web origin
-  if (isAuthorizedOrigin(req)) {
-    return { authorized: true, reason: "authorized_origin" };
+
+  // 3. Token-less request: native players (VLC, curl) send no browser headers —
+  //    keep their entry playback working. Sub-requests never legitimately
+  //    arrive without a token, so they are denied.
+  if (isEntryPlaylist && !hasBrowserHeaders(req)) {
+    return { authorized: true, reason: "headerless_entry" };
   }
-  // 3. Direct player / server proxy requests
-  return { authorized: true, reason: "stream_access_allowed" };
+
+  // 4. Additional (spoofable) signal: our own app pages may dial the entry URL
+  //    directly when the mint call fails — allow only known origins.
+  if (isEntryPlaylist && isAuthorizedOrigin(req)) {
+    return { authorized: true, reason: "allowlisted_origin_entry" };
+  }
+
+  return { authorized: false, reason: "missing_token" };
 }
 
 /* ========================================================================== *
@@ -1214,26 +1624,6 @@ function sendJson(res, status, body) {
   res.status(status).json(body);
 }
 
-function corsMiddleware(req, res, next) {
-  const origin = req.headers.origin;
-  if (origin && isAuthorizedOrigin(req)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Range, Origin, Accept, Content-Type, X-Requested-With, Cache-Control, X-Stream-Token, X-Local-Server-Secret");
-  res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type, Accept-Ranges, X-Origin-Status, Cache-Control, X-Stream-Token");
-  res.setHeader("Access-Control-Max-Age", "86400");
-  res.setHeader("X-Accel-Buffering", "no");
-  res.setHeader("Connection", "keep-alive");
-  Object.keys(CONFIG.responseHeaders).forEach((k) => res.setHeader(k, CONFIG.responseHeaders[k]));
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  next();
-}
-
 /**
  * Proxies one request for `streamId` using Strict Single-Connection Enforcer & Smart Failover.
  */
@@ -1242,12 +1632,27 @@ async function forward(req, res, streamId, rawRest) {
   if (!ev) return sendJson(res, 404, { error: "Unknown stream" });
 
   // ── Ultra-Short Dynamic Token & Origin Guard ──
-  const auth = validateStreamAccess(req, streamId);
-  if (!auth.authorized) {
+  const isEntryPlaylist = rawRest === null || (/\.m3u8$/i.test(rawRest) && !rawRest.includes("/"));
+  const auth = validateStreamAccess(req, streamId, isEntryPlaylist);
+  if (!auth.authorized && CONFIG.streamGuardMode === "strict") {
     return sendJson(res, 403, {
       error: "Access Denied: Ultra-Short Token Expired or Unauthorized Origin",
       reason: auth.reason,
       code: "STREAM_ACCESS_FORBIDDEN",
+    });
+  }
+  if (!auth.authorized) {
+    console.warn("[stream-guard:permissive] would deny " + req.path + " reason=" + auth.reason);
+  }
+
+  // This card's own source must be present and active — nothing falls back to another provider.
+  const relation = cardSourceState(ev);
+  if (relation.status !== "ok") {
+    return sendJson(res, 503, {
+      error: "Source Unavailable",
+      reason: relation.status,
+      detail: relation.reason,
+      code: "SOURCE_NOT_AVAILABLE",
     });
   }
 
@@ -1535,7 +1940,11 @@ function wrapAsync(fn) {
       if (isAbortError(err) || res.destroyed || res.writableEnded) {
         return;
       }
-      console.error("[forwarder] " + req.method + " " + req.path + " failed: " + (err && err.message));
+      // Deliberate httpError() responses (validation, 404, conflict) belong to the caller.
+      if (err && err.expose && err.status < 500 && typeof next === "function") {
+        return next(err);
+      }
+      console.error("[request] " + req.method + " " + req.path + " failed: " + (err && err.message));
       if (!res.headersSent && !res.destroyed) {
         sendJson(res, 500, { error: "Forwarder error" });
       }
@@ -1556,12 +1965,17 @@ function buildForwarderRouter() {
     /^\/live\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/token$/,
     (req, res) => {
       const streamId = req.params[0].toLowerCase();
+      // Minting is the one place Origin/Referer is a hard requirement: a
+      // headerless client (curl/VLC) must not be able to bootstrap a
+      // self-refreshing token chain. Server probes pass via the shared secret.
       if (!isAuthorizedOrigin(req)) {
+        res.setHeader("Cache-Control", "no-store");
         return sendJson(res, 403, { error: "Unauthorized origin for token minting" });
       }
       const ttl = CONFIG.streamTokenTtlSec || 55;
       const token = generateStreamToken(streamId, ttl);
       const expiresAt = Math.floor(Date.now() / 1000) + ttl;
+      res.setHeader("Cache-Control", "no-store");
       return res.json({
         ok: true,
         streamId,
@@ -2001,7 +2415,8 @@ async function syncToCloud(options) {
               endTime: new Date(ev.endTime),
               status: ev.status,
               primaryStreamUrl: cloudPrimaryUrl(ev),
-              backupStreamUrls: ev.backupStreamUrls || [],
+              // Forwarded cards fail over server-side, so raw provider URLs never travel to the client.
+              backupStreamUrls: ev.useForwarder ? [] : ev.backupStreamUrls || [],
               isLocalServerActive: Boolean(st && st.online && ev.status !== "ended"),
               priorityOrder: ev.priorityOrder,
               sourceNode: CONFIG.nodeId,
@@ -2037,6 +2452,14 @@ async function syncToCloud(options) {
       }
     });
 
+    let sourceCount = 0;
+    try {
+      const r = await syncSourcesToCloud();
+      sourceCount = r ? r.sources : 0;
+    } catch (e) {
+      warnings.push("live sources were not synced: " + scrub(e.message));
+    }
+
     const summary = {
       at: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
@@ -2045,11 +2468,12 @@ async function syncToCloud(options) {
       updated: modified,
       removed: deleted,
       mirror: mirror,
+      sources: sourceCount,
       warnings: warnings,
     };
     store.meta.lastSync = summary;
     await store.save();
-    console.log("[sync] " + events.length + " card(s): +" + upserted + " ~" + modified + " -" + deleted + " in " + summary.durationMs + "ms");
+    console.log("[sync] " + events.length + " card(s) + " + sourceCount + " source(s): +" + upserted + " ~" + modified + " -" + deleted + " in " + summary.durationMs + "ms");
     return summary;
   } finally {
     syncing = false;
@@ -2147,21 +2571,25 @@ async function sendHeartbeat(active) {
 
 function viewOf(ev) {
   const candidates = getEventCandidates(ev);
+  const rel = cardSourceState(ev);
   const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
   let stagedCandidate = null;
   if (ev.stagedSource) {
-    const resolvedStaged = resolveXtreamUrl(ev.stagedSource);
+    const resolvedStaged = resolveStagedSource(ev);
     stagedCandidate = {
       rawUrl: ev.stagedSource,
-      resolvedUrl: resolvedStaged,
-      maskedUrl: maskCredentials(resolvedStaged),
-      format: resolvedStaged.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
+      resolvedUrl: resolvedStaged.url,
+      blocked: !resolvedStaged.url,
+      blockedReason: resolvedStaged.error || "",
+      maskedUrl: maskCredentials(resolvedStaged.url),
+      format: resolvedStaged.url.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
     };
   }
   return Object.assign({}, ev, {
     forwarderPath: forwarderPath(ev),
     localForwarderUrl: localForwarderBase() + forwarderPath(ev),
     cloudPrimaryUrl: cloudPrimaryUrl(ev),
+    sourceRelation: { id: ev.sourceId || "", status: rel.status, name: rel.source ? rel.source.name : "", reason: rel.reason },
     origin: originState.get(ev.id) || null,
     cloudHealth: cloudState.get(ev.id) || null,
     activeStreamIndex: activeIdx,
@@ -2176,14 +2604,88 @@ function viewOf(ev) {
 function buildApiRouter() {
   const api = express.Router();
 
-  api.get("/xtream/status", (req, res) => {
-    res.json({
-      serverUrl: CONFIG.xtreamServerUrl,
-      username: CONFIG.xtreamUsername,
-      passwordSet: Boolean(CONFIG.xtreamPassword),
-      activeStream: strictStreamManager.getActiveInfo(),
-    });
+  // ── Live sources: each card picks one of these; nothing here is global ──
+  api.get("/sources", (req, res) => {
+    res.json(sourcesPayload());
   });
+
+  api.post(
+    "/sources",
+    wrapAsync(async (req, res) => {
+      const { errors, value } = validateSourceInput(req.body, null);
+      if (errors.length) throw httpError(400, "Validation failed", errors);
+      const id = newSourceId(value.name);
+      if (!SOURCE_ID_RE.test(id)) throw httpError(400, "Could not derive a valid source id from the name");
+      const now = new Date().toISOString();
+      const source = Object.assign({ id: id, active: true }, value, { createdAt: now, updatedAt: now });
+      sourceStore.sources.push(source);
+      await sourceStore.save();
+      queueSourceSync("create " + source.name);
+      res.status(201).json(sourcesPayload({ source: sourceViewOf(source) }));
+    })
+  );
+
+  api.put(
+    "/sources/:id",
+    wrapAsync(async (req, res) => {
+      const source = sourceStore.byId(req.params.id);
+      if (!source) throw httpError(404, "Source not found");
+      const { errors, value } = validateSourceInput(req.body, source);
+      if (errors.length) throw httpError(400, "Validation failed", errors);
+      if (!Object.keys(value).length) throw httpError(400, "No updatable fields were provided");
+      const deactivated = source.active !== false && value.active === false;
+      Object.assign(source, value, { updatedAt: new Date().toISOString() });
+      await sourceStore.save();
+      await dropUpstreamForSource(source.id, deactivated ? "Source deactivated" : "Source updated");
+      queueSourceSync("update " + source.name);
+      res.json(sourcesPayload({ source: sourceViewOf(source) }));
+    })
+  );
+
+  api.delete(
+    "/sources/:id",
+    wrapAsync(async (req, res) => {
+      const idx = sourceStore.sources.findIndex((s) => s.id === req.params.id);
+      if (idx === -1) throw httpError(404, "Source not found");
+      const removed = sourceStore.sources[idx];
+      const affected = sourceStore.cardsUsing(removed.id).length;
+      await dropUpstreamForSource(removed.id, "Source deleted");
+      sourceStore.sources.splice(idx, 1);
+      await sourceStore.save();
+      queueSourceSync("delete " + removed.id);
+      // Cards that referenced it keep their sourceId and report "source missing" —
+      // they are never silently reassigned to another provider.
+      res.json(sourcesPayload({ deletedId: removed.id, affectedCards: affected }));
+    })
+  );
+
+  api.post(
+    "/sources/:id/test",
+    wrapAsync(async (req, res) => {
+      const source = sourceStore.byId(req.params.id);
+      if (!source) throw httpError(404, "Source not found");
+      const target = sourceProbeUrl(source);
+      if (!target) throw httpError(400, 'Source "' + source.name + '" is missing the fields its type requires');
+      const started = Date.now();
+      const result = { ok: false, sourceId: source.id, name: source.name, type: source.type, url: maskCredentials(target), status: null, latencyMs: null, message: "", error: null };
+      try {
+        const resp = await fetch(target, { signal: AbortSignal.timeout(8000), headers: lowerKeys(source.headers) });
+        result.status = resp.status;
+        result.latencyMs = Date.now() - started;
+        const head = await readHead(resp, 2048);
+        if (resp.ok) {
+          result.ok = true;
+          result.message = describeSourceProbe(source, head);
+        } else {
+          result.error = "HTTP " + resp.status;
+        }
+      } catch (e) {
+        result.latencyMs = Date.now() - started;
+        result.error = e.name === "AbortError" ? "Timed out after 8s" : (e.cause && e.cause.code) || (e.message && e.message !== "fetch failed" ? e.message : "") || "Unreachable";
+      }
+      res.json(result);
+    })
+  );
 
   // ── Test Source: Returns raw credentialed URL (Admin-only, NEVER exposed to public/Vercel) ──
   api.get(
@@ -2195,6 +2697,7 @@ function buildApiRouter() {
       const activeIdx = typeof ev.activeStreamIndex === "number" ? ev.activeStreamIndex : 0;
       const active = candidates[activeIdx] || candidates[0];
       if (!active) throw httpError(404, "No stream candidates configured");
+      if (active.blocked) throw httpError(409, active.blockedReason || "This card's source is unavailable");
       // Return the REAL resolved URL with credentials for direct browser testing
       res.json({
         rawUrl: active.resolvedUrl,
@@ -2213,11 +2716,12 @@ function buildApiRouter() {
       const ev = store.byId(req.params.id);
       if (!ev) throw httpError(404, "Event not found");
       if (!ev.stagedSource) throw httpError(400, "No staged source configured for this event");
-      const resolved = resolveXtreamUrl(ev.stagedSource);
+      const resolved = resolveStagedSource(ev);
+      if (!resolved.url) throw httpError(409, resolved.error);
       res.json({
-        rawUrl: resolved,
-        maskedUrl: maskCredentials(resolved),
-        format: resolved.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
+        rawUrl: resolved.url,
+        maskedUrl: maskCredentials(resolved.url),
+        format: resolved.url.endsWith(".ts") ? "MPEG-TS" : "HLS (m3u8)",
       });
     })
   );
@@ -2230,11 +2734,11 @@ function buildApiRouter() {
       if (!ev) throw httpError(404, "Event not found");
       const src = req.body && typeof req.body.stagedSource === "string" ? req.body.stagedSource.trim() : "";
       if (!src) throw httpError(400, "stagedSource is required");
-      if (!isValidStreamInput(src)) throw httpError(400, "stagedSource must be a valid http(s) URL or Xtream Stream ID");
+      if (!isValidStreamInput(src)) throw httpError(400, "stagedSource must be an Xtream channel number or a full http(s) stream URL");
       ev.stagedSource = src;
       ev.updatedAt = new Date().toISOString();
       await store.save();
-      console.log(`[staging] 📝 Staged new source "${maskCredentials(resolveXtreamUrl(src))}" for "${ev.matchTitle}" (Live stream untouched)`);
+      console.log(`[staging] 📝 Staged new source "${maskCredentials(src)}" for "${ev.matchTitle}" (Live stream untouched)`);
       res.json({ success: true, event: viewOf(ev) });
     })
   );
@@ -2248,7 +2752,9 @@ function buildApiRouter() {
       if (!ev.stagedSource) throw httpError(400, "No staged source to promote");
 
       const newSource = ev.stagedSource;
-      console.log(`[staging:promote] 🚀 Promoting staged source "${maskCredentials(resolveXtreamUrl(newSource))}" to LIVE for "${ev.matchTitle}"`);
+      const preview = resolveStagedSource(ev);
+      if (!preview.url) throw httpError(409, preview.error);
+      console.log(`[staging:promote] 🚀 Promoting staged source "${maskCredentials(preview.url)}" to LIVE for "${ev.matchTitle}"`);
 
       await strictStreamManager.withLock(async () => {
         // 1. Gracefully terminate active upstream connection
@@ -2315,6 +2821,8 @@ function buildApiRouter() {
         } catch (e) {
           results.rawError = e.name === "AbortError" ? "Timeout (>6s)" : e.message;
         }
+      } else if (active && active.blocked) {
+        results.rawError = active.blockedReason || "Source unavailable for this card";
       }
 
       // Test local proxy pipe
@@ -2364,6 +2872,7 @@ function buildApiRouter() {
         endTime: value.endTime,
         status: value.status || "scheduled",
         primaryStreamUrl: primaryUrl,
+        sourceId: value.sourceId,
         backupStreamUrls: value.backupStreamUrls || [],
         activeStreamIndex: value.activeStreamIndex || 0,
         useForwarder: value.useForwarder !== undefined ? value.useForwarder : true,
@@ -2433,8 +2942,9 @@ function buildApiRouter() {
       if (value.primaryStreamUrl && (value.primaryStreamUrl.includes(":5000/live/") || value.primaryStreamUrl.includes("localhost:5000") || value.primaryStreamUrl.includes("127.0.0.1:5000"))) {
         value.primaryStreamUrl = value.primaryStreamUrl.replace(":5000", ":5001");
       }
+      const sourceChanged = value.sourceId !== undefined && value.sourceId !== ev.sourceId;
       Object.assign(ev, value, { updatedAt: new Date().toISOString() });
-      if (value.primaryStreamUrl || value.headers || value.backupStreamUrls) {
+      if (sourceChanged || value.primaryStreamUrl || value.headers || value.backupStreamUrls) {
         originState.delete(ev.id);
         cloudState.delete(ev.id);
         if (strictStreamManager.activeStream && strictStreamManager.activeStream.streamId === ev.streamId) {
@@ -2574,6 +3084,7 @@ function buildApiRouter() {
       heartbeat: { ok: heartbeat.ok, via: heartbeat.via, lastAt: heartbeat.lastAt, error: heartbeat.error, intervalSec: CONFIG.heartbeatIntervalSec, auto: CONFIG.autoHeartbeat },
       syncing: syncing,
       lastSync: store.meta.lastSync,
+      sources: { total: sourceStore.sources.length, activeCount: sourceStore.activeCount(), vaultEnabled: Boolean(vaultKey()) },
     });
   });
 
@@ -2765,6 +3276,7 @@ async function main() {
   }
 
   store.load();
+  sourceStore.load();
 
   if (CONFIG.mongoUri) {
     try {
@@ -2852,5 +3364,5 @@ module.exports = {
   EventStore,
   cloudPrimaryUrl,
   sanitizeHeaderMap,
-  _internals: { store, CONFIG, originState, probeOrigin },
+  _internals: { store, sourceStore, CONFIG, originState, probeOrigin },
 };

@@ -64,26 +64,26 @@ export default function ChannelRail({ title, accent, categorySlug, channels }: C
   if (channels.length === 0) return null;
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-1.5 sm:space-y-3">
       {/* Row header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           {accent && (
-            <span className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#0d1628] border border-slate-800 flex items-center justify-center text-base sm:text-lg shadow-inner">
+            <span className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#0d1628] border border-slate-800 hidden sm:flex items-center justify-center text-base sm:text-lg shadow-inner">
               {accent}
             </span>
           )}
           <div className="min-w-0">
-            <h2 className="text-sm sm:text-lg font-black text-white tracking-tight truncate">
+            <h2 className="text-[11px] sm:text-lg font-black text-white tracking-tight truncate">
               {title}
             </h2>
-            <p className="text-[10px] sm:text-xs font-medium text-slate-500 truncate">
+            <p className="hidden sm:block text-xs font-medium text-slate-500 truncate">
               {channels.length} live channel{channels.length === 1 ? "" : "s"}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="hidden sm:flex items-center gap-2 shrink-0">
           {/* Desktop sweep arrows */}
           <button
             type="button"
@@ -119,7 +119,7 @@ export default function ChannelRail({ title, accent, categorySlug, channels }: C
         <div
           ref={scrollerRef}
           onScroll={updateArrows}
-          className="flex items-start gap-3 sm:gap-4 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-smooth pb-2 pt-1"
+          className="flex items-start gap-3 sm:gap-4 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-smooth pb-1 sm:pb-2 pt-0.5 sm:pt-1"
         >
           {channels.map((channel) => {
             const logo = getChannelLogo(channel.name, channel.logo);

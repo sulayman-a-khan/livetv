@@ -135,7 +135,7 @@ export default function HomePage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-7 sm:space-y-10 animate-fade-in">
+          <div className="space-y-4 sm:space-y-10 animate-fade-in">
             {rails.map((rail) => (
               <ChannelRail
                 key={rail.category.slug}

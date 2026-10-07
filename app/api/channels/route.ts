@@ -24,7 +24,7 @@ const CATALOGUE_CACHE = "public, s-maxage=30, stale-while-revalidate=300";
 
 /** Only the fields the grid, the rails and the watch sidebar actually render. */
 const CHANNEL_FIELDS =
-  "_id name logo category country tags isPinned priorityOrder streamUrl url";
+  "_id name logo category tags isPinned priorityOrder streamUrl url";
 
 /**
  * Mirror rows as they may leave the server. `headers` (upstream Referer/Origin
@@ -68,7 +68,6 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get("category");
-    const country = searchParams.get("country");
     const search = searchParams.get("search");
     // A rail is one of the five fixed display categories. The category page asks
     // for its own rail instead of downloading the whole catalogue and filtering
@@ -101,7 +100,6 @@ export async function GET(req: NextRequest) {
       // MongoDB Mode: the pinned catalogue only, then the optional filters.
       const filter: Record<string, unknown> = { isPinned: true };
       if (requestedCategory && requestedCategory !== "All") filter.category = requestedCategory;
-      if (country && country !== "All") filter.country = country;
       if (search) filter.name = { $regex: search, $options: "i" };
 
       const channels = await Channel.find(filter)
@@ -167,9 +165,6 @@ export async function GET(req: NextRequest) {
 
       if (requestedCategory && requestedCategory !== "All") {
         channels = channels.filter((c) => c.category === requestedCategory);
-      }
-      if (country && country !== "All") {
-        channels = channels.filter((c) => c.country === country);
       }
       if (search) {
         channels = channels.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));

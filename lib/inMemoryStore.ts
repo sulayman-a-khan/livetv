@@ -16,7 +16,6 @@ export interface InMemoryChannel {
   logo: string;
   /** Exactly one of the five catalogue categories. */
   category: ChannelCategory;
-  country: string;
   isPinned: boolean;
   priorityOrder: number;
   /** Free-form admin tags used for manual categorisation overrides. */
@@ -91,15 +90,13 @@ const seedChannel = (
   _id: string,
   name: string,
   normalizedName: string,
-  category: ChannelCategory,
-  country: string
+  category: ChannelCategory
 ): InMemoryChannel => ({
   _id,
   name,
   normalizedName,
   logo: getChannelLogo(name),
   category,
-  country,
   isPinned: false,
   priorityOrder: 99,
   createdAt: new Date(),
@@ -107,15 +104,15 @@ const seedChannel = (
 });
 
 const INITIAL_CHANNELS: InMemoryChannel[] = [
-  seedChannel("ch_tsports", "T Sports HD", "tsports", "Sports", "Bangladesh"),
-  seedChannel("ch_gtv", "GTV (Gazi TV)", "gtv", "Bangla", "Bangladesh"),
-  seedChannel("ch_starsports1", "Star Sports 1 HD", "starsports1", "Sports", "India"),
-  seedChannel("ch_sonyten1", "Sony Ten 1 HD", "sonyten1", "Sports", "India"),
-  seedChannel("ch_ptvsports", "PTV Sports", "ptvsports", "Sports", "Pakistan"),
-  seedChannel("ch_asports", "A Sports HD", "asports", "Sports", "Pakistan"),
-  seedChannel("ch_somoynews", "Somoy News TV", "somoynews", "Bangla", "Bangladesh"),
-  seedChannel("ch_aajtak", "Aaj Tak HD", "aajtak", "Indian", "India"),
-  seedChannel("ch_geonews", "GEO News", "geonews", "Pakistani", "Pakistan"),
+  seedChannel("ch_tsports", "T Sports HD", "tsports", "Sports"),
+  seedChannel("ch_gtv", "GTV (Gazi TV)", "gtv", "Bangla"),
+  seedChannel("ch_starsports1", "Star Sports 1 HD", "starsports1", "Sports"),
+  seedChannel("ch_sonyten1", "Sony Ten 1 HD", "sonyten1", "Sports"),
+  seedChannel("ch_ptvsports", "PTV Sports", "ptvsports", "Sports"),
+  seedChannel("ch_asports", "A Sports HD", "asports", "Sports"),
+  seedChannel("ch_somoynews", "Somoy News TV", "somoynews", "Bangla"),
+  seedChannel("ch_aajtak", "Aaj Tak HD", "aajtak", "Indian"),
+  seedChannel("ch_geonews", "GEO News", "geonews", "Pakistani"),
 ];
 
 const INITIAL_STREAMS: InMemoryStreamLink[] = [
@@ -245,8 +242,6 @@ declare global {
   var __freetv_in_memory_streams: InMemoryStreamLink[] | undefined;
 }
 
-import { detectCategoryAndCountry } from "./utils";
-
 function ensureLoaded(force: boolean = false) {
   if (!force && global.__freetv_in_memory_channels && global.__freetv_in_memory_streams) {
     return;
@@ -258,33 +253,20 @@ function ensureLoaded(force: boolean = false) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.channels) && Array.isArray(parsed.streams)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        global.__freetv_in_memory_channels = parsed.channels.map((c: any) => {
-          const base = {
-            ...c,
-            // Legacy category text ("Live Sports", "News", "Movies", "General")
-            // collapses into the five; a value already in the five passes through.
-            category: normalizeCategory(c.category, c.name, c.country),
-            tags: Array.isArray(c.tags) ? c.tags : [],
-            isPinned: c.isPinned === true,
-            priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
-            createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
-            updatedAt: c.updatedAt ? new Date(c.updatedAt) : new Date(),
-          };
-
-          // A hand-edited record is authoritative: only the category collapse runs,
-          // never automatic country/logo re-detection.
-          if (c.isManuallyEdited) return base;
-
-          const detected = detectCategoryAndCountry(c.name, c.category || "");
-          return {
-            ...base,
-            country:
-              !c.country || c.country === "Global" || c.country === "All"
-                ? detected.country
-                : c.country,
-            logo: getChannelLogo(c.name, c.logo),
-          };
-        });
+        global.__freetv_in_memory_channels = parsed.channels.map((c: any) => ({
+          ...c,
+          // Legacy category text ("Live Sports", "News", "Movies", "General")
+          // collapses into the five; a value already in the five passes through.
+          category: normalizeCategory(c.category, c.name),
+          tags: Array.isArray(c.tags) ? c.tags : [],
+          isPinned: c.isPinned === true,
+          priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
+          createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
+          updatedAt: c.updatedAt ? new Date(c.updatedAt) : new Date(),
+          // A hand-edited record keeps its own logo; only a stored record gets
+          // its missing logo resolved.
+          logo: c.isManuallyEdited ? c.logo : getChannelLogo(c.name, c.logo),
+        }));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         global.__freetv_in_memory_streams = parsed.streams.map((s: any) => ({
           ...s,
@@ -324,24 +306,15 @@ export const inMemoryDb = {
   getChannels: () => {
     ensureLoaded(true);
     const channels = global.__freetv_in_memory_channels || [];
-    return channels.map((c) => {
+    return channels.map((c) => ({
+      ...c,
       // Manual admin overrides are authoritative for everything but the
       // five-category collapse, which no record is allowed to escape.
-      const category = normalizeCategory(c.category, c.name, c.country);
-      if (c.isManuallyEdited) return { ...c, category };
-      const detected = detectCategoryAndCountry(c.name, c.category || "");
-      return {
-        ...c,
-        country:
-          !c.country || c.country === "Global" || c.country === "All"
-            ? detected.country
-            : c.country,
-        category,
-        logo: getChannelLogo(c.name, c.logo),
-        isPinned: c.isPinned === true,
-        priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
-      };
-    });
+      category: normalizeCategory(c.category, c.name),
+      logo: c.isManuallyEdited ? c.logo : getChannelLogo(c.name, c.logo),
+      isPinned: c.isPinned === true,
+      priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
+    }));
   },
   getStreams: () => {
     ensureLoaded(true);

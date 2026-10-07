@@ -12,7 +12,6 @@ export interface IChannel extends Document {
   logo: string;
   /** Exactly one of the five catalogue categories — no subcategories, no lists. */
   category: ChannelCategory;
-  country: string;
   isPinned: boolean;
   priorityOrder: number;
   tags: string[];
@@ -39,7 +38,6 @@ const ChannelSchema = new Schema<IChannel>(
       default: DEFAULT_CATEGORY,
       index: true,
     },
-    country: { type: String, default: "Global", index: true },
     /** Curated switch: only pinned channels reach the user-facing app. */
     isPinned: { type: Boolean, default: false, index: true },
     priorityOrder: { type: Number, default: 99, index: true },
@@ -58,7 +56,7 @@ const ChannelSchema = new Schema<IChannel>(
  */
 ChannelSchema.pre("validate", function collapseCategory() {
   const doc = this as any;
-  doc.category = normalizeCategory(doc.category, doc.name, doc.country);
+  doc.category = normalizeCategory(doc.category, doc.name);
 });
 
 // The public catalogue always reads pinned-first, then priority, then name.

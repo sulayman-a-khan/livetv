@@ -38,7 +38,6 @@ const ChannelSchema = new mongoose.Schema(
       enum: ["Sports", "Bangla", "Indian", "Pakistani", "Documentary"],
       default: "Bangla",
     },
-    country: { type: String, default: "Global" },
     isPinned: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -67,7 +66,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "tsports",
     logo: "https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=200&auto=format&fit=crop&q=80",
     category: "Sports",
-    country: "Bangladesh",
     urls: [
     ],
   },
@@ -76,7 +74,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "gtv",
     logo: "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=200&auto=format&fit=crop&q=80",
     category: "Bangla",
-    country: "Bangladesh",
     urls: [
     ],
   },
@@ -85,7 +82,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "starsports1",
     logo: "https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=200&auto=format&fit=crop&q=80",
     category: "Sports",
-    country: "India",
     urls: [
     ],
   },
@@ -94,7 +90,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "sonyten1",
     logo: "https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=200&auto=format&fit=crop&q=80",
     category: "Sports",
-    country: "India",
     urls: [
     ],
   },
@@ -103,7 +98,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "ptvsports",
     logo: "https://images.unsplash.com/photo-1579952363873-27f3bade9f55?w=200&auto=format&fit=crop&q=80",
     category: "Sports",
-    country: "Pakistan",
     urls: [
     ],
   },
@@ -112,7 +106,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "asports",
     logo: "https://images.unsplash.com/photo-1517649763962-0c623266010b?w=200&auto=format&fit=crop&q=80",
     category: "Sports",
-    country: "Pakistan",
     urls: [
     ],
   },
@@ -121,7 +114,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "somoynews",
     logo: "https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=200&auto=format&fit=crop&q=80",
     category: "Bangla",
-    country: "Bangladesh",
     urls: [
     ],
   },
@@ -130,7 +122,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "aajtak",
     logo: "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=200&auto=format&fit=crop&q=80",
     category: "Indian",
-    country: "India",
     urls: [
     ],
   },
@@ -139,7 +130,6 @@ const SAMPLE_CHANNELS = [
     normalizedName: "geonews",
     logo: "https://images.unsplash.com/photo-1495020689067-958852a7765e?w=200&auto=format&fit=crop&q=80",
     category: "Pakistani",
-    country: "Pakistan",
     urls: [
     ],
   },
@@ -168,7 +158,6 @@ async function seedDatabase() {
       normalizedName: item.normalizedName,
       logo: item.logo,
       category: item.category,
-      country: item.country,
     });
     channelCount++;
 

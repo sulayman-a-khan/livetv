@@ -149,7 +149,6 @@ export async function GET(
                 name: sportDoc.matchTitle,
                 logo: getChannelLogo(sportDoc.sportType, ""),
                 category: "Sports",
-                country: "Global",
                 streams,
               },
             },

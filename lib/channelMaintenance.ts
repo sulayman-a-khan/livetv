@@ -33,7 +33,6 @@ export interface MaintChannel {
   normalizedName?: string;
   logo?: string;
   category?: string;
-  country?: string;
   tags?: string[];
   isPinned?: boolean;
   priorityOrder?: number;
@@ -222,8 +221,6 @@ function mergeMetadata(survivor: MaintChannel, others: MaintChannel[]): Partial<
     ) {
       patch.category = other.category;
     }
-    if (isGeneric(survivor.country) && !isGeneric(other.country)) patch.country = other.country;
-
     if (other.tags?.length) {
       patch.tags = Array.from(new Set([...(survivor.tags || []), ...(patch.tags || []), ...other.tags]));
     }

@@ -35,7 +35,6 @@ interface ChannelDetails {
   name: string;
   logo: string;
   category: string;
-  country: string;
   streams: FreeStreamMirror[];
 }
 
@@ -44,7 +43,6 @@ interface SidebarChannel {
   name: string;
   logo: string;
   category: string;
-  country: string;
   activeStreamCount: number;
   isPinned?: boolean;
   priorityOrder?: number;
@@ -278,7 +276,6 @@ export default function WatchPage() {
                 name: evMatch.matchTitle || "Live Sports Match",
                 logo: "",
                 category: evMatch.sportType || "Live Sports",
-                country: "Global",
                 streams: candidates,
               });
               setCurrentStreamIndex(0);
@@ -299,7 +296,6 @@ export default function WatchPage() {
               name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
               logo: "",
               category: "Live Sports",
-              country: "Global",
               streams: candidates,
             });
             setCurrentStreamIndex(0);
@@ -322,7 +318,6 @@ export default function WatchPage() {
           name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
           logo: "",
           category: "Live Sports",
-          country: "Global",
           streams: candidates,
         });
       } else if (!isInitial) {
@@ -387,7 +382,6 @@ export default function WatchPage() {
         name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
         logo: "",
         category: "Live Sports",
-        country: "Global",
         streams: candidates,
       });
       setInitialLoading(false);
@@ -441,7 +435,7 @@ export default function WatchPage() {
     if (channel) {
       // A sports-event placeholder (or any legacy label) is folded onto its rail
       // by the same classifier the backend uses, so the sidebar opens on Sports.
-      const rail = normalizeCategory(channel.category, channel.name, channel.country);
+      const rail = normalizeCategory(channel.category, channel.name);
       const matched = CATEGORIES.find((cat) => cat.category === rail);
       if (matched) return matched;
     }
@@ -481,7 +475,7 @@ export default function WatchPage() {
   const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
   // The top bar names the uplink the current server is fed from, so moving from
   // Server 1 to Server 2 reads as the feed handing over to another satellite.
-  const activeUplinkName = getSatelliteUplink(channel?.country, currentStreamIndex);
+  const activeUplinkName = getSatelliteUplink(currentStreamIndex);
   const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
   // A raw MPEG-TS `.ts` feed (or one already routed through /api/stream)
   // can't be played by hls.js — it goes to the mpegts.js-based player instead.

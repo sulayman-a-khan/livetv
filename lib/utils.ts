@@ -1,6 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { classifyCategory, type ChannelCategory } from "./categories";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -20,42 +19,6 @@ export function normalizeChannelName(name: string): string {
     .replace(/\b(hd|fhd|uhd|4k|sd|1080p|720p|576p|480p|360p|240p|server\s*\d*|stream\s*\d*|bd|in|pk|live|tv|network|channel)\b/gi, "")
     .replace(/[^a-z0-9]/g, "")
     .trim() || name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
-}
-
-/**
- * Auto-detects the one category (out of the five) and the country for a channel
- * name plus its M3U group title. Categories come from `lib/categories`, which is
- * the single source of truth rails, health batches and the admin form share.
- */
-export function detectCategoryAndCountry(name: string, groupTitle: string = ""): {
-  category: ChannelCategory;
-  country: string;
-} {
-  const combined = `${name} ${groupTitle}`.toLowerCase();
-
-  // Country Detection
-  let country = "Global";
-  if (
-    /bangladesh|\bbd\b|bangla|ananda|atn|boishakhi|channel s|channel 24|channel i|dbc|deshi|deepto|duronto|ekattor|ekushey|gtv|gazi|independent|jamuna|maasranga|my tv|nagorik|ntv|rtv|somoy|t sports|tsports|bijoy|mohona|asian tv|sa tv|vokta|nexus|rajdhani|movie bangla/i.test(
-      combined
-    )
-  ) {
-    country = "Bangladesh";
-  } else if (
-    /india|\bin\b|star sports|sony ten|sports18|zee|aaj tak|colors|star plus|ndtv|republic|india today|sony sab|abp|dd sports|ten 1|ten 2|ten 3|sony six|sony max/i.test(
-      combined
-    )
-  ) {
-    country = "India";
-  } else if (
-    /pakistan|\bpk\b|ptv sports|ten sports pk|geo|ary|hum tv|samaa|bol|express|a sports|asports/i.test(
-      combined
-    )
-  ) {
-    country = "Pakistan";
-  }
-
-  return { category: classifyCategory(name, groupTitle, country), country };
 }
 
 /**
@@ -282,41 +245,13 @@ export function getChannelLogo(name: string, existingLogo?: string): string {
   )}&background=0284c7&color=ffffff&size=256&bold=true&font-size=0.3&rounded=true`;
 }
 
-/** Maps a channel/category country name to its flag emoji (falls back to a globe icon). */
-export function getCountryFlag(country?: string): string {
-  const key = (country || "").trim().toLowerCase();
-  const flags: Record<string, string> = {
-    bangladesh: "🇧🇩",
-    india: "🇮🇳",
-    pakistan: "🇵🇰",
-    global: "🌍",
-  };
-  return flags[key] || "🌐";
-}
-
 /**
- * Uplink names for the watch page's LIVE badge. Real satellites beaming each
- * region's TV fleet, listed in failover order so moving to Server 2 reads as
- * the feed handing over to the next bird in the sky.
+ * Uplink names for the watch page's LIVE badge, listed in failover order so
+ * moving to Server 2 reads as the feed handing over to the next bird in the sky.
  */
-const SATELLITE_UPLINKS: { region: RegExp; names: string[] }[] = [
-  // Bangladesh has exactly one TV satellite, so Server 2 hands over to the
-  // regional bird these feeds are also ingested from rather than a second BD one.
-  { region: /bangladesh|bangla|\bbd\b/i, names: ["Bangabandhu-1", "GSAT-30"] },
-  { region: /india|\bin\b/i, names: ["GSAT-18", "GSAT-30", "INSAT-4A"] },
-  { region: /pakistan|\bpk\b/i, names: ["PAKSAT-1R", "PAKSAT-1", "Badr-5"] },
-  { region: /arab|saudi|uae|qatar|egypt|turkey|middle east/i, names: ["Nilesat 201", "Badr-6", "Arabsat 2B"] },
-  { region: /uk|united kingdom|ireland|england/i, names: ["Astra 28.2°E", "Eutelsat 9B"] },
-  { region: /usa|united states|canada|america/i, names: ["Telstar 12", "Intelsat-40"] },
-  { region: /sri\s*lanka|nepal|maldives|bhutan|asia/i, names: ["Bangabandhu-1", "GSAT-18"] },
-];
-
-const GLOBAL_UPLINKS = ["Intelsat-20", "Eutelsat 9B", "Astra 19.2°E"];
+const SATELLITE_UPLINKS = ["Intelsat-20", "Eutelsat 9B", "Astra 19.2°E"];
 
 /** Which satellite this viewer is nominally pulling the feed from. */
-export function getSatelliteUplink(country?: string, serverIndex = 0): string {
-  const key = (country || "").trim().toLowerCase();
-  const match = SATELLITE_UPLINKS.find((entry) => entry.region.test(key));
-  const names = match ? match.names : GLOBAL_UPLINKS;
-  return names[Math.abs(serverIndex) % names.length];
+export function getSatelliteUplink(serverIndex = 0): string {
+  return SATELLITE_UPLINKS[Math.abs(serverIndex) % SATELLITE_UPLINKS.length];
 }

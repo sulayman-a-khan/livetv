@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  * POST /api/admin/channels — Manual Channel Entry.
  *
  * Creates one curated channel from scratch: name, logo, exactly one of the five
- * categories, country, and its first M3U8/MPEG-TS link. The stream is probed
+ * categories and its first M3U8/MPEG-TS link. The stream is probed
  * before it is stored so the link lands with a real latency and the fastest-first
  * ordering is correct from the start.
  *
@@ -35,13 +35,8 @@ export async function POST(req: NextRequest) {
 
     const name = String(body.name || "").trim();
     const logo = String(body.logo || "").trim();
-    const country = String(body.country || "").trim() || "Global";
     const url = String(body.streamUrl || "").trim();
-    const category = normalizeCategory(
-      String(body.category || ""),
-      name,
-      country
-    );
+    const category = normalizeCategory(String(body.category || ""), name);
 
     if (!name) {
       return NextResponse.json(
@@ -99,7 +94,6 @@ export async function POST(req: NextRequest) {
         normalizedName,
         logo,
         category,
-        country,
         isPinned: false,
         priorityOrder: 99,
         isManuallyEdited: true,
@@ -134,7 +128,6 @@ export async function POST(req: NextRequest) {
       normalizedName,
       logo,
       category,
-      country,
       isPinned: false,
       priorityOrder: 99,
       isManuallyEdited: true,

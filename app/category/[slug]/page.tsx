@@ -13,7 +13,6 @@ interface ChannelItem {
   name: string;
   logo: string;
   category: string;
-  country: string;
   activeStreamCount: number;
 }
 

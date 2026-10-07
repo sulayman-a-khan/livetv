@@ -18,7 +18,7 @@ export const CHANNEL_CATEGORIES = [
 export type ChannelCategory = (typeof CHANNEL_CATEGORIES)[number];
 
 /**
- * Where a channel with no sport/documentary/country/name signal lands. This is a
+ * Where a channel with no sport/documentary/name signal lands. This is a
  * staging value only: the Admin Dashboard shows every unpinned channel with its
  * category, and an admin confirms or changes it before pinning.
  */
@@ -147,18 +147,17 @@ export function isChannelCategory(value: unknown): value is ChannelCategory {
  *
  * Recognises the five values themselves (case-insensitive), then falls back to
  * classifying the free text (`legacy` is usually an old category like "Live
- * Sports" or an M3U group title) together with the channel name and country.
+ * Sports" or an M3U group title) together with the channel name.
  * Never returns an unknown value, so no code path has to handle a sixth one.
  */
 export function normalizeCategory(
   legacy: string | undefined | null,
-  name = "",
-  country = ""
+  name = ""
 ): ChannelCategory {
   const direct = (legacy || "").trim().toLowerCase();
   const hit = CHANNEL_CATEGORIES.find((c) => c.toLowerCase() === direct);
   if (hit) return hit;
-  return classifyCategory(name, legacy || "", country);
+  return classifyCategory(name, legacy || "");
 }
 
 const SPORTS_RE =
@@ -177,21 +176,16 @@ const PAKISTANI_RE =
   /pakistan|\bpk\b|\bptv\b|\bgeo\b|\bary\b|hum tv|hum news|samaa|\bbol\b|express|khyber|paywish|pashto|sindh/i;
 
 /**
- * Picks the single category for a channel from its name, its M3U group title (or
- * legacy category text) and its country. Sports and Documentary are decided by
- * content keywords first — a Bangladeshi sports channel is a Sports channel —
- * then region follows the country, then the station-name heuristics.
+ * Picks the single category for a channel from its name and its M3U group title
+ * (or legacy category text). Sports and Documentary are decided by content
+ * keywords first — a Bangladeshi sports channel is a Sports channel — then the
+ * station-name heuristics decide the regional rail.
  */
-export function classifyCategory(name = "", groupTitle = "", country = ""): ChannelCategory {
+export function classifyCategory(name = "", groupTitle = ""): ChannelCategory {
   const combined = `${name} ${groupTitle}`.toLowerCase();
 
   if (SPORTS_RE.test(combined)) return "Sports";
   if (DOCUMENTARY_RE.test(combined)) return "Documentary";
-
-  const c = (country || "").trim().toLowerCase();
-  if (/bangladesh|bangla/.test(c)) return "Bangla";
-  if (/india/.test(c)) return "Indian";
-  if (/pakistan/.test(c)) return "Pakistani";
 
   if (BANGLA_RE.test(combined)) return "Bangla";
   if (PAKISTANI_RE.test(combined)) return "Pakistani";

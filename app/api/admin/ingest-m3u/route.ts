@@ -123,7 +123,6 @@ export async function POST(req: NextRequest) {
                 normalizedName: canonicalKey,
                 logo: item.logo,
                 category: item.category,
-                country: item.country,
                 isPinned: false,
               });
               channelsCreated++;
@@ -178,7 +177,6 @@ export async function POST(req: NextRequest) {
                 normalizedName: canonicalKey,
                 logo: item.logo,
                 category: item.category,
-                country: item.country,
                 isPinned: false,
                 tags: [],
                 isManuallyEdited: false,

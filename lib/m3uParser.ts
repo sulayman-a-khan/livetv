@@ -1,5 +1,5 @@
-import { normalizeChannelName, detectCategoryAndCountry, getChannelLogo } from "./utils";
-import type { ChannelCategory } from "./categories";
+import { normalizeChannelName, getChannelLogo } from "./utils";
+import { classifyCategory, type ChannelCategory } from "./categories";
 
 export interface ParsedM3uChannel {
   name: string;
@@ -7,7 +7,6 @@ export interface ParsedM3uChannel {
   logo: string;
   /** Exactly one of the five catalogue categories. */
   category: ChannelCategory;
-  country: string;
   streamUrl: string;
 }
 
@@ -50,10 +49,7 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
         const normalized = normalizeChannelName(rawName);
 
         if (normalized) {
-          const { category, country } = detectCategoryAndCountry(
-            rawName,
-            currentMeta.groupTitle || ""
-          );
+          const category = classifyCategory(rawName, currentMeta.groupTitle || "");
 
           // Resolve logo online if tvg-logo attribute was missing or empty
           const logo = getChannelLogo(rawName, currentMeta.logo || "");
@@ -63,7 +59,6 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
             normalizedName: normalized,
             logo,
             category,
-            country,
             streamUrl: line,
           });
         }

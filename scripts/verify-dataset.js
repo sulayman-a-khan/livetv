@@ -42,7 +42,7 @@ async function verify() {
   for (let i = 0; i < Math.min(5, channels.length); i++) {
     const ch = channels[i];
     const cand = streamMap.get(String(ch._id)) || [];
-    console.log(` - [${ch.category} | ${ch.country}] ${ch.name} -> ${cand.length} streams (e.g. ${cand[0]?.url?.slice(0, 60)}...)`);
+    console.log(` - [${ch.category}] ${ch.name} -> ${cand.length} streams (e.g. ${cand[0]?.url?.slice(0, 60)}...)`);
   }
 
   await mongoose.disconnect();

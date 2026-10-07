@@ -50,7 +50,7 @@ export async function DELETE(
 /**
  * PUT /api/admin/channels/[id]
  * Manual override of channel metadata. Accepts any subset of:
- *   name, logo, category, country, tags[]
+ *   name, logo, category, tags[]
  *
  * `category` is always collapsed to exactly one of the five catalogue rails
  * before it is stored — the routes it passes through do not run the model's
@@ -76,7 +76,7 @@ export async function PUT(
     }
 
     const { id } = params;
-    const { name, logo, category, country, tags } = body;
+    const { name, logo, category, tags } = body;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const patch: any = {};
@@ -86,9 +86,8 @@ export async function PUT(
     }
     if (typeof logo === "string") patch.logo = logo.trim();
     if (typeof category === "string" && category.trim()) {
-      patch.category = normalizeCategory(category.trim(), patch.name || "", patch.country || "");
+      patch.category = normalizeCategory(category.trim(), patch.name || "");
     }
-    if (typeof country === "string" && country.trim()) patch.country = country.trim();
     if (Array.isArray(tags)) {
       patch.tags = tags
         .map((t: unknown) => String(t).trim())

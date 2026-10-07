@@ -93,7 +93,7 @@ function plan(list, normalizeCategory) {
   const updates = [];
   const skipped = [];
   for (const ch of list) {
-    const next = normalizeCategory(ch.category, ch.name, ch.country || "");
+    const next = normalizeCategory(ch.category, ch.name);
     const hadSub = Boolean(ch.subCategory);
     if (next === ch.category && !hadSub) {
       skipped.push(ch);

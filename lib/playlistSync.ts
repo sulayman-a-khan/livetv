@@ -147,7 +147,6 @@ function toDesiredEntries(parsed: ReturnType<typeof parseM3uContent>): DesiredEn
       canonicalUrl,
       logo: item.logo,
       category: item.category,
-      country: item.country,
     });
   }
   return out;

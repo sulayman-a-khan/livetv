@@ -21,7 +21,6 @@ const RAIL_TITLES: Record<string, string> = {
 
 interface ApiChannel extends RailChannel {
   category?: string;
-  country?: string;
 }
 
 export default function HomePage() {

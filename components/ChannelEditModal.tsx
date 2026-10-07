@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { CHANNEL_CATEGORIES, normalizeCategory, type ChannelCategory } from "@/lib/categories";
-import { getCountryFlag } from "@/lib/utils";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import LinkHealthBadge, { linkHealthLabel } from "@/components/LinkHealthBadge";
@@ -41,7 +40,6 @@ export interface EditableChannel {
   name: string;
   logo: string;
   category: string;
-  country: string;
   tags?: string[];
   streams: EditableStream[];
 }
@@ -53,8 +51,6 @@ interface Props {
   /** Called after any successful mutation so the dashboard can refetch. */
   onSaved: () => void | Promise<void>;
 }
-
-const COUNTRY_OPTIONS = ["Bangladesh", "India", "Pakistan", "Global"];
 
 /**
  * Manual override panel for a single channel.
@@ -68,9 +64,8 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
   const [name, setName] = useState(channel.name);
   const [logo, setLogo] = useState(channel.logo || "");
   const [category, setCategory] = useState<ChannelCategory>(
-    normalizeCategory(channel.category, channel.name, channel.country)
+    normalizeCategory(channel.category, channel.name)
   );
-  const [country, setCountry] = useState(channel.country || "Global");
 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
@@ -102,7 +97,6 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
           name: name.trim(),
           logo: logo.trim(),
           category,
-          country,
         }),
       });
       const data = await res.json();
@@ -295,21 +289,6 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
               {CHANNEL_CATEGORIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="space-y-1">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Country</span>
-            <select
-              value={country}
-              onChange={(e) => setCountry(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-brand-500 outline-none"
-            >
-              {COUNTRY_OPTIONS.map((c) => (
-                <option key={c} value={c}>
-                  {getCountryFlag(c)} {c}
                 </option>
               ))}
             </select>

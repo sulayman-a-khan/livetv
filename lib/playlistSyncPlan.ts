@@ -39,7 +39,6 @@ export interface DesiredEntry {
   canonicalUrl: string;
   logo?: string;
   category?: string;
-  country?: string;
 }
 
 /** A `PlaylistEntry` row already stored for this source. */

@@ -2,7 +2,7 @@
 
 import "@/lib/tvPolyfills";
 import { useEffect, useState, useMemo, useCallback } from "react";
-import { getChannelLogo, getCountryFlag } from "@/lib/utils";
+import { getChannelLogo } from "@/lib/utils";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
 import PlaylistSourcePanel from "@/components/PlaylistSourcePanel";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory, CHANNEL_CATEGORIES, type ChannelCategory } from "@/lib/categories";
@@ -60,7 +60,6 @@ interface ChannelWithStreams {
   name: string;
   normalizedName: string;
   category: string;
-  country: string;
   logo: string;
   isPinned?: boolean;
   priorityOrder?: number;
@@ -103,7 +102,7 @@ const ADMIN_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 
 /** True when a channel belongs to the given pinned-board tab ("all" or a category slug). */
 function channelInPinnedTab(
-  ch: { category?: string; country?: string; name?: string },
+  ch: { category?: string; name?: string },
   tabId: string
 ): boolean {
   if (tabId === "all") return true;
@@ -144,7 +143,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     name: "",
     logo: "",
     category: "Bangla" as ChannelCategory,
-    country: "Bangladesh",
     streamUrl: "",
   });
   const [manualSaving, setManualSaving] = useState(false);
@@ -543,7 +541,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           name: manualForm.name.trim(),
           logo: manualForm.logo.trim(),
           category: manualForm.category,
-          country: manualForm.country,
           streamUrl: manualForm.streamUrl.trim(),
         }),
       });
@@ -1159,21 +1156,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               </select>
             </label>
 
-            <label className="space-y-1">
-              <span className="block text-xs font-semibold text-slate-400">Country</span>
-              <select
-                value={manualForm.country}
-                onChange={(e) => setManualForm((f) => ({ ...f, country: e.target.value }))}
-                className="w-full bg-slate-900 text-xs text-white px-4 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:border-brand-500 cursor-pointer"
-              >
-                {["Bangladesh", "India", "Pakistan", "Global"].map((c) => (
-                  <option key={c} value={c}>
-                    {getCountryFlag(c)} {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <label className="space-y-1 sm:col-span-2">
               <span className="block text-xs font-semibold text-slate-400">M3U8 Stream URL</span>
               <input
@@ -1368,7 +1350,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                     <div className="truncate">
                       <span className="text-xs font-bold text-white">{ch.name}</span>
                       <span className="block text-[10px] text-slate-400">
-                        {ch.category} • {getCountryFlag(ch.country)} {ch.country}
+                        {ch.category}
                       </span>
                     </div>
                   </div>
@@ -1665,7 +1647,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
                       <td className="px-2 py-2.5 align-middle">
                         <span className="inline-block px-2 py-0.5 rounded bg-slate-900 text-slate-300 font-medium text-[11px] truncate max-w-full">
-                          {ch.category} ({getCountryFlag(ch.country)} {ch.country})
+                          {ch.category}
                         </span>
                       </td>
 

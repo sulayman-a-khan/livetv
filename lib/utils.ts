@@ -319,3 +319,28 @@ export function getCountryFlag(country?: string): string {
   };
   return flags[key] || "🌐";
 }
+
+/**
+ * Uplink names for the watch page's LIVE badge. Real satellites beaming each
+ * region's TV fleet, listed in failover order so moving to Server 2 reads as
+ * the feed handing over to the next bird in the sky.
+ */
+const SATELLITE_UPLINKS: { region: RegExp; names: string[] }[] = [
+  { region: /bangladesh|bangla|\bbd\b/i, names: ["Bangabandhu-1", "Bangabandhu-2", "GSAT-30"] },
+  { region: /india|\bin\b/i, names: ["GSAT-18", "GSAT-30", "INSAT-4A"] },
+  { region: /pakistan|\bpk\b/i, names: ["PAKSAT-1R", "PAKSAT-1", "Badr-5"] },
+  { region: /arab|saudi|uae|qatar|egypt|turkey|middle east/i, names: ["Nilesat 201", "Badr-6", "Arabsat 2B"] },
+  { region: /uk|united kingdom|ireland|england/i, names: ["Astra 28.2°E", "Eutelsat 9B"] },
+  { region: /usa|united states|canada|america/i, names: ["Telstar 12", "Intelsat-40"] },
+  { region: /srilanka|nepal|maldives|bhutan|asia/i, names: ["Bangabandhu-1", "GSAT-18"] },
+];
+
+const GLOBAL_UPLINKS = ["Intelsat-20", "Eutelsat 9B", "Astra 19.2°E"];
+
+/** Which satellite this viewer is nominally pulling the feed from. */
+export function getSatelliteUplink(country?: string, serverIndex = 0): string {
+  const key = (country || "").trim().toLowerCase();
+  const match = SATELLITE_UPLINKS.find((entry) => entry.region.test(key));
+  const names = match ? match.names : GLOBAL_UPLINKS;
+  return names[Math.abs(serverIndex) % names.length];
+}

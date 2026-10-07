@@ -11,7 +11,7 @@ import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { getChannelLogo } from "@/lib/utils";
+import { getChannelLogo, getCountryFlag, getSatelliteUplink } from "@/lib/utils";
 import {
   getCategoryBySlug,
   isChannelInCategory,
@@ -26,6 +26,7 @@ import {
   Play,
   Radio,
   CheckCircle2,
+  SatelliteDish,
 } from "lucide-react";
 
 interface ChannelDetails {
@@ -490,6 +491,9 @@ export default function WatchPage() {
   // (and IP-locks the media segments), so the custom player can't play them
   // on Vercel. YouTube's own controls stay hidden until hover.
   const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
+  // The top bar names the uplink the current server is fed from, so moving from
+  // Server 1 to Server 2 reads as the feed handing over to another satellite.
+  const activeUplinkName = getSatelliteUplink(channel?.country, currentStreamIndex);
   const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
   // A raw MPEG-TS `.ts` feed (or one already routed through /api/stream)
   // can't be played by hls.js — it goes to the mpegts.js-based player instead.
@@ -723,7 +727,7 @@ export default function WatchPage() {
                   never scrolls, so the player stays fixed in place and only the
                   channel list below it scrolls. */}
               <div className="z-20 bg-[#060b13] space-y-2.5 lg:bg-transparent lg:space-y-4">
-                {/* Back Navigation + Mobile Server Switch (same line, space-between) */}
+                {/* Back Navigation + live uplink badge (same line, space-between) */}
                 <div className="flex items-center justify-between gap-2">
                   <Link
                     href={`/`}
@@ -736,32 +740,33 @@ export default function WatchPage() {
                     <span className="sm:hidden">Home</span>
                   </Link>
 
-                  {/* Compact server switcher - mobile only */}
-                  {channel.streams.length > 0 && (
-                    <div className="flex lg:hidden items-center gap-1 overflow-x-auto scrollbar-none min-w-0">
-                      {channel.streams.map((st, idx) => {
-                        const isSelected = idx === currentStreamIndex;
-                        return (
-                          <button
-                            key={st._id}
-                            onClick={() => setCurrentStreamIndex(idx)}
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold transition-all shrink-0 cursor-pointer ${
-                              isSelected
-                                ? "bg-[#00c978] text-slate-950 shadow-sm"
-                                : "bg-[#0d1628] text-slate-300 border border-slate-800"
-                            }`}
-                          >
-                            <span
-                              className={`w-1 h-1 rounded-full ${
-                                isSelected ? "bg-slate-950" : "bg-emerald-400"
-                              }`}
-                            />
-                            <span>S{idx + 1}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {/* Live uplink badge — server switching lives in the player controls */}
+                  <div className="flex items-center gap-2 min-w-0 rounded-xl border border-emerald-500/25 bg-[#0d1628] pl-1 pr-2.5 py-1 shadow-lg shadow-black/30">
+                    <span className="relative grid place-items-center w-8 h-8 shrink-0">
+                      <span className="absolute w-5 h-5 rounded-full border border-emerald-400/30 animate-ping" />
+                      <SatelliteDish className="relative w-[18px] h-[18px] text-emerald-400 -rotate-12" />
+                    </span>
+
+                    <span className="flex flex-col leading-tight min-w-0">
+                      <span className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-[0.16em] text-emerald-400 whitespace-nowrap">
+                        Satellite live
+                        <span className="text-[9px] leading-none">{getCountryFlag(channel.country)}</span>
+                      </span>
+                      <span className="text-[11px] font-extrabold text-white truncate max-w-[132px] sm:max-w-[220px]">
+                        {activeUplinkName}
+                      </span>
+                    </span>
+
+                    <span className="flex items-end gap-[2px] h-3.5 shrink-0" aria-hidden="true">
+                      {[6, 9, 12, 15].map((barHeight, i) => (
+                        <span
+                          key={barHeight}
+                          className="w-[3px] rounded-full bg-emerald-400/80 animate-pulse"
+                          style={{ height: `${barHeight}px`, animationDelay: `${i * 160}ms` }}
+                        />
+                      ))}
+                    </span>
+                  </div>
                 </div>
 
                 {/* TV Player Box */}

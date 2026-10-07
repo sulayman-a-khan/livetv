@@ -141,7 +141,9 @@ export function selectPurgeableDeadLinks(
   streams: MaintStream[],
   listedCanonicalUrls: Set<string> | null
 ): string[] {
-  if (!listedCanonicalUrls) return [];
+  // An empty set means no playlist source is configured at all, not that every
+  // URL is unlisted. Without that evidence nothing may be deleted.
+  if (!listedCanonicalUrls || listedCanonicalUrls.size === 0) return [];
   return streams
     .filter(
       (s) =>

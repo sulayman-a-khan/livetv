@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/admin/scheduler/sync",
+      "schedule": "0 20 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health",
+      "schedule": "0 21 * * *"
+    }
+  ]
+}

@@ -750,12 +750,12 @@ export default function WatchPage() {
                       </span>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1.5 min-w-0 rounded-lg border border-emerald-500/25 bg-[#0d1628] px-2 py-[3px]">
-                      <span className="relative grid place-items-center w-5 h-5 shrink-0">
-                        <span className="absolute w-3.5 h-3.5 rounded-full border border-emerald-400/30 animate-ping" />
-                        <SatelliteDish className="relative w-[15px] h-[15px] text-emerald-400 -rotate-12" />
+                    <div className="flex items-center gap-1 min-w-0 rounded-md border border-emerald-500/25 bg-[#0d1628] px-1.5 py-[1px]">
+                      <span className="relative grid place-items-center w-3.5 h-3.5 shrink-0">
+                        <span className="absolute w-2.5 h-2.5 rounded-full border border-emerald-400/30 animate-ping" />
+                        <SatelliteDish className="relative w-[11px] h-[11px] text-emerald-400 -rotate-12" />
                       </span>
-                      <span className="text-[10px] font-extrabold tracking-wide text-emerald-300 whitespace-nowrap">
+                      <span className="text-[8px] font-extrabold tracking-wide text-emerald-300 whitespace-nowrap">
                         {activeUplinkName}
                       </span>
                     </div>

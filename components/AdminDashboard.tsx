@@ -564,7 +564,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
-  // Trigger a full catalogue health check.
+  // Probe every link on every pinned channel, oldest check first, in batches of
+  // a dozen per request. The route never widens past the pinned set and never
+  // touches admin-disabled links; this loop keeps calling it until it reports no
+  // links left due, so one press means full coverage of the curated catalogue.
   const handleTriggerHealthCheck = async () => {
     setHealthCheckLoading(true);
     setHealthCheckLog(null);
@@ -574,6 +577,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       let active = 0;
       let degraded = 0;
       let broken = 0;
+      let remaining = 0;
+      let skippedDisabled = 0;
       let hasMore = true;
 
       while (hasMore) {
@@ -601,12 +606,26 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         active += data.summary.activeCount;
         degraded += data.summary.degradedCount;
         broken += data.summary.brokenCount;
+        remaining = Number(data.remaining ?? 0);
+        skippedDisabled = Number(data.skippedDisabled ?? 0);
         hasMore = data.hasMore === true;
-        setHealthCheckLog(`Checking all links... ${checked} tested so far.`);
+
+        // A batch that tested nothing while links are still due would spin here
+        // forever, so stop and say the run is incomplete instead.
+        if (hasMore && data.summary.checkedCount === 0) {
+          setHealthCheckLog(
+            `Stopped: ${remaining} pinned link(s) are still due but this batch tested none of them. Try again; if it repeats, the affected links are failing to save.`
+          );
+          return;
+        }
+
+        const total = Number(data.pinnedTotal ?? checked + remaining);
+        setHealthCheckLog(`Checking pinned links… ${checked} of ${total} tested, ${remaining} still due.`);
       }
 
       setHealthCheckLog(
-        `Health check finished! Tested ${checked} links: ${active} Active, ${degraded} Degraded, ${broken} Broken.`
+        `All pinned links checked: ${checked} tested (${active} Active, ${degraded} Degraded, ${broken} Broken).` +
+          (skippedDisabled > 0 ? ` ${skippedDisabled} admin-disabled link(s) were left as you set them.` : "")
       );
       fetchStats();
       fetchSchedule();
@@ -844,10 +863,11 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           <button
             onClick={handleTriggerHealthCheck}
             disabled={healthCheckLoading}
+            title="Probes every link on every pinned channel, a batch at a time, until none are left due"
             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-brand-600/30 disabled:opacity-50"
           >
             <Activity className={`w-4 h-4 ${healthCheckLoading ? "animate-spin" : ""}`} />
-            <span>{healthCheckLoading ? "Probing All Links..." : "Run Health Check (All Links)"}</span>
+            <span>{healthCheckLoading ? "Probing Pinned Links..." : "Run Health Check (All Pinned)"}</span>
           </button>
 
           <button

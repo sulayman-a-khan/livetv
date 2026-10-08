@@ -474,9 +474,12 @@ async function runAutoHealthCheck(
 ): Promise<HealthCheckResult> {
   const deadlineAt = options.deadlineMs ? Date.now() + options.deadlineMs : undefined;
   // Re-entrancy guard: with enough streams a single pass can take longer than
-  // its own interval, and the admin panel's "Run Health Check Now" button
-  // calls this same function. Without this guard, two overlapping runs could
-  // race on the same stream records and on data/store.json.
+  // its own interval, and the category batches, the full pass and the retry
+  // timer all call this same function. Without this guard, two overlapping runs
+  // could race on the same stream records and on data/store.json. (The admin
+  // dashboard's "Run Health Check (All Pinned)" button is a separate, batched
+  // caller in `/api/admin/health-check`; a link that gets probed by both sides
+  // in the same moment simply re-appears as due and is tested again.)
   if (global.__freetv_health_check_running) {
     console.log(`[AutoHealthChecker] (${scope}) Skipped — a health check is already in progress.`);
     return emptyResult(scope);

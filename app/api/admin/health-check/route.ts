@@ -8,10 +8,19 @@ import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth"
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
+/**
+ * One batch must be able to finish inside the request: every link in it is
+ * saved before the response, so a killed function loses that work and the admin
+ * sees no progress. 60s is well above the worst case below.
+ */
+export const maxDuration = 60;
 
 // Keep each serverless request short; the admin UI repeats batches until done.
+// The batch is a single parallel wave (concurrency === limit), so the worst-case
+// wall clock is one probe budget (8s x 2 attempts) plus save time — no chance of
+// a second wave being cut off mid-flight.
 const BATCH_LIMIT = 12;
-const BATCH_CONCURRENCY = 6;
+const BATCH_CONCURRENCY = BATCH_LIMIT;
 const PROBE_OPTS = {
   timeoutMs: 8000,
   checkLiveRefresh: false,
@@ -53,6 +62,8 @@ export async function POST(req: NextRequest) {
         batchSize: 0,
         runStartedAt: cutoff.toISOString(),
         hasMore: false,
+        pinnedTotal: 0,
+        remaining: 0,
         skipped: "No pinned channels — nothing to health-check",
         summary: {
           checkedCount: 0,
@@ -78,6 +89,12 @@ export async function POST(req: NextRequest) {
         channelId: { $in: pinnedChannelIds },
         $or: [{ lastCheckedAt: null }, { lastCheckedAt: { $lt: cutoff } }],
       };
+      // Denominator for the UI's "x of y" progress, so a run that stops early is
+      // visibly incomplete rather than looking finished.
+      const pinnedTotal = await StreamLink.countDocuments({
+        adminDisabled: { $ne: true },
+        channelId: { $in: pinnedChannelIds },
+      });
       const streamsToTest = await StreamLink.find(pendingFilter)
         .sort({ lastCheckedAt: 1 })
         .limit(BATCH_LIMIT);
@@ -113,11 +130,21 @@ export async function POST(req: NextRequest) {
         }));
       }
 
+      const remaining = await StreamLink.countDocuments(pendingFilter);
+      // Reported so the admin can see the run skipped nothing they own.
+      const skippedDisabled = await StreamLink.countDocuments({
+        adminDisabled: true,
+        channelId: { $in: pinnedChannelIds },
+      });
+
       return NextResponse.json({
         success: true,
         batchSize: streamsToTest.length,
         runStartedAt: cutoff.toISOString(),
-        hasMore: (await StreamLink.countDocuments(pendingFilter)) > 0,
+        hasMore: remaining > 0,
+        pinnedTotal,
+        remaining,
+        skippedDisabled,
         summary: {
           checkedCount,
           activeCount,
@@ -127,22 +154,21 @@ export async function POST(req: NextRequest) {
         },
       });
     } else {
-      // In-Memory Mode — mirror the MongoDB branch: only pinned channels, no
-      // admin-disabled links, bounded batch size, least-recently-checked first,
-      // and probed with limited concurrency so this request can't run for minutes
-      // (or hit a serverless timeout) on a catalogue of hundreds/thousands of
-      // streams.
+      // In-Memory Mode — mirrors the MongoDB branch exactly: only pinned
+      // channels, never an admin-disabled link, one bounded batch of
+      // least-recently-checked streams per request.
       const pinned = new Set(pinnedChannelIds);
-      const streams = [...inMemoryDb.getStreams()]
-        .filter((stream) => !stream.adminDisabled && pinned.has(stream.channelId))
+      const pinnedStreams = [...inMemoryDb.getStreams()].filter((stream) => pinned.has(stream.channelId));
+      const streams = pinnedStreams
+        .filter((stream) => !stream.adminDisabled)
         .sort((a, b) => {
           const aTime = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
           const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
           return aTime - bTime;
         });
-      const streamsToTest = streams
-        .filter((stream) => !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime())
-        .slice(0, BATCH_LIMIT);
+      const dueBefore = (stream: { lastCheckedAt?: Date | string | null }) =>
+        !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime();
+      const streamsToTest = streams.filter(dueBefore).slice(0, BATCH_LIMIT);
 
       for (let i = 0; i < streamsToTest.length; i += BATCH_CONCURRENCY) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
@@ -195,13 +221,16 @@ export async function POST(req: NextRequest) {
 
       inMemoryDb.saveState();
 
+      const remaining = streams.filter(dueBefore).length;
+
       return NextResponse.json({
         success: true,
         batchSize: streamsToTest.length,
         runStartedAt: cutoff.toISOString(),
-        hasMore: streams.some(
-          (stream) => !stream.lastCheckedAt || new Date(stream.lastCheckedAt).getTime() < cutoff.getTime()
-        ),
+        hasMore: remaining > 0,
+        pinnedTotal: streams.length,
+        remaining,
+        skippedDisabled: pinnedStreams.length - streams.length,
         summary: {
           checkedCount,
           activeCount,

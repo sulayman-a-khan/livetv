@@ -257,9 +257,13 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   // raw data, and no subcategories anywhere.
   const categories = CATEGORIES;
 
-  // Compute filtered and sorted channel list
+  // Compute filtered and sorted channel list. Pinned channels are deliberately
+  // NOT here — they are managed on the pinned board above, one card each, with
+  // the same mirrors, health states and actions this table offers. What remains
+  // is the unpinned shelf.
   const filteredChannels = useMemo(() => {
     return channels
+      .filter((ch) => ch.isPinned !== true)
       .filter((ch) => {
         // Search filter (channel name, normalized slug, or category)
         if (searchTerm.trim()) {
@@ -287,13 +291,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         return true;
       })
       .sort((a, b) => {
-        // Pinned channels always float to the top, ordered by priorityOrder.
-        const aPinned = a.isPinned === true ? 1 : 0;
-        const bPinned = b.isPinned === true ? 1 : 0;
-        if (bPinned !== aPinned) return bPinned - aPinned;
-        if (aPinned && bPinned) {
-          return (a.priorityOrder ?? 99) - (b.priorityOrder ?? 99);
-        }
         if (sortBy === "name-asc") return a.name.localeCompare(b.name);
         if (sortBy === "name-desc") return b.name.localeCompare(a.name);
         if (sortBy === "streams-desc") return b.streams.length - a.streams.length;
@@ -305,6 +302,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         return 0;
       });
   }, [channels, searchTerm, statusFilter, categoryFilter, sortBy]);
+
+  const unpinnedTotal = channels.filter((ch) => ch.isPinned !== true).length;
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
@@ -845,6 +844,100 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
+  /**
+   * Mirrors, per-link health and the test / disable / delete controls. The
+   * pinned board and the unpinned table both render this, so a pinned channel
+   * carries exactly the same detail as a table row did — in a card instead.
+   */
+  const renderMirrorList = (ch: ChannelWithStreams) => (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1 text-slate-400 font-mono text-[10px]">
+        <Layers className="w-3 h-3 text-brand-400 inline shrink-0" />
+        <span>{ch.streams.length} Mirrors</span>
+      </div>
+      {ch.streams.map((st, idx) => {
+        const busy = linkActionId !== null && linkActionId.startsWith(`${st._id}:`);
+        return (
+          <div
+            key={st._id}
+            className="flex items-center justify-between gap-1.5 px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono min-w-0"
+          >
+            <div className="flex items-center gap-1 min-w-0 truncate">
+              <LinkHealthBadge link={st} />
+              <span className="truncate text-[10px]" title={st.url}>
+                #{idx + 1}: {st.url.replace(/^https?:\/\//, "").substring(0, 20)}...
+              </span>
+            </div>
+
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                onClick={() => handleLinkAction(st._id, "test")}
+                disabled={busy}
+                className="text-brand-400 hover:text-brand-300 transition-colors p-0.5 disabled:opacity-40"
+                title="Probe this link now"
+              >
+                {linkActionId === `${st._id}:test` ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Activity className="w-3 h-3" />
+                )}
+              </button>
+              {st.adminDisabled ? (
+                <button
+                  onClick={() => handleLinkAction(st._id, "restore")}
+                  disabled={busy}
+                  className="text-emerald-400 hover:text-emerald-300 transition-colors p-0.5 disabled:opacity-40"
+                  title="Restore this link to service"
+                >
+                  {linkActionId === `${st._id}:restore` ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-3 h-3" />
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleLinkAction(st._id, "disable")}
+                  disabled={busy}
+                  className="text-amber-400 hover:text-amber-300 transition-colors p-0.5 disabled:opacity-40"
+                  title="Take this link out of service"
+                >
+                  {linkActionId === `${st._id}:disable` ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Ban className="w-3 h-3" />
+                  )}
+                </button>
+              )}
+              <button
+                onClick={() => handleDeleteStream(st._id)}
+                disabled={deletingId === st._id}
+                className="text-red-400 hover:text-red-300 transition-colors p-0.5 disabled:opacity-50"
+                title="Delete this stream mirror link"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  /** The viewer-facing state: at least one active mirror, or hidden. */
+  const renderChannelStatus = (ch: ChannelWithStreams) => {
+    const activeCount = ch.streams.filter((s) => s.status === "active").length;
+    return activeCount > 0 ? (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+        <CheckCircle2 className="w-3 h-3 shrink-0" /> Active ({activeCount})
+      </span>
+    ) : (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 whitespace-nowrap">
+        <AlertTriangle className="w-3 h-3 shrink-0" /> Hidden (0)
+      </span>
+    );
+  };
+
   return (
     <div className="space-y-8">
       {/* Top Header */}
@@ -1244,8 +1337,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               </div>
               <p className="text-xs text-slate-400 mt-0.5 hidden sm:block truncate">
                 {pinnedExpanded
-                  ? "Drag or click arrows to reorder. Pinned channels lead the Home & Category pages."
-                  : "Click to expand and manage the pinned channel order."}
+                  ? "Each card carries its category, mirrors, health and actions. Drag or use the arrows to reorder — pinned channels lead the Home & Category pages."
+                  : "Click to expand and manage the pinned channels — order, mirrors, health and links all live here."}
               </p>
             </div>
           </div>
@@ -1329,79 +1422,107 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             {pinnedOrder
               .map((ch, originalIdx) => ({ ch, originalIdx }))
               .filter(({ ch }) => channelInPinnedTab(ch, pinCategoryTab))
-              .map(({ ch, originalIdx }, categoryIdx) => (
+              .map(({ ch, originalIdx }) => (
                 <div
                   key={ch._id}
                   draggable
                   onDragStart={() => handleDragStart(originalIdx)}
                   onDragOver={(e) => handleDragOver(e, originalIdx)}
                   onDragEnd={handleDragEnd}
-                  className={`flex items-center justify-between gap-3 p-3 rounded-xl border transition-all cursor-move select-none ${
+                  className={`rounded-xl border p-3 transition-all select-none ${
                     draggedIndex === originalIdx
                       ? "bg-amber-500/20 border-amber-400 shadow-lg scale-[1.01]"
                       : "bg-slate-900/80 border-slate-800 hover:border-slate-700"
                   }`}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex items-center gap-1.5 text-slate-500 shrink-0">
-                      <GripVertical className="w-4 h-4" />
-                      <span className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 font-black text-xs flex items-center justify-center">
-                        #{originalIdx + 1}
-                      </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0 cursor-move">
+                      <div className="flex items-center gap-1.5 text-slate-500 shrink-0">
+                        <GripVertical className="w-4 h-4" />
+                        <span className="w-6 h-6 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 font-black text-xs flex items-center justify-center">
+                          #{originalIdx + 1}
+                        </span>
+                      </div>
+
+                      <div className="w-9 h-9 rounded-lg bg-white p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={getChannelLogo(ch.name, ch.logo)}
+                          alt={ch.name}
+                          className="max-w-full max-h-full object-contain"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            if (!target.dataset.fallback) {
+                              target.dataset.fallback = "true";
+                              const initials = ch.name.substring(0, 2).toUpperCase();
+                              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div className="min-w-0">
+                        <span className="block text-xs font-bold text-white truncate" title={ch.name}>
+                          {ch.name}
+                        </span>
+                        <span className="block text-[10px] text-slate-500 font-mono truncate">
+                          {ch.normalizedName}
+                        </span>
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 text-[11px]">
+                          {ch.category}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="w-8 h-8 rounded-lg bg-white p-1 flex items-center justify-center shrink-0 overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={getChannelLogo(ch.name, ch.logo)}
-                        alt={ch.name}
-                        className="max-w-full max-h-full object-contain"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          if (!target.dataset.fallback) {
-                            target.dataset.fallback = "true";
-                            const initials = ch.name.substring(0, 2).toUpperCase();
-                            target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
-                          }
-                        }}
-                      />
-                    </div>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {renderChannelStatus(ch)}
 
-                    <div className="truncate">
-                      <span className="text-xs font-bold text-white">{ch.name}</span>
-                      <span className="block text-[10px] text-slate-400">
-                        {ch.category}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleMovePinned(originalIdx, originalIdx - 1)}
+                          disabled={originalIdx === 0}
+                          className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                          title="Move Up"
+                        >
+                          <MoveUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleMovePinned(originalIdx, originalIdx + 1)}
+                          disabled={originalIdx === pinnedOrder.length - 1}
+                          className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                          title="Move Down"
+                        >
+                          <MoveDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditorChannelId(ch._id)}
+                          className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition-all"
+                          title="Edit name, category, tags & server links"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteChannel(ch._id, ch.name)}
+                          disabled={deletingId === ch._id}
+                          className="p-1.5 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                          title="Delete entire channel"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleTogglePin(ch._id, true)}
+                          disabled={pinningId === ch._id}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white transition-all disabled:opacity-50"
+                          title="Unpin channel"
+                        >
+                          <PinOff className="w-3.5 h-3.5" />
+                          <span>Unpin</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => handleMovePinned(originalIdx, originalIdx - 1)}
-                      disabled={originalIdx === 0}
-                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                      title="Move Up"
-                    >
-                      <MoveUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleMovePinned(originalIdx, originalIdx + 1)}
-                      disabled={originalIdx === pinnedOrder.length - 1}
-                      className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                      title="Move Down"
-                    >
-                      <MoveDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleTogglePin(ch._id, true)}
-                      disabled={pinningId === ch._id}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500 hover:text-white transition-all ml-1 disabled:opacity-50"
-                      title="Unpin channel"
-                    >
-                      <PinOff className="w-3.5 h-3.5" />
-                      <span>Unpin</span>
-                    </button>
-                  </div>
+                  <div className="mt-2.5">{renderMirrorList(ch)}</div>
                 </div>
               ))}
           </div>
@@ -1417,11 +1538,12 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-white">Channel & Stream Links Manager</h2>
               <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-brand-400">
-                {filteredChannels.length} of {channels.length} Channels
+                {filteredChannels.length} of {unpinnedTotal} Unpinned Channels
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Filter by name, status, category, or region, toggle pins, and mark checkboxes to perform bulk actions.
+              The unpinned shelf — pinned channels live on the board above with their own mirrors, health and actions.
+              Filter by name, status or category, pin a channel to move it up there, or mark checkboxes for bulk actions.
             </p>
           </div>
 
@@ -1569,8 +1691,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                   </button>
                 </th>
                 <th className="px-2 py-3 w-[22%]">Channel</th>
-                <th className="px-2 py-3 w-[12%]">Pin / Priority</th>
-                <th className="px-2 py-3 w-[18%]">Category / Region</th>
+                <th className="px-2 py-3 w-[12%]">Pin</th>
+                <th className="px-2 py-3 w-[18%]">Category</th>
                 <th className="px-2 py-3 w-[28%]">Stream Mirrors</th>
                 <th className="px-2 py-3 w-[11%]">Status</th>
                 <th className="px-2 py-3 rounded-r-xl w-[9%] text-right">Actions</th>
@@ -1596,7 +1718,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               ) : (
                 filteredChannels.map((ch) => {
                   const isSelected = selectedIds.includes(ch._id);
-                  const isPinned = ch.isPinned === true;
                   return (
                     <tr
                       key={ch._id}
@@ -1638,11 +1759,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                           <div className="min-w-0 truncate">
                             <div className="flex items-center gap-1.5 truncate">
                               <span className="truncate text-xs" title={ch.name}>{ch.name}</span>
-                              {isPinned && (
-                                <span className="px-1 py-0.1 rounded bg-amber-500/10 border border-amber-500/30 text-[9px] text-amber-400 font-bold shrink-0">
-                                  #{ch.priorityOrder ?? 1}
-                                </span>
-                              )}
                             </div>
                             <span className="block text-[10px] text-slate-500 font-mono truncate">{ch.normalizedName}</span>
                           </div>
@@ -1651,17 +1767,13 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
                       <td className="px-2 py-2.5 align-middle">
                         <button
-                          onClick={() => handleTogglePin(ch._id, isPinned)}
+                          onClick={() => handleTogglePin(ch._id, false)}
                           disabled={pinningId === ch._id}
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all disabled:opacity-50 ${
-                            isPinned
-                              ? "bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30"
-                              : "bg-slate-900 text-slate-400 border border-slate-800 hover:text-amber-400 hover:border-amber-500/30"
-                          }`}
-                          title={isPinned ? "Unpin channel" : "Pin channel to top"}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold bg-slate-900 text-slate-400 border border-slate-800 hover:text-amber-400 hover:border-amber-500/30 transition-all disabled:opacity-50"
+                          title="Pin this channel — it moves to the pinned board above and becomes visible to viewers"
                         >
-                          <Pin className={`w-3 h-3 ${isPinned ? "fill-amber-400 text-amber-400" : ""}`} />
-                          <span>{isPinned ? "Pinned" : "Pin"}</span>
+                          <Pin className="w-3 h-3" />
+                          <span>Pin</span>
                         </button>
                       </td>
 
@@ -1671,92 +1783,9 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                         </span>
                       </td>
 
-                      <td className="px-2 py-2.5 align-middle">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-1 text-slate-400 font-mono text-[10px]">
-                            <Layers className="w-3 h-3 text-brand-400 inline shrink-0" />
-                            <span>{ch.streams.length} Mirrors</span>
-                          </div>
-                          {ch.streams.map((st, idx) => {
-                            const busy = linkActionId !== null && linkActionId.startsWith(`${st._id}:`);
-                            return (
-                            <div
-                              key={st._id}
-                              className="flex items-center justify-between gap-1.5 px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono min-w-0"
-                            >
-                              <div className="flex items-center gap-1 min-w-0 truncate">
-                                <LinkHealthBadge link={st} />
-                                <span className="truncate text-[10px]" title={st.url}>
-                                  #{idx + 1}: {st.url.replace(/^https?:\/\//, "").substring(0, 20)}...
-                                </span>
-                              </div>
+                      <td className="px-2 py-2.5 align-middle">{renderMirrorList(ch)}</td>
 
-                              <div className="flex items-center gap-0.5 shrink-0">
-                                <button
-                                  onClick={() => handleLinkAction(st._id, "test")}
-                                  disabled={busy}
-                                  className="text-brand-400 hover:text-brand-300 transition-colors p-0.5 disabled:opacity-40"
-                                  title="Probe this link now"
-                                >
-                                  {linkActionId === `${st._id}:test` ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    <Activity className="w-3 h-3" />
-                                  )}
-                                </button>
-                                {st.adminDisabled ? (
-                                  <button
-                                    onClick={() => handleLinkAction(st._id, "restore")}
-                                    disabled={busy}
-                                    className="text-emerald-400 hover:text-emerald-300 transition-colors p-0.5 disabled:opacity-40"
-                                    title="Restore this link to service"
-                                  >
-                                    {linkActionId === `${st._id}:restore` ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <RotateCcw className="w-3 h-3" />
-                                    )}
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => handleLinkAction(st._id, "disable")}
-                                    disabled={busy}
-                                    className="text-amber-400 hover:text-amber-300 transition-colors p-0.5 disabled:opacity-40"
-                                    title="Take this link out of service"
-                                  >
-                                    {linkActionId === `${st._id}:disable` ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <Ban className="w-3 h-3" />
-                                    )}
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => handleDeleteStream(st._id)}
-                                  disabled={deletingId === st._id}
-                                  className="text-red-400 hover:text-red-300 transition-colors p-0.5 disabled:opacity-50"
-                                  title="Delete this stream mirror link"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                            );
-                          })}
-                        </div>
-                      </td>
-
-                      <td className="px-2 py-2.5 align-middle">
-                        {ch.streams.filter((s) => s.status === "active").length > 0 ? (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
-                            <CheckCircle2 className="w-3 h-3 shrink-0" /> Active ({ch.streams.filter((s) => s.status === "active").length})
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-400 border border-red-500/20 whitespace-nowrap">
-                            <AlertTriangle className="w-3 h-3 shrink-0" /> Hidden (0)
-                          </span>
-                        )}
-                      </td>
+                      <td className="px-2 py-2.5 align-middle">{renderChannelStatus(ch)}</td>
 
                       <td className="px-2 py-2.5 text-right align-middle">
                         <div className="flex items-center justify-end gap-1">

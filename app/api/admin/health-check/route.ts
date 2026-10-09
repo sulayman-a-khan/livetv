@@ -121,7 +121,11 @@ export async function POST(req: NextRequest) {
           result,
           now,
           stream.lastCountedFailureDay,
-          stream.deliveryHidden
+          {
+            deliveryHidden: stream.deliveryHidden,
+            deliveryMisses: stream.deliveryMisses,
+            lastDeliveryMissAt: stream.lastDeliveryMissAt,
+          }
         );
 
         stream.status = decision.status;
@@ -223,7 +227,11 @@ export async function POST(req: NextRequest) {
               result,
               now,
               stream.lastCountedFailureDay,
-              stream.deliveryHidden
+              {
+                deliveryHidden: stream.deliveryHidden,
+                deliveryMisses: stream.deliveryMisses,
+                lastDeliveryMissAt: stream.lastDeliveryMissAt,
+              }
             );
             stream.status = decision.status;
             stream.latency = decision.latency;

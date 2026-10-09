@@ -11,8 +11,9 @@
  *                          plus a 03:00 sweep over every pinned channel.
  *   - Every 6 hours      : a long-lived process re-checks the whole pinned set.
  *   - Every hour         : `runDeliveryRecheck` gives another 10-second window to
- *                          the links the delivery rule hid, and shows them again
- *                          as soon as one hands over media.
+ *                          the links the delivery rule hid — and to any still
+ *                          holding an unconfirmed miss — showing a link again as
+ *                          soon as it hands over media.
  *
  * Unpinned channels are invisible to users, so they are never probed: an
  * administrator brings a channel into health checking by pinning it. When no
@@ -45,9 +46,9 @@ import type { HealthBatchTask } from "@/lib/healthSchedule";
 
 /**
  * `"pinned"` = every pinned channel, `"full"` = every pinned channel and the
- * whole-catalogue maintenance afterwards, `"recheck"` = only the links the
- * delivery rule hid, anything else = one category batch from
- * `lib/healthSchedule.ts`.
+ * whole-catalogue maintenance afterwards, `"recheck"` = only the links waiting on
+ * a delivery verdict (hidden by the rule, or holding a miss it has not confirmed
+ * yet), anything else = one category batch from `lib/healthSchedule.ts`.
  */
 export type HealthCheckScope = "pinned" | "full" | "recheck" | HealthBatchTask;
 
@@ -220,7 +221,14 @@ async function runInMemoryHealthCheck(
   const allowed = new Set(channelIds);
   const streams = inMemoryDb
     .getStreams()
-    .filter((s) => !s.adminDisabled && allowed.has(s.channelId) && (!recheck || s.deliveryHidden === true))
+    .filter(
+      (s) =>
+        !s.adminDisabled &&
+        allowed.has(s.channelId) &&
+        // A link the rule hid, and a link holding one unconfirmed miss — that
+        // miss is what the next hour has to either clear or turn into hiding.
+        (!recheck || s.deliveryHidden === true || (s.deliveryMisses ?? 0) > 0)
+    )
     .sort((a, b) => {
       // A re-check works the oldest miss first; a normal pass puts hidden links
       // ahead of the queue and is otherwise least-recently-checked first.
@@ -261,7 +269,11 @@ async function runInMemoryHealthCheck(
       result,
       now,
       stream.lastCountedFailureDay,
-      stream.deliveryHidden
+      {
+        deliveryHidden: stream.deliveryHidden,
+        deliveryMisses: stream.deliveryMisses,
+        lastDeliveryMissAt: stream.lastDeliveryMissAt,
+      }
     );
 
     stream.status = decision.status;
@@ -334,13 +346,16 @@ async function runMongoHealthCheck(
   // Least-recently-checked first, so a bounded run rotates through the batch
   // instead of re-probing the same links and starving the rest. Links the
   // delivery rule hid go first: a budget-truncated pass still lifts the ones
-  // that have started working again. A re-check covers only those, oldest miss
-  // first.
+  // that have started working again. A re-check covers the links that need a
+  // delivery verdict — hidden ones, and ones still holding an unconfirmed miss —
+  // oldest miss first.
   const filter: Record<string, unknown> = {
     adminDisabled: { $ne: true },
     channelId: { $in: channelIds },
   };
-  if (recheck) filter.deliveryHidden = true;
+  if (recheck) {
+    filter.$or = [{ deliveryHidden: true }, { deliveryMisses: { $gt: 0 } }];
+  }
   const streams = await StreamLink.find(filter)
     .sort(recheck ? { lastDeliveryMissAt: 1 } : { deliveryHidden: -1, lastCheckedAt: 1 })
     .limit(recheck ? RECHECK_LINKS_PER_RUN : MAX_LINKS_PER_RUN);
@@ -392,7 +407,11 @@ async function runMongoHealthCheck(
         result,
         now,
         stream.lastCountedFailureDay,
-        stream.deliveryHidden
+        {
+          deliveryHidden: stream.deliveryHidden,
+          deliveryMisses: stream.deliveryMisses,
+          lastDeliveryMissAt: stream.lastDeliveryMissAt,
+        }
       );
       stream.status = decision.status;
       stream.latency = decision.latency;

@@ -103,8 +103,9 @@ export function resolveBatchCategories(task: string): ChannelCategory[] | null {
 
 /**
  * The delivery re-check (`lib/autoHealthChecker.ts` → `runDeliveryRecheck`):
- * probes only the links the 10-second delivery rule hid, and shows them again as
- * soon as one hands over media. Cheap enough to run every hour.
+ * probes the links the 10-second delivery rule hid, plus any still holding an
+ * unconfirmed miss, and shows them again as soon as one hands over media. Cheap
+ * enough to run every hour.
  */
 export const DELIVERY_RECHECK_TASK = "health-recheck";
 

@@ -14,6 +14,12 @@
  * hides the link immediately instead of waiting three days. Hidden is not gone —
  * the hourly re-check (`runDeliveryRecheck`) shows it again as soon as it
  * delivers.
+ *
+ * What a viewer sees is narrower than what is stored. `degraded` means "this
+ * link failed a check and is being retried", so the public catalogue lists
+ * `active` links only: a tile a viewer can click is a tile that played for the
+ * checker last time it looked. A link climbs back into the UI on the first pass
+ * that delivers media, with no admin action.
  */
 
 import type { BrowserBlocker, HlsCheckResult } from "./streamProbe";
@@ -32,7 +38,7 @@ export type LinkHealthState =
   | "healthy"
   /** Working, but measurably slower than the channel's other mirrors. */
   | "slow"
-  /** Failed today (or sits in the short-streak grace window) — kept visible. */
+  /** Failed a check and being retried — listed in admin, not to viewers. */
   | "temporarily-failed"
   /** 3 consecutive failed daily checks — hidden from users, still monitored. */
   | "dead"
@@ -133,9 +139,10 @@ export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
  * same-day repeat of an already-counted failure leaves the streak alone — that
  * is what keeps 6-hourly checks from maturing a 3-day rule in 18 hours.
  *
- * `previousDeliveryHidden` carries the delivery verdict forward: a link hidden
- * for not delivering stays hidden until something actually delivers, even if the
- * next probe fails for a different reason.
+ * `previousDelivery` carries the delivery evidence forward: a link hidden for
+ * not delivering stays hidden until something actually delivers, even if the
+ * next probe fails for a different reason, and a pass that gets no media adds
+ * its misses to the ones it never cleared rather than resetting them.
  */
 export function decideStreamHealth(
   previousStatus: StoredStreamStatus,
@@ -144,7 +151,11 @@ export function decideStreamHealth(
   result: HlsCheckResult,
   checkedAt: Date = new Date(),
   previousCountedFailureDay?: string | null,
-  previousDeliveryHidden?: boolean
+  previousDelivery?: {
+    deliveryHidden?: boolean;
+    deliveryMisses?: number | null;
+    lastDeliveryMissAt?: Date | string | null;
+  }
 ): StreamHealthDecision {
   if (result.ok || result.status === "DEGRADED") {
     return {
@@ -186,10 +197,13 @@ export function decideStreamHealth(
 
   // The probe confirms a delivery miss with a second attempt ~15s later, so two
   // of them is a link that cannot put media in a player's hands — hide it now
-  // rather than waiting three more days for the streak to mature.
-  const deliveryMisses = Math.max(0, result.deliveryMisses || 0);
+  // rather than waiting three more days for the streak to mature. Misses from
+  // earlier passes count too: the hourly re-check deliberately probes once, and
+  // an origin that was already slow an hour ago is not evidence of health.
+  const runMisses = Math.max(0, result.deliveryMisses || 0);
+  const deliveryMisses = Math.max(0, previousDelivery?.deliveryMisses || 0) + runMisses;
   const missedDelivery = deliveryMisses >= DELIVERY_MISSES_TO_HIDE;
-  const deliveryHidden = missedDelivery || previousDeliveryHidden === true;
+  const deliveryHidden = missedDelivery || previousDelivery?.deliveryHidden === true;
   const status: StoredStreamStatus =
     deliveryHidden || failedAttempts >= MAX_CONSECUTIVE_FAILURES
       ? "broken"
@@ -207,7 +221,12 @@ export function decideStreamHealth(
     browserBlocker: null,
     deliveryMisses,
     deliveryHidden,
-    lastDeliveryMissAt: deliveryMisses > 0 ? checkedAt : null,
+    lastDeliveryMissAt:
+      runMisses > 0
+        ? checkedAt
+        : previousDelivery?.lastDeliveryMissAt
+        ? new Date(previousDelivery.lastDeliveryMissAt)
+        : null,
   };
 }
 

@@ -13,8 +13,8 @@
  *                                               `lib/healthSchedule.ts`
  *   GET /api/admin/scheduler/health             every pinned channel, plus the
  *                                               whole-catalogue maintenance pass
- *   GET /api/admin/scheduler/health-recheck     only the links the delivery rule
- *                                               hid, once in every UTC hour
+ *   GET /api/admin/scheduler/health-recheck     the links waiting on a delivery
+ *                                               verdict, once in every UTC hour
  *   GET /api/admin/scheduler/sync               once a day, at the fixed hour
  *
  * The task is a path segment, not a query string: Vercel cron paths must be

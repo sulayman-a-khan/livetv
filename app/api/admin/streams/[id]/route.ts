@@ -135,7 +135,11 @@ export async function PATCH(
           result,
           now,
           stream.lastCountedFailureDay,
-          stream.deliveryHidden
+          {
+            deliveryHidden: stream.deliveryHidden,
+            deliveryMisses: stream.deliveryMisses,
+            lastDeliveryMissAt: stream.lastDeliveryMissAt,
+          }
         );
         stream.status = decision.status;
         stream.latency = decision.latency;
@@ -199,7 +203,11 @@ export async function PATCH(
       result,
       now,
       mem.lastCountedFailureDay,
-      mem.deliveryHidden
+      {
+        deliveryHidden: mem.deliveryHidden,
+        deliveryMisses: mem.deliveryMisses,
+        lastDeliveryMissAt: mem.lastDeliveryMissAt,
+      }
     );
     mem.status = decision.status;
     mem.latency = decision.latency;

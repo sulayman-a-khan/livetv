@@ -190,6 +190,8 @@ async function loadChannelStates(
         manual: Boolean(l.manual),
         adminDisabled: Boolean(l.adminDisabled),
         deliveryHidden: Boolean(l.deliveryHidden),
+        deliveryMisses: l.deliveryMisses || 0,
+        lastDeliveryMissAt: l.lastDeliveryMissAt ?? null,
       })),
       sourceLinkIds,
     };

@@ -4,7 +4,6 @@ import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
-import { MAX_CONSECUTIVE_FAILURES } from "@/lib/streamHealth";
 import { getCategoryBySlug, isChannelCategory } from "@/lib/categories";
 
 // SoluPlay Channels API Route - Force Recompile for Logo Fix
@@ -51,17 +50,14 @@ function toPublicStream(stream: {
   };
 }
 
-/** active → degraded (while its failure streak is short) → nothing. */
-function pickUsableStreams<T extends { status?: string; failedAttempts?: number }>(
-  candidates: T[]
-): T[] {
-  const active = candidates.filter((stream) => stream.status === "active");
-  if (active.length > 0) return active;
-  const degraded = candidates.filter(
-    (stream) =>
-      stream.status === "degraded" && (stream.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES
-  );
-  return degraded;
+/**
+ * Only links the checker last saw handing over media. `degraded` means "Retrying"
+ * — it failed a check and is still monitored, but a tile built on it is a tile
+ * that does not play, so it stays in the admin gate and out of the catalogue.
+ * A link that delivers again on a later pass comes back with no admin action.
+ */
+function pickUsableStreams<T extends { status?: string }>(candidates: T[]): T[] {
+  return candidates.filter((stream) => stream.status === "active");
 }
 
 export async function GET(req: NextRequest) {
@@ -109,13 +105,13 @@ export async function GET(req: NextRequest) {
 
       const channelIds = channels.map((c) => c._id);
 
-      // Only the links a viewer could actually play: broken mirrors are internal
-      // bookkeeping, and publishing one as `primaryStream` hands the player a URL
-      // that is already known to be dead.
+      // Only the links a viewer could actually play: a `broken` mirror is dead
+      // bookkeeping and a `degraded` one is retrying, and publishing either as
+      // `primaryStream` hands the player a URL that is already known to fail.
       const usableStreams = channelIds.length
         ? await StreamLink.find({
             channelId: { $in: channelIds },
-            status: { $in: ["active", "degraded"] },
+            status: "active",
             adminDisabled: { $ne: true },
           })
             .sort({ priority: 1, latency: 1 })

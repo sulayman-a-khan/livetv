@@ -67,6 +67,9 @@ export interface ChannelLink {
   adminDisabled?: boolean;
   /** Hidden by the delivery rule; only a probe that delivers media lifts it. */
   deliveryHidden?: boolean;
+  /** Delivery misses already on record — the rule counts across checks. */
+  deliveryMisses?: number | null;
+  lastDeliveryMissAt?: Date | string | null;
 }
 
 /** The channel record (if any) that a canonical key resolves to. */
@@ -345,7 +348,11 @@ export function planPlaylistSync(
             probe,
             now,
             link.lastCountedFailureDay,
-            link.deliveryHidden
+            {
+              deliveryHidden: link.deliveryHidden,
+              deliveryMisses: link.deliveryMisses,
+              lastDeliveryMissAt: link.lastDeliveryMissAt,
+            }
           );
           const revived = link.status !== "active" && decision.status === "active";
           if (revived) plan.stats.linksRevived++;

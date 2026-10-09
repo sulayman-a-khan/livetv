@@ -21,6 +21,12 @@
  * static, and every job expression in `vercel.json` runs once per day — which is
  * also why the hourly re-check is 24 daily expressions instead of one per-hour.
  *
+ * Two project settings decide whether any of this ever runs. Vercel invokes the
+ * path on the production URL and does not follow redirects, so Deployment
+ * Protection answering with a 3xx to SSO ends the job as a silent success; and
+ * the `Authorization: Bearer $CRON_SECRET` header is only sent when that variable
+ * exists in the project. Either one missing means no scheduled pass at all.
+ *
  * Safety properties that matter here:
  *   - Every health pass is pinned-only: a batch with no pinned channels probes
  *     nothing, and never widens to the unpinned catalogue.
@@ -44,6 +50,7 @@ import {
   getLastFullHealthCheckTime,
 } from "@/lib/autoHealthChecker";
 import { runPlaylistMonitorTick, getPlaylistMonitorStatus } from "@/lib/playlistMonitor";
+import { recordSchedulerHeartbeat } from "@/lib/settings";
 import { HEALTH_BATCHES, getHealthBatch, DELIVERY_RECHECK_TASK } from "@/lib/healthSchedule";
 
 export const dynamic = "force-dynamic";
@@ -120,6 +127,10 @@ async function handle(
       { status: 400, ...responseInit }
     );
   }
+
+  // Stamp arrival before doing any work: the run may be cut off by the wall
+  // clock, but "the scheduler reached us at HH:MM" still stands.
+  await recordSchedulerHeartbeat(task, scheduledInvocation(req));
 
   const ran: Record<string, unknown> = {};
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getLastHealthCheckTime, getLastFullHealthCheckTime, runAutoHealthCheck } from "@/lib/autoHealthChecker";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { getSchedulerHeartbeat } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
   const lastCheck = getLastHealthCheckTime();
   const lastFullCheck = getLastFullHealthCheckTime();
   const isRunning = !!global.__freetv_health_checker_started;
+  const scheduler = await getSchedulerHeartbeat();
 
   return NextResponse.json(
     {
@@ -32,6 +34,10 @@ export async function GET(req: NextRequest) {
         intervalMinutes: 360,
         lastCheckAt: lastCheck || "Not yet run",
         lastFullCheckAt: lastFullCheck || "Not yet run",
+        /** The last time Vercel's scheduler reached this app, if it ever has. */
+        lastSchedulerAt: scheduler?.at || null,
+        lastSchedulerTask: scheduler?.task || null,
+        lastSchedulerWasVercel: scheduler ? scheduler.scheduled : null,
       },
     },
     { headers: { "Cache-Control": "no-store" } }

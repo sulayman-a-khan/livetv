@@ -8,6 +8,7 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { resolveStreamUrl } from "@/lib/streamUrl";
 import { getDynamicStreamBaseUrl } from "@/lib/settings";
+import { isUsableViewerLink } from "@/lib/streamHealth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,13 @@ const CHANNEL_CACHE = "public, s-maxage=15, stale-while-revalidate=120";
  * Referer, so shipping them just leaks the upstream configuration.
  */
 const STREAM_FIELDS = "_id url priority status latency failedAttempts";
+
+/**
+ * Read for the visibility gate only, and stripped by `projectStream` on the way
+ * out: a link already labelled "Not delivering" is not allowed to be the reason
+ * this channel still looks playable.
+ */
+const STREAM_GATE_FIELDS = " deliveryHidden deliveryMisses";
 
 /** Same field whitelist, applied to the in-memory store's rows. */
 function projectStream(stream: {
@@ -64,7 +72,7 @@ export async function GET(
           Channel.findOne({ _id: id, isPinned: true }).lean(),
           StreamLink.find({ channelId: id, adminDisabled: { $ne: true } })
             .sort({ priority: 1, latency: 1 })
-            .select(STREAM_FIELDS)
+            .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
             .lean(),
         ]);
 
@@ -73,8 +81,10 @@ export async function GET(
           // checker last saw delivering media. A `degraded` link is "Retrying" —
           // monitored in the admin gate, not offered here — so a channel whose
           // only link failed a check reports `playable: false` instead of handing
-          // the player a URL that is already known to stall.
-          let usableStreams = streams.filter((stream) => stream.status === "active");
+          // the player a URL that is already known to stall. The same holds for a
+          // link already marked "Not delivering": another usable mirror on this
+          // channel still carries it, but that link alone no longer does.
+          let usableStreams = streams.filter(isUsableViewerLink);
 
           const directUrl = (channel as any).streamUrl || (channel as any).url;
           if (usableStreams.length === 0 && directUrl) {
@@ -169,7 +179,7 @@ export async function GET(
     const candidates = streams
       .filter((s) => s.channelId === id && !s.adminDisabled)
       .sort((a, b) => (a.priority || 99) - (b.priority || 99) || (a.latency || 0) - (b.latency || 0));
-    let chStreams = candidates.filter((stream) => stream.status === "active");
+    let chStreams = candidates.filter(isUsableViewerLink);
 
     const directUrl = (channel as any).streamUrl || (channel as any).url;
     if (chStreams.length === 0 && directUrl) {

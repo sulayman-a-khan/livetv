@@ -5,6 +5,7 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { getCategoryBySlug, isChannelCategory } from "@/lib/categories";
+import { isUsableViewerLink } from "@/lib/streamHealth";
 
 // SoluPlay Channels API Route - Force Recompile for Logo Fix
 export const dynamic = "force-dynamic";
@@ -32,6 +33,21 @@ const CHANNEL_FIELDS =
  */
 const STREAM_FIELDS = "_id channelId url priority status latency failedAttempts";
 
+/**
+ * Read alongside the payload fields, for the visibility gate only: the delivery
+ * flags behind the "Not delivering" label. Neither one leaves the server —
+ * `toPublicStream` still whitelists what a viewer gets.
+ */
+const STREAM_GATE_FIELDS = " deliveryHidden deliveryMisses";
+
+/** The stored fields `isUsableViewerLink` reads. */
+type ViewerLinkFields = {
+  status?: string;
+  adminDisabled?: boolean;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
+};
+
 function toPublicStream(stream: {
   _id: unknown;
   url: string;
@@ -55,9 +71,12 @@ function toPublicStream(stream: {
  * — it failed a check and is still monitored, but a tile built on it is a tile
  * that does not play, so it stays in the admin gate and out of the catalogue.
  * A link that delivers again on a later pass comes back with no admin action.
+ * `isUsableViewerLink` adds the delivery case: a link already labelled "Not
+ * delivering" cannot be the reason a channel stays on screen, but it never hides
+ * a channel that has another usable mirror.
  */
-function pickUsableStreams<T extends { status?: string }>(candidates: T[]): T[] {
-  return candidates.filter((stream) => stream.status === "active");
+function pickUsableStreams<T extends ViewerLinkFields>(candidates: T[]): T[] {
+  return candidates.filter(isUsableViewerLink);
 }
 
 export async function GET(req: NextRequest) {
@@ -115,7 +134,7 @@ export async function GET(req: NextRequest) {
             adminDisabled: { $ne: true },
           })
             .sort({ priority: 1, latency: 1 })
-            .select(STREAM_FIELDS)
+            .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
             .lean()
         : [];
 

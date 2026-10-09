@@ -40,6 +40,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import LinkHealthBadge, { type LinkProbeDetail } from "@/components/LinkHealthBadge";
+import { isUsableViewerLink } from "@/lib/streamHealth";
 
 interface AdminDashboardProps {
   secretKey: string;
@@ -95,6 +96,9 @@ interface HealthSchedule {
   intervalMinutes: number;
   lastCheckAt: string;
   lastFullCheckAt: string;
+  lastSchedulerAt: string | null;
+  lastSchedulerTask: string | null;
+  lastSchedulerWasVercel: boolean | null;
 }
 
 /** Short labels for the five rails, keyed by slug so the tabs and the table agree. */
@@ -251,6 +255,34 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       health: fmt(last + schedule.intervalMinutes * 60 * 1000 - nowTick),
       running: schedule.running,
     };
+  }, [schedule, nowTick]);
+
+  // Vercel counts a blocked cron as a finished job: a 3xx from Deployment
+  // Protection or a 401 from a missing CRON_SECRET leaves no cron log and no
+  // request in the app. So the dashboard states whether the scheduler arrives,
+  // rather than letting a dead automation layer look like a bad health rule.
+  const schedulerStatus = useMemo(() => {
+    if (!schedule) return null;
+    const at = schedule.lastSchedulerAt ? Date.parse(schedule.lastSchedulerAt) : NaN;
+    const via =
+      schedule.lastSchedulerWasVercel === false ? "admin trigger" : "cron";
+    const label = schedule.lastSchedulerTask || "check";
+    if (Number.isNaN(at)) {
+      return {
+        ok: false,
+        text: "No scheduled check has ever reached this app — Vercel cron is blocked by Deployment Protection, or CRON_SECRET is not set.",
+      };
+    }
+    const mins = Math.max(0, Math.round((nowTick - at) / 60000));
+    const ago = mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`;
+    // Every job expression runs once a day, so a day without one is a stoppage.
+    if (mins > 26 * 60) {
+      return {
+        ok: false,
+        text: `Last scheduled check: ${label} (${via}), ${ago} ago — nothing since, so the cron is not running.`,
+      };
+    }
+    return { ok: true, text: `Last scheduled check: ${label} (${via}), ${ago} ago.` };
   }, [schedule, nowTick]);
 
   // The five and only five catalogue categories (Sports, Bangla, Indian,
@@ -953,9 +985,9 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     </div>
   );
 
-  /** The viewer-facing state: at least one active mirror, or hidden. */
+  /** The viewer-facing state: at least one mirror the catalogue would serve, or hidden. */
   const renderChannelStatus = (ch: ChannelWithStreams) => {
-    const activeCount = ch.streams.filter((s) => s.status === "active").length;
+    const activeCount = ch.streams.filter(isUsableViewerLink).length;
     return activeCount > 0 ? (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
         <CheckCircle2 className="w-3 h-3 shrink-0" /> Active ({activeCount})
@@ -1032,10 +1064,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
               {healthCheckLoading ? "Health Check Running" : "Next Auto-Probe"}
             </p>
-            <p className="text-xs text-slate-500">
-              {nextProbe.running
-                ? "Auto health checker is active on the server."
-                : "No server timers here — the scheduled job runs the passes."}
+            <p
+              className={`text-xs ${
+                schedulerStatus && !schedulerStatus.ok ? "text-amber-400" : "text-slate-500"
+              }`}
+            >
+              {schedulerStatus?.text ??
+                (nextProbe.running
+                  ? "Auto health checker is active on the server."
+                  : "No server timers here — the scheduled job runs the passes.")}
             </p>
           </div>
         </div>

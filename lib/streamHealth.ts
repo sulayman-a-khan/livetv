@@ -134,6 +134,43 @@ export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
 }
 
 /**
+ * The links a viewer may be handed. The catalogue has always required
+ * `status === "active"`; this adds the one thing that status can still be
+ * carrying a pass late — the "Not delivering" label, which a link wears as soon
+ * as it holds an unpaid delivery miss, before the second miss flips the stored
+ * status to `broken`. A channel that has another usable mirror keeps showing it
+ * either way; a channel whose only candidate is that link stops propping itself
+ * up on it. No other state is judged here: healthy, slow, retrying, dead,
+ * browser-blocked and disabled links pass or fail exactly as the status gate
+ * alone decided.
+ *
+ * Takes the stored fields that decide delivery and nothing else — the streak and
+ * latency the verdict ignores are held at zero inside the classification call.
+ */
+export function isUsableViewerLink(link: {
+  status?: string;
+  adminDisabled?: boolean;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
+}): boolean {
+  // Asked only of links the status gate already accepted, so a browser-blocked
+  // one is never seen here — it is stored `broken`. The streak and latency the
+  // delivery verdict ignores are held at zero inside the classification.
+  if (link.status !== "active") return false;
+  return (
+    classifyLinkHealth({
+      status: "active",
+      failedAttempts: 0,
+      latency: 0,
+      adminDisabled: link.adminDisabled,
+      browserBlocker: null,
+      deliveryHidden: link.deliveryHidden,
+      deliveryMisses: link.deliveryMisses,
+    }) !== "delivery-failed"
+  );
+}
+
+/**
  * A probe has its own retries; this persisted streak is a second guard on top.
  * A DEGRADED result verified downloadable media, so it counts as working. A
  * same-day repeat of an already-counted failure leaves the streak alone — that

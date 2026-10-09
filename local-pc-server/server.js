@@ -913,9 +913,23 @@ function forwarderPath(ev) {
   return "/live/" + ev.streamId + ".m3u8";
 }
 
-/** What gets written to the cloud as primaryStreamUrl. */
+/** Can a viewer's player fetch this at all? A source entry may be a channel number. */
+function isViewerFetchableUrl(url) {
+  return /^https?:\/\//i.test(String(url || "").trim());
+}
+
+/**
+ * What gets written to the cloud as primaryStreamUrl.
+ *
+ * "Publish via forwarder" off is only a meaningful instruction when the card's own
+ * entry is a URL the viewer can fetch. Since sources became per-card, that entry is
+ * usually an Xtream channel number, and publishing it verbatim handed the site a
+ * bare number: no CDN hop, no playback, and a card that plays for nobody. Then the
+ * forwarder is the only publishable URL, so it is the one that gets published.
+ */
 function cloudPrimaryUrl(ev) {
-  if (!ev.useForwarder) return ev.primaryStreamUrl;
+  const raw = String(ev.primaryStreamUrl || "").trim();
+  if (!ev.useForwarder && isViewerFetchableUrl(raw)) return raw;
   let base = (CONFIG.publicStreamBaseUrl || localForwarderBase()).trim().replace(/\/+$/, "");
   if (base.startsWith("http://") && !looksLocal(base)) {
     base = "https://" + base.slice(7);
@@ -1256,7 +1270,13 @@ async function probeOrigin(ev) {
 }
 
 async function probeCloud(ev) {
-  if (!ev.useForwarder) {
+  // The CDN tile answers one question: does the URL this card hands viewers pass
+  // through the CDN? A card in genuine direct mode publishes its own provider URL,
+  // which does not, and there is nothing of ours to probe. Every other card is
+  // probed at the URL a viewer actually receives—including one whose entry was too
+  // raw to publish and is now served by the forwarder, which is exactly the card
+  // this tile used to misreport as "direct".
+  if (!ev.useForwarder && isViewerFetchableUrl(ev.primaryStreamUrl)) {
     const state = { online: true, checkedAt: new Date().toISOString(), latencyMs: 0, direct: true };
     cloudState.set(ev.id, state);
     return state;
@@ -2384,11 +2404,15 @@ async function syncToCloud(options) {
     const events = store.events;
 
     for (const ev of events) {
-      if (ev.useForwarder && !CONFIG.publicStreamBaseUrl) {
+      // The forwarder serves a card whenever it is ticked, and whenever the card's
+      // own entry is too raw for a viewer to fetch. Either way the published URL is
+      // built on the public base, so a missing base would publish a localhost feed.
+      const publishesForwarder = ev.useForwarder || !isViewerFetchableUrl(ev.primaryStreamUrl);
+      if (publishesForwarder && !CONFIG.publicStreamBaseUrl) {
         throw httpError(
           400,
-          'PUBLIC_STREAM_BASE_URL is not set, but "' + ev.matchTitle + '" publishes via the forwarder. ' +
-            "Set it in .env (e.g. https://origin.example.com) or untick \"Publish via forwarder\" for that card."
+          'PUBLIC_STREAM_BASE_URL is not set, but "' + ev.matchTitle + '" publishes its viewers through the forwarder. ' +
+            "Set it in .env (e.g. https://origin.example.com), or give that card its own full stream URL and untick \"Publish via forwarder\"."
         );
       }
       if (!ev.useForwarder && looksLocal(ev.primaryStreamUrl)) {

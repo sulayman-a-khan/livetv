@@ -7,6 +7,7 @@ import { refreshChannelLinks } from "@/lib/maintenanceRunner";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { checkHlsStream } from "@/lib/streamProbe";
 import { classifyLinkHealth, decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
+import { toLastCheckDetail } from "@/lib/autoHealthChecker";
 import type { BrowserBlocker } from "@/lib/streamProbe";
 
 export const dynamic = "force-dynamic";
@@ -151,6 +152,9 @@ export async function PATCH(
         stream.deliveryMisses = decision.deliveryMisses;
         stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
         stream.deliveryHidden = decision.deliveryHidden;
+        // Keep the probe's own report on the link: the row is rebuilt from the
+        // store after this response, so anything not saved here is invisible.
+        stream.lastCheck = toLastCheckDetail(result);
         await stream.save();
         await refreshChannelLinks(channelId);
 

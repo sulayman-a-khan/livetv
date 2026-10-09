@@ -5,6 +5,7 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { checkHlsStream } from "@/lib/streamProbe";
 import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
+import { toLastCheckDetail } from "@/lib/autoHealthChecker";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
@@ -138,6 +139,10 @@ export async function POST(req: NextRequest) {
         stream.deliveryMisses = decision.deliveryMisses;
         stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
         stream.deliveryHidden = decision.deliveryHidden;
+        // What the probe actually saw, kept with the link. Without this a batch
+        // run changes the verdict but leaves the row describing the last cron
+        // pass, so the admin cannot tell that this press is what decided it.
+        stream.lastCheck = toLastCheckDetail(result);
         await stream.save();
         checkedCount++;
         if (decision.browserBlocker) unplayableCount++;

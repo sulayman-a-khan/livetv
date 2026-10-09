@@ -23,6 +23,14 @@ export function linkHealthLabel(state: LinkHealthState): string {
   return PRESENTATION[state].label;
 }
 
+/** The probe's own last report, stored on the link by every check that runs. */
+export interface LinkProbeDetail {
+  healthStatus?: string | null;
+  errorCode?: string | null;
+  responseTime?: number | null;
+  checkedAt?: string | Date | null;
+}
+
 export interface LinkHealthInput {
   status: "active" | "degraded" | "broken";
   failedAttempts?: number;
@@ -33,11 +41,26 @@ export interface LinkHealthInput {
   browserBlocker?: string | null;
   deliveryHidden?: boolean;
   deliveryMisses?: number | null;
+  lastCheck?: LinkProbeDetail | null;
+}
+
+/** "checked 12m ago" — so a row can show that a run actually reached this link. */
+function checkedAgo(at: string | Date | null | undefined): string | null {
+  if (!at) return null;
+  const ms = Date.now() - new Date(at).getTime();
+  if (!Number.isFinite(ms)) return null;
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "checked just now";
+  if (mins < 60) return `checked ${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `checked ${hours}h ago`;
+  return `checked ${Math.round(hours / 24)}d ago`;
 }
 
 /**
  * The dot + label for one link, plus a tooltip carrying the detail a badge has
- * no room for (daily failure streak, and whether the admin added it by hand).
+ * no room for: the last probe's own verdict and when it ran, the daily failure
+ * streak, and whether the admin added the link by hand.
  */
 export default function LinkHealthBadge({ link }: { link: LinkHealthInput }) {
   const state = classifyLinkHealth({
@@ -52,12 +75,21 @@ export default function LinkHealthBadge({ link }: { link: LinkHealthInput }) {
   });
   const view = PRESENTATION[state];
   const streak = link.failedAttempts || 0;
+  const probe = link.lastCheck?.healthStatus
+    ? `last probe: ${link.lastCheck.healthStatus}${
+        link.lastCheck.errorCode && link.lastCheck.errorCode !== "OK"
+          ? `/${link.lastCheck.errorCode}`
+          : ""
+      }`
+    : null;
   const title = [
     view.label,
     browserBlockerLabel(link.browserBlocker as BrowserBlocker | null),
     link.deliveryHidden
       ? "No media inside 10 seconds, twice — hidden; the hourly re-check brings it back when it delivers"
       : "",
+    checkedAgo(link.lastCheckedAt ?? link.lastCheck?.checkedAt),
+    probe,
     streak > 0 ? `${streak} failed daily check(s)` : "",
     link.manual ? "added by admin — never auto-deleted" : "",
   ]

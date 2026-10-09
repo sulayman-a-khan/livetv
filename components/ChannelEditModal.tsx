@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CHANNEL_CATEGORIES, normalizeCategory, type ChannelCategory } from "@/lib/categories";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
-import LinkHealthBadge, { linkHealthLabel } from "@/components/LinkHealthBadge";
+import LinkHealthBadge, { linkHealthLabel, type LinkProbeDetail } from "@/components/LinkHealthBadge";
 import HlsPlayer from "@/components/HlsPlayer";
 import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
@@ -36,6 +36,7 @@ export interface EditableStream {
   browserBlocker?: string | null;
   deliveryHidden?: boolean;
   deliveryMisses?: number | null;
+  lastCheck?: LinkProbeDetail | null;
 }
 
 export interface EditableChannel {

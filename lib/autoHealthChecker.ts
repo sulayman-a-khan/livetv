@@ -160,7 +160,14 @@ async function probeBatch<T extends { url: string; headers?: Record<string, stri
 }
 
 /** Shrinks a full HLS check result down to the subset worth persisting on the stream record. */
-function toLastCheckDetail(result: HlsCheckResult) {
+/**
+ * The probe's own words, stored with the link so the admin row can say what it
+ * saw — the verdict fields (`status`, `deliveryMisses`) answer "is it listed",
+ * this answers "what happened when we tested it, and when". Shared with the
+ * manual health-check and single-link test routes, which otherwise leave a row
+ * reporting the last cron pass as if it were today's press.
+ */
+export function toLastCheckDetail(result: HlsCheckResult) {
   return {
     healthStatus: result.status,
     errorCode: result.errorCode,

@@ -39,7 +39,7 @@ import {
   Ban,
   RotateCcw,
 } from "lucide-react";
-import LinkHealthBadge from "@/components/LinkHealthBadge";
+import LinkHealthBadge, { type LinkProbeDetail } from "@/components/LinkHealthBadge";
 
 interface AdminDashboardProps {
   secretKey: string;
@@ -76,6 +76,7 @@ interface ChannelWithStreams {
     browserBlocker?: string | null;
     deliveryHidden?: boolean;
     deliveryMisses?: number | null;
+    lastCheck?: LinkProbeDetail | null;
   }>;
 }
 

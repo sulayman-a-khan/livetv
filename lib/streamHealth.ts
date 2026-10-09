@@ -8,12 +8,12 @@
  * the streak once, whatever else happened in it, so
  * `MAX_CONSECUTIVE_FAILURES` means "3 consecutive daily health checks".
  *
- * On top of that sits the delivery rule, because a link that answers slowly is
- * as good as gone for anyone who pressed play: a probe gets 10 seconds to hand
- * over real media, and a miss confirmed by a second attempt ~15 seconds later
- * hides the link immediately instead of waiting three days. Hidden is not gone —
- * the hourly re-check (`runDeliveryRecheck`) shows it again as soon as it
- * delivers.
+ * On top of that sits the delivery rule, because a link that gives a viewer
+ * nothing is as good as gone: every probe attempt that hands over no real media
+ * counts as a miss — a 10-second timeout and a connection refused in 400ms are
+ * the same answer to "can anyone watch this?" — and two misses hide the link
+ * immediately instead of waiting three days. Hidden is not gone — the hourly
+ * re-check (`runDeliveryRecheck`) shows it again as soon as it delivers.
  *
  * What a viewer sees is narrower than what is stored. `degraded` means "this
  * link failed a check and is being retried", so the public catalogue lists
@@ -81,9 +81,9 @@ export const DEAD_LINK_PURGE_DAYS = 7;
 export const SLOW_LATENCY_MS = 1200;
 
 /**
- * Misses that hide a link for delivery. The probe confirms a miss with a second
- * attempt ~15 seconds later, and a player's report counts the same way, so two
- * is "this link cannot serve a viewer right now" — never one bad connection.
+ * Misses that hide a link for delivery. Two independent looks have to come back
+ * with no media — retries inside one probe, a later pass, or a viewer's player
+ * all count the same way — so one bad connection never blanks a channel.
  */
 export const DELIVERY_MISSES_TO_HIDE = 2;
 
@@ -239,9 +239,11 @@ export interface DeliveryMissRecord {
 
 /**
  * Counts a viewer-side miss: the watch page gave up on this server link before
- * it showed a frame. Reports from one viewing session only count while they keep
- * arriving inside `DELIVERY_MISS_WINDOW_MS`; once that lapses the count restarts,
- * so a channel-switching viewer cannot condemn a link on its own.
+ * it showed a frame. Reports that keep arriving inside `DELIVERY_MISS_WINDOW_MS`
+ * are one viewer's story — three give-ups from one channel-flipping session are
+ * still a single miss — and a report after that window has lapsed is new
+ * evidence from a fresh look, so it adds one. The count only ever grows here: a
+ * link clears back down when a probe actually hands over media.
  */
 export function recordDeliveryMiss(
   previousDeliveryMisses: number | undefined | null,
@@ -249,8 +251,10 @@ export function recordDeliveryMiss(
   at: Date = new Date()
 ): DeliveryMissRecord {
   const lastAt = previousLastDeliveryMissAt ? new Date(previousLastDeliveryMissAt).getTime() : 0;
-  const inWindow = Number.isFinite(lastAt) && lastAt > 0 && at.getTime() - lastAt <= DELIVERY_MISS_WINDOW_MS;
-  const deliveryMisses = (inWindow ? Math.max(0, previousDeliveryMisses || 0) : 0) + 1;
+  const inSameBurst =
+    Number.isFinite(lastAt) && lastAt > 0 && at.getTime() - lastAt <= DELIVERY_MISS_WINDOW_MS;
+  const previous = Math.max(0, previousDeliveryMisses || 0);
+  const deliveryMisses = inSameBurst ? Math.max(1, previous) : previous + 1;
   return {
     deliveryMisses,
     lastDeliveryMissAt: at,

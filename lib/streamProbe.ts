@@ -784,11 +784,19 @@ function deliveryMiss(deadlineMs: number, elapsedMs: number): HlsCheckResult {
   });
 }
 
+/**
+ * Did this attempt put media in a player's hands? `ONLINE` verified a playlist
+ * and a segment, `DEGRADED` verified media that was slow or partly unreadable —
+ * either is watchable. Everything else, however fast it failed, is a spinner.
+ */
+function deliveredMedia(result: HlsCheckResult): boolean {
+  return result.ok || result.status === "DEGRADED";
+}
+
 async function probeOnce(
   url: string,
   options: typeof DEFAULTS & { headers?: Record<string, string> }
-): Promise<HlsCheckResult> {
-  const headers = buildHeaders(options.headers);
+): Promise<HlsCheckResult> {  const headers = buildHeaders(options.headers);
 
   // The delivery budget starts here and stops mattering the moment real media
   // is in hand — the checks after that point (live refresh, ffprobe) are
@@ -1389,12 +1397,15 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
 
   let lastResult: HlsCheckResult | null = null;
   let deliveryMisses = 0;
+  /** Attempts that left a player with nothing, however they failed. */
+  let attemptsWithoutMedia = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     lastResult = await probeAttempt();
     lastResult.attempts = attempt;
 
     if (lastResult.status === "UNDELIVERABLE") {
       deliveryMisses++;
+      attemptsWithoutMedia++;
       // Two misses, ~15s apart, is what hides a link. A caller that asked for a
       // single attempt (the hourly re-check) gets exactly that.
       if (deliveryMisses >= DELIVERY_MISSES_TO_CONFIRM || attempt >= maxAttempts) break;
@@ -1407,8 +1418,15 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
       continue;
     }
 
-    // Media arrived, so whatever the earlier attempts were is settled.
-    deliveryMisses = 0;
+    if (deliveredMedia(lastResult)) {
+      // Media arrived, so whatever the earlier attempts were is settled.
+      deliveryMisses = 0;
+      attemptsWithoutMedia = 0;
+    } else {
+      // Refused, 404, not a playlist — a viewer waiting ten seconds gets exactly
+      // as little out of this as out of an origin that never answered.
+      attemptsWithoutMedia++;
+    }
 
     // A `.ts` feed keeps its deliberately lenient single pass: nothing but a
     // delivery miss earns it a second look.
@@ -1425,7 +1443,10 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
   }
 
   const final = lastResult as HlsCheckResult;
-  final.deliveryMisses = final.status === "UNDELIVERABLE" ? deliveryMisses : 0;
+  // The delivery rule asks one question — did a viewer get media? — so every
+  // attempt that answered no is reported, not only the ones that ran out the
+  // 10-second budget. A link that is refused in 400ms is not "no evidence".
+  final.deliveryMisses = deliveredMedia(final) ? 0 : Math.max(1, attemptsWithoutMedia);
   return applyBrowserGate(final, url, merged, gateApplies);
 }
 

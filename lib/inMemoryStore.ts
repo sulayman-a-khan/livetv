@@ -44,6 +44,8 @@ export interface InMemoryStreamLink {
    * streak advances at most once per UTC day, and this is the day it last moved.
    */
   lastCountedFailureDay?: string | null;
+  /** Why a viewer's browser cannot fetch this link; null/absent when it can. */
+  browserBlocker?: string | null;
   /** Hand-added link: automation may probe and rank it, never delete it. */
   manual?: boolean;
   /** Admin took the link out of service; hidden until an admin restores it. */
@@ -64,7 +66,7 @@ export interface InMemoryStreamLink {
    * is purely extra detail for the admin UI/logs.
    */
   lastCheck?: {
-    healthStatus: string; // ONLINE | DEGRADED | OFFLINE | EXPIRED | BLOCKED | INVALID | TIMEOUT | UNKNOWN
+    healthStatus: string; // ONLINE | DEGRADED | UNPLAYABLE | OFFLINE | EXPIRED | BLOCKED | INVALID | TIMEOUT | UNKNOWN
     errorCode: string;
     httpStatus: number | null;
     responseTime: number;
@@ -80,6 +82,9 @@ export interface InMemoryStreamLink {
     attempts: number;
     error: string | null;
     checkedAt: string;
+    /** Whether the origin granted CORS to this site; null when it could not be judged. */
+    browserCors?: boolean | null;
+    browserBlocker?: string | null;
   };
 }
 

@@ -16,6 +16,13 @@ export interface IStreamLink extends Document {
    * once. Reset to null when a probe succeeds.
    */
   lastCountedFailureDay: string | null;
+  /**
+   * Why a viewer's browser cannot fetch this link even though the origin serves
+   * it (`mixed content`, no CORS grant, headers a browser may not send). Null
+   * when the link is reachable in a browser, or before anything has proved
+   * otherwise — automation sets it, an admin clearing it is a deliberate act.
+   */
+  browserBlocker: string | null;
   /** Hand-added by an admin: automation may test and rank it, never delete it. */
   manual: boolean;
   /** Admin took this link out of service: hidden, and automation won't restore it. */
@@ -42,6 +49,7 @@ const StreamLinkSchema = new Schema<IStreamLink>(
     lastCheckedAt: { type: Date, default: null },
     latency: { type: Number, default: 0 },
     lastCountedFailureDay: { type: String, default: null },
+    browserBlocker: { type: String, default: null },
     manual: { type: Boolean, default: false },
     adminDisabled: { type: Boolean, default: false },
     // Some providers require a Referer or Origin; retain it for probes.

@@ -18,6 +18,14 @@
  *                           is actually advancing (best-effort, short)
  *   6. ffprobe (optional) — if ffmpeg/ffprobe is installed on the host, a
  *                           capped probe confirms decodable video/audio
+ *   7. Browser gate       — the checks above run server-side, where any header
+ *                           can be forged and mixed content doesn't exist. A
+ *                           viewer's browser is far stricter, and this app
+ *                           relays no media, so a link the browser can never
+ *                           fetch is not healthy even when the origin serves it
+ *                           happily to us. The gate re-tests what the browser
+ *                           will really request, with the headers a browser is
+ *                           allowed to send, and demands a CORS grant.
  *
  * A normal HTTP 200 is never treated as "online" by itself — every one of
  * the steps above has to agree the stream is actually serving playable
@@ -33,6 +41,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
+import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,6 +53,8 @@ const execFileAsync = promisify(execFile);
 export type HlsHealthStatus =
   | "ONLINE"
   | "DEGRADED"
+  /** The origin serves real media, but no browser on this HTTPS site can fetch it. */
+  | "UNPLAYABLE"
   | "OFFLINE"
   | "EXPIRED"
   | "BLOCKED"
@@ -71,7 +82,22 @@ export type HlsErrorCode =
   | "SEGMENTS_UNAVAILABLE"
   | "PARTIAL_SEGMENTS_UNAVAILABLE"
   | "FFPROBE_DECODE_FAILED"
+  | "BROWSER_MIXED_CONTENT"
+  | "BROWSER_CORS_BLOCKED"
+  | "BROWSER_HEADERS_UNSUPPORTED"
   | "UNKNOWN_ERROR";
+
+/** Why a link that the origin serves happily is still impossible in a browser. */
+export type BrowserBlocker = "MIXED_CONTENT" | "CORS_BLOCKED" | "HEADERS_REQUIRED";
+
+export const BROWSER_BLOCKER_REASON: Record<BrowserBlocker, string> = {
+  MIXED_CONTENT:
+    "Plain HTTP origin: a page served over HTTPS is not allowed to load it, and this app relays no media",
+  CORS_BLOCKED:
+    "The origin never sends Access-Control-Allow-Origin, so the player cannot read the playlist or segments",
+  HEADERS_REQUIRED:
+    "Only reachable with request headers (Referer/Origin/Authorization) a browser is not allowed to send",
+};
 
 export type PlaylistType = "MASTER" | "MEDIA" | null;
 
@@ -101,6 +127,15 @@ export interface HlsCheckResult {
   attempts: number;
   checkedAt: string;
   error: string | null;
+  /**
+   * Whether the origin granted the cross-origin read a browser needs.
+   * `null` means it could not be judged — the probe did not know this
+   * deployment's own origin, so no browser-real `Origin` header was sent.
+   * Never treat null as "blocked".
+   */
+  browserCors: boolean | null;
+  /** Set only when `status === "UNPLAYABLE"`. */
+  browserBlocker: BrowserBlocker | null;
 }
 
 /** Kept for backward compatibility with existing imports. */
@@ -201,11 +236,63 @@ function resolveUrl(uri: string, baseUrl: string): string | null {
 }
 
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
+  const origin = siteOrigin();
   return {
     "User-Agent": DEFAULT_USER_AGENT,
     Accept: "*/*",
+    // A viewer's browser always identifies where the request came from, and a
+    // CDN's CORS answer depends on it. Probing without an Origin would get an
+    // answer no browser ever receives.
+    ...(origin ? { Origin: origin, Referer: `${origin}/` } : {}),
     ...extra,
   };
+}
+
+/**
+ * This deployment's own browser origin, or null when it cannot be known (local
+ * runs). The CORS verdict needs it: an `Origin` we never sent is a CORS answer
+ * we never got, so without it the gate stays silent instead of guessing.
+ */
+function siteOrigin(): string | null {
+  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return host ? `https://${host}` : null;
+}
+
+function isLocalHost(host: string): boolean {
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
+  const parts = host.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = parts;
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 169;
+}
+
+/**
+ * The URL a viewer's browser really requests. `normalizeDirectPublicUrl` builds
+ * the watch page's ladder, so probing anything else would test a URL nobody
+ * ever plays — notably an `http://` link the app upgrades to HTTPS before use.
+ */
+function browserPlaybackUrl(rawUrl: string): string {
+  return normalizeDirectPublicUrl(rawUrl) || rawUrl.trim();
+}
+
+/**
+ * The direct-play rules bind only links the browser fetches from the origin
+ * itself. Local/LAN hosts, Cloudflare tunnels and `/live/` forwarder paths are
+ * reached through the secured relay, whose own rules are not these ones, so
+ * they keep the ordinary checks.
+ */
+function isRelayedUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return (
+      isLocalHost(host) ||
+      host.endsWith(".trycloudflare.com") ||
+      parsed.pathname.includes("/live/")
+    );
+  } catch {
+    return true; // unreadable URL: nothing to judge from a browser's point of view
+  }
 }
 
 interface FetchOutcome {
@@ -420,6 +507,7 @@ interface SegmentCheckOutcome {
   ok: boolean;
   status: number | null;
   bytesRead: number;
+  acao: string | null;
 }
 
 /** Verifies one media segment is actually downloadable and isn't an HTML error page. HEAD first (cheap); falls back to a small ranged GET for CDNs that don't implement HEAD correctly. */
@@ -428,11 +516,19 @@ async function checkSegment(
   headers: Record<string, string>,
   timeoutMs: number
 ): Promise<SegmentCheckOutcome> {
+  let acao: string | null = null;
+  const remember = (response: Response | null) => {
+    const value = response?.headers.get("access-control-allow-origin") || null;
+    if (value) acao = value;
+    return value;
+  };
+
   const head = await timedFetch(url, { method: "HEAD", headers }, timeoutMs);
+  if (head.response) remember(head.response);
   if (head.response && (head.response.ok || head.response.status === 206)) {
     const len = parseInt(head.response.headers.get("content-length") || "0", 10);
     if (len > 0 || head.response.status === 206) {
-      return { ok: true, status: head.response.status, bytesRead: len };
+      return { ok: true, status: head.response.status, bytesRead: len, acao };
     }
     // HEAD succeeded but reported 0 bytes — verify with a real GET before giving up on it.
   }
@@ -442,18 +538,19 @@ async function checkSegment(
     { method: "GET", headers: { ...headers, Range: "bytes=0-4096" } },
     timeoutMs
   );
-  if (!get.response) return { ok: false, status: null, bytesRead: 0 };
+  if (!get.response) return { ok: false, status: null, bytesRead: 0, acao };
+  remember(get.response);
   if (!get.response.ok && get.response.status !== 206) {
-    return { ok: false, status: get.response.status, bytesRead: 0 };
+    return { ok: false, status: get.response.status, bytesRead: 0, acao };
   }
 
   const contentType = (get.response.headers.get("content-type") || "").toLowerCase();
   const { text, bytesRead } = await readBodyCapped(get.response, 4096);
-  if (bytesRead === 0) return { ok: false, status: get.response.status, bytesRead: 0 };
+  if (bytesRead === 0) return { ok: false, status: get.response.status, bytesRead: 0, acao };
   if (looksLikeHtmlErrorPage(text, contentType)) {
-    return { ok: false, status: get.response.status, bytesRead };
+    return { ok: false, status: get.response.status, bytesRead, acao };
   }
-  return { ok: true, status: get.response.status, bytesRead };
+  return { ok: true, status: get.response.status, bytesRead, acao };
 }
 
 /* ------------------------------------------------------------------ *
@@ -590,6 +687,34 @@ function baseResult(overrides: Partial<HlsCheckResult>): HlsCheckResult {
     attempts: overrides.attempts ?? 1,
     checkedAt: new Date().toISOString(),
     error: overrides.error ?? null,
+    browserCors: overrides.browserCors ?? null,
+    browserBlocker: overrides.browserBlocker ?? null,
+  };
+}
+
+/** Rewrites an otherwise-healthy result as "the browser can never fetch this". */
+function asUnplayable(
+  result: HlsCheckResult,
+  blocker: BrowserBlocker,
+  checkedUrl: string
+): HlsCheckResult {
+  const reason = BROWSER_BLOCKER_REASON[blocker];
+  const errorCode: HlsErrorCode =
+    blocker === "MIXED_CONTENT"
+      ? "BROWSER_MIXED_CONTENT"
+      : blocker === "CORS_BLOCKED"
+        ? "BROWSER_CORS_BLOCKED"
+        : "BROWSER_HEADERS_UNSUPPORTED";
+  return {
+    ...result,
+    ok: false,
+    status: "UNPLAYABLE",
+    errorCode,
+    latency: result.responseTime,
+    reason,
+    finalUrl: checkedUrl || result.finalUrl,
+    error: reason,
+    browserBlocker: blocker,
   };
 }
 
@@ -617,6 +742,17 @@ async function probeOnce(
 ): Promise<HlsCheckResult> {
   const headers = buildHeaders(options.headers);
 
+  // The player fetches every playlist and every segment with XHR, so each
+  // response it touches needs the browser's permission slip. Without a known
+  // site origin we sent no `Origin` header, so the answer tells us nothing —
+  // `corsGranted` stays null and the gate keeps quiet.
+  const originKnown = Boolean(siteOrigin());
+  let corsGranted: boolean | null = originKnown ? true : null;
+  const noteCors = (response: Response | null) => {
+    if (!originKnown) return;
+    if (!response || !response.headers.get("access-control-allow-origin")) corsGranted = false;
+  };
+
   // ---- STEP 1: HTTP request for the playlist itself ----
   const playlistFetch = await timedFetch(url, { method: "GET", headers }, options.timeoutMs);
 
@@ -631,6 +767,7 @@ async function probeOnce(
 
   const response = playlistFetch.response;
   const finalUrl = response.url || url;
+  noteCors(response);
 
   if (!response.ok && response.status !== 206) {
     const { status, errorCode } = classifyHttpStatus(response.status, url);
@@ -719,6 +856,7 @@ async function probeOnce(
       mediaPlaylistUrl = variantFetch.response.url || variantUrl;
       mediaParsed = parsedVariant;
       resolvedOk = true;
+      noteCors(variantFetch.response);
       break;
     }
 
@@ -746,6 +884,7 @@ async function probeOnce(
       playlistType,
       isLive: mediaParsed.isLive,
       segmentCount: 0,
+      browserCors: corsGranted,
       error: "Playlist parsed but currently lists no media segments",
     });
   }
@@ -756,7 +895,7 @@ async function probeOnce(
   for (const seg of sampledSegments) {
     const segUrl = resolveUrl(seg.uri, mediaPlaylistUrl);
     if (!segUrl) {
-      segmentResults.push({ ok: false, status: null, bytesRead: 0 });
+      segmentResults.push({ ok: false, status: null, bytesRead: 0, acao: null });
       continue;
     }
     segmentResults.push(await checkSegment(segUrl, headers, Math.min(options.timeoutMs, 6000)));
@@ -764,6 +903,9 @@ async function probeOnce(
 
   const okSegments = segmentResults.filter((s) => s.ok).length;
   const latestSegment = mediaParsed.segments[mediaParsed.segments.length - 1]?.uri || null;
+  // A downloadable segment the browser is not allowed to read is as good as
+  // missing for a viewer — the player fails on the very first fragment.
+  if (originKnown && segmentResults.some((s) => s.ok && !s.acao)) corsGranted = false;
 
   if (okSegments === 0) {
     return baseResult({
@@ -791,6 +933,7 @@ async function probeOnce(
       isLive: mediaParsed.isLive,
       segmentCount: mediaParsed.segments.length,
       latestSegment,
+      browserCors: corsGranted,
       error: `${segmentResults.length - okSegments}/${segmentResults.length} sampled segments failed`,
     });
   }
@@ -801,6 +944,7 @@ async function probeOnce(
     await sleep(options.liveRefreshDelayMs);
     const refetch = await timedFetch(mediaPlaylistUrl, { method: "GET", headers }, options.timeoutMs);
     if (refetch.response && (refetch.response.ok || refetch.response.status === 206)) {
+      noteCors(refetch.response);
       const refetchBody = await readBodyCapped(refetch.response, 512 * 1024);
       const reparsed = parseM3U8(refetchBody.text);
       const newLatest = reparsed.segments[reparsed.segments.length - 1]?.uri || null;
@@ -848,6 +992,7 @@ async function probeOnce(
       resolution,
       codec,
       fps,
+      browserCors: corsGranted,
       error: "HTTP checks passed but ffprobe could not decode the media",
     });
   }
@@ -866,15 +1011,63 @@ async function probeOnce(
     newSegmentDetected,
     video,
     audio,
-    resolution,
     codec,
+    resolution,
     fps,
+    browserCors: corsGranted,
     error: null,
   });
 }
 
 /** Failure statuses worth retrying — transient/network-shaped, not content-deterministic. */
 const RETRYABLE_STATUSES: HlsHealthStatus[] = ["TIMEOUT", "OFFLINE", "UNKNOWN"];
+
+/**
+ * Step 7 — would a viewer's browser be allowed to fetch any of this?
+ *
+ * Only deterministic refusals count here, because a blocked link is hidden from
+ * users at once instead of being given the daily-failure grace period: the
+ * origin answered but withheld the CORS grant, or answered only because we sent
+ * something a browser is forbidden to send. A timeout or a dropped connection
+ * says nothing about the browser, so those keep the ordinary rules.
+ */
+async function applyBrowserGate(
+  result: HlsCheckResult,
+  url: string,
+  options: typeof DEFAULTS & { headers?: Record<string, string> },
+  gateApplies: boolean
+): Promise<HlsCheckResult> {
+  if (!gateApplies) return result;
+  if (result.status !== "ONLINE" && result.status !== "DEGRADED") return result;
+
+  if (result.browserCors === false) {
+    return asUnplayable(result, "CORS_BLOCKED", url);
+  }
+
+  // The probe may have leaned on an identity a browser cannot copy: the admin's
+  // stored headers, or the player User-Agent this checker forges for `.ts`
+  // feeds. Re-ask with only what a browser is allowed to send.
+  const forgedIdentity = Object.keys(options.headers || {}).length > 0 || isMpegTsUrl(url);
+  if (!forgedIdentity) return result;
+
+  const bare = await timedFetch(
+    url,
+    { method: "GET", headers: buildHeaders() },
+    Math.min(options.timeoutMs, 6000)
+  );
+  const response = bare.response;
+  if (!response) return result; // silence proves nothing
+  if (!response.ok && response.status !== 206) {
+    return asUnplayable(result, "HEADERS_REQUIRED", url);
+  }
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const { text } = await readBodyCapped(response, 4096);
+  if (looksLikeHtmlErrorPage(text, contentType)) {
+    return asUnplayable(result, "HEADERS_REQUIRED", url);
+  }
+  return result;
+}
 
 /* ------------------------------------------------------------------ *
  * MPEG-TS (.ts) probe
@@ -966,6 +1159,11 @@ async function probeTsStream(
 
   const response = res.response;
   const finalUrl = response.url || url;
+  // mpegts.js pulls the feed over XHR, so the browser needs the same CORS
+  // grant here as it does for an HLS segment.
+  const browserCors = siteOrigin()
+    ? Boolean(response.headers.get("access-control-allow-origin"))
+    : null;
 
   if (!response.ok && response.status !== 206) {
     const { status, errorCode } = classifyHttpStatus(response.status, url);
@@ -1030,6 +1228,7 @@ async function probeTsStream(
     isLive: true,
     video: true,
     audio: true,
+    browserCors,
     error: null,
   });
 }
@@ -1042,7 +1241,7 @@ async function probeTsStream(
  * EXPIRED — an HTML error page or an expired token isn't going to change
  * between retries) are returned immediately without wasting attempts.
  */
-export async function checkHlsStream(url: string, options: ProbeOptions = {}): Promise<HlsCheckResult> {
+export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {}): Promise<HlsCheckResult> {
   // YouTube Live links aren't raw HLS manifests — they're played through
   // YouTube's own IFrame Player API (see YouTubeLivePlayer.tsx), so none of
   // the m3u8/segment checks below apply to them. Every #EXTM3U/segment check
@@ -1051,7 +1250,7 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
   // eventually purged by the health checker. Treat it as healthy here and
   // let YouTubeLivePlayer itself report a real playback failure if the
   // broadcast turns out not to be live.
-  if (isYouTubeUrl(url)) {
+  if (isYouTubeUrl(rawUrl)) {
     return baseResult({
       status: "ONLINE",
       errorCode: "OK",
@@ -1059,11 +1258,30 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
       // 1, not 0 — several places in the UI treat a falsy latency as
       // "unknown" and render a dash instead of a number.
       responseTime: 1,
-      finalUrl: url,
+      finalUrl: rawUrl,
       playlistType: null,
       isLive: true,
       error: null,
     });
+  }
+
+  // The browser never sees the stored URL — it sees the one the app builds from
+  // it (`normalizeDirectPublicUrl`, used by the watch page's mirror ladder).
+  // Judge that address instead: a link the app silently upgrades to HTTPS would
+  // otherwise be tested as plain HTTP, which is the opposite of the failure the
+  // viewer runs into.
+  const url = browserPlaybackUrl(rawUrl);
+  const gateApplies = !isRelayedUrl(url);
+
+  if (gateApplies && url.toLowerCase().startsWith("http://")) {
+    // Nothing else to test. An HTTPS page may not load this and this app
+    // relays no media, so no viewer can play it however happily the origin
+    // answers a server-side request.
+    return asUnplayable(
+      baseResult({ status: "UNKNOWN", finalUrl: url, playlistType: null, isLive: true }),
+      "MIXED_CONTENT",
+      url
+    );
   }
 
   const merged = { ...DEFAULTS, ...options, headers: options.headers };
@@ -1076,7 +1294,7 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
   if (isMpegTsUrl(url)) {
     const tsResult = await probeTsStream(url, merged);
     tsResult.attempts = 1;
-    return tsResult;
+    return applyBrowserGate(tsResult, url, merged, gateApplies);
   }
 
   let lastResult: HlsCheckResult | null = null;
@@ -1095,7 +1313,7 @@ export async function checkHlsStream(url: string, options: ProbeOptions = {}): P
     await sleep(backoffMs);
   }
 
-  return lastResult as HlsCheckResult;
+  return applyBrowserGate(lastResult as HlsCheckResult, url, merged, gateApplies);
 }
 
 /**

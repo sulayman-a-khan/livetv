@@ -1,6 +1,11 @@
 "use client";
 
-import { classifyLinkHealth, type LinkHealthState } from "@/lib/streamHealth";
+import {
+  browserBlockerLabel,
+  classifyLinkHealth,
+  type LinkHealthState,
+} from "@/lib/streamHealth";
+import type { BrowserBlocker } from "@/lib/streamProbe";
 
 /** Colour and one-word label per health state — the admin's view of the rules in `lib/streamHealth.ts`. */
 const PRESENTATION: Record<LinkHealthState, { label: string; dot: string; text: string }> = {
@@ -9,6 +14,7 @@ const PRESENTATION: Record<LinkHealthState, { label: string; dot: string; text: 
   unverified: { label: "Unverified", dot: "bg-slate-400", text: "text-slate-400" },
   "temporarily-failed": { label: "Retrying", dot: "bg-amber-400", text: "text-amber-400" },
   dead: { label: "Dead", dot: "bg-red-400", text: "text-red-400" },
+  "unplayable": { label: "Not playable", dot: "bg-rose-500", text: "text-rose-400" },
   disabled: { label: "Disabled", dot: "bg-slate-600", text: "text-slate-500" },
 };
 
@@ -23,6 +29,7 @@ export interface LinkHealthInput {
   lastCheckedAt?: string | Date | null;
   manual?: boolean;
   adminDisabled?: boolean;
+  browserBlocker?: string | null;
 }
 
 /**
@@ -36,11 +43,13 @@ export default function LinkHealthBadge({ link }: { link: LinkHealthInput }) {
     latency: link.latency || 0,
     lastCheckedAt: link.lastCheckedAt ?? null,
     adminDisabled: link.adminDisabled,
+    browserBlocker: (link.browserBlocker ?? null) as BrowserBlocker | null,
   });
   const view = PRESENTATION[state];
   const streak = link.failedAttempts || 0;
   const title = [
     view.label,
+    browserBlockerLabel(link.browserBlocker as BrowserBlocker | null),
     streak > 0 ? `${streak} failed daily check(s)` : "",
     link.manual ? "added by admin — never auto-deleted" : "",
   ]

@@ -7,6 +7,7 @@ import { refreshChannelLinks } from "@/lib/maintenanceRunner";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { checkHlsStream } from "@/lib/streamProbe";
 import { classifyLinkHealth, decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
+import type { BrowserBlocker } from "@/lib/streamProbe";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,7 @@ function linkView(link: {
   failedAttempts?: number;
   lastCheckedAt?: Date | string | null;
   lastCountedFailureDay?: string | null;
+  browserBlocker?: string | null;
   manual?: boolean;
   adminDisabled?: boolean;
 }) {
@@ -41,6 +43,7 @@ function linkView(link: {
     failedAttempts: link.failedAttempts ?? 0,
     lastCheckedAt: link.lastCheckedAt ?? null,
     lastCountedFailureDay: link.lastCountedFailureDay ?? null,
+    browserBlocker: link.browserBlocker ?? null,
     manual: Boolean(link.manual),
     adminDisabled: Boolean(link.adminDisabled),
     health: classifyLinkHealth({
@@ -49,6 +52,7 @@ function linkView(link: {
       latency: link.latency ?? 0,
       lastCheckedAt: link.lastCheckedAt,
       adminDisabled: link.adminDisabled,
+      browserBlocker: (link.browserBlocker ?? null) as BrowserBlocker | null,
     }),
   };
 }
@@ -108,6 +112,7 @@ export async function PATCH(
           stream.failedAttempts = 0;
           stream.firstFailedAt = null;
           stream.lastCountedFailureDay = null;
+          stream.browserBlocker = null;
         }
 
         const result = await checkHlsStream(stream.url, {
@@ -128,6 +133,7 @@ export async function PATCH(
         stream.firstFailedAt = decision.firstFailedAt;
         stream.lastCheckedAt = decision.lastCheckedAt;
         stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+        stream.browserBlocker = decision.browserBlocker;
         await stream.save();
         await refreshChannelLinks(channelId);
 
@@ -141,6 +147,7 @@ export async function PATCH(
             latency: result.latency,
             reason: result.reason,
             resolution: result.resolution,
+            browserBlocker: result.browserBlocker,
           },
         });
       }
@@ -164,6 +171,7 @@ export async function PATCH(
       mem.failedAttempts = 0;
       mem.firstFailedAt = null;
       mem.lastCountedFailureDay = null;
+      mem.browserBlocker = null;
     }
 
     const result = await checkHlsStream(mem.url, { ...PROBE_OPTS, headers: mem.headers });
@@ -181,6 +189,7 @@ export async function PATCH(
     mem.firstFailedAt = decision.firstFailedAt;
     mem.lastCheckedAt = decision.lastCheckedAt;
     mem.lastCountedFailureDay = decision.lastCountedFailureDay;
+    mem.browserBlocker = decision.browserBlocker;
     inMemoryDb.saveState();
     await refreshChannelLinks(mem.channelId);
 
@@ -188,7 +197,13 @@ export async function PATCH(
       success: true,
       action,
       stream: linkView(mem),
-      probe: { ok: result.ok, status: result.status, latency: result.latency, reason: result.reason },
+      probe: {
+        ok: result.ok,
+        status: result.status,
+        latency: result.latency,
+        reason: result.reason,
+        browserBlocker: result.browserBlocker,
+      },
     });
   } catch (error: any) {
     console.error("PATCH /api/admin/streams/[id] error:", error);

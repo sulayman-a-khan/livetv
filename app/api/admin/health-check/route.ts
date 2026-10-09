@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
           activeCount: 0,
           degradedCount: 0,
           brokenCount: 0,
+          unplayableCount: 0,
           deletedCount: 0,
         },
       });
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest) {
     let activeCount = 0;
     let degradedCount = 0;
     let brokenCount = 0;
+    /** Links the origin serves but no viewer's browser may fetch — hidden at once. */
+    let unplayableCount = 0;
     const deletedCount = 0;
 
     if (conn) {
@@ -122,8 +125,10 @@ export async function POST(req: NextRequest) {
         stream.firstFailedAt = decision.firstFailedAt;
         stream.lastCheckedAt = decision.lastCheckedAt;
         stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+        stream.browserBlocker = decision.browserBlocker;
         await stream.save();
         checkedCount++;
+        if (decision.browserBlocker) unplayableCount++;
         if (decision.status === "active") activeCount++;
         else if (decision.status === "degraded") degradedCount++;
         else brokenCount++;
@@ -150,6 +155,7 @@ export async function POST(req: NextRequest) {
           activeCount,
           degradedCount,
           brokenCount,
+          unplayableCount,
           deletedCount,
         },
       });
@@ -195,6 +201,8 @@ export async function POST(req: NextRequest) {
               attempts: result.attempts,
               error: result.error,
               checkedAt: result.checkedAt,
+              browserCors: result.browserCors,
+              browserBlocker: result.browserBlocker,
             };
             const previous = stream.status as StoredStreamStatus;
             const decision = decideStreamHealth(
@@ -211,7 +219,9 @@ export async function POST(req: NextRequest) {
             stream.firstFailedAt = decision.firstFailedAt;
             stream.lastCheckedAt = decision.lastCheckedAt;
             stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+            stream.browserBlocker = decision.browserBlocker;
             checkedCount++;
+            if (decision.browserBlocker) unplayableCount++;
             if (decision.status === "active") activeCount++;
             else if (decision.status === "degraded") degradedCount++;
             else brokenCount++;
@@ -236,6 +246,7 @@ export async function POST(req: NextRequest) {
           activeCount,
           degradedCount,
           brokenCount,
+          unplayableCount,
           deletedCount: 0,
         },
       });

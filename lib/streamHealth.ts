@@ -9,7 +9,7 @@
  * `MAX_CONSECUTIVE_FAILURES` means "3 consecutive daily health checks".
  */
 
-import type { HlsCheckResult } from "./streamProbe";
+import type { BrowserBlocker, HlsCheckResult } from "./streamProbe";
 
 export type StoredStreamStatus = "active" | "degraded" | "broken";
 
@@ -29,6 +29,8 @@ export type LinkHealthState =
   | "temporarily-failed"
   /** 3 consecutive failed daily checks — hidden from users, still monitored. */
   | "dead"
+  /** The origin serves it, but a viewer's browser is never allowed to fetch it. */
+  | "unplayable"
   /** Hidden by an admin on purpose; automation never re-enables it. */
   | "disabled";
 
@@ -40,6 +42,8 @@ export interface StreamHealthDecision {
   latency: number;
   /** UTC day (`YYYY-MM-DD`) the streak last advanced — the day gate. */
   lastCountedFailureDay: string | null;
+  /** Why the browser cannot fetch this link; null whenever it can. */
+  browserBlocker: BrowserBlocker | null;
 }
 
 /** The number of consecutive failed DAILY checks required before hiding a link. */
@@ -66,11 +70,25 @@ export interface LinkHealthInput {
   latency: number;
   lastCheckedAt?: Date | string | null;
   adminDisabled?: boolean;
+  browserBlocker?: BrowserBlocker | null;
 }
 
-/** Maps stored health to the six admin-facing states. */
+/** One line for the admin: what the browser could not do, in plain terms. */
+const BLOCKER_LABEL: Record<BrowserBlocker, string> = {
+  MIXED_CONTENT: "HTTP origin — an HTTPS page may not load it",
+  CORS_BLOCKED: "no CORS grant — the player cannot read it",
+  HEADERS_REQUIRED: "needs headers a browser cannot send",
+};
+
+export function browserBlockerLabel(blocker: BrowserBlocker | null | undefined): string | null {
+  if (!blocker) return null;
+  return BLOCKER_LABEL[blocker] || null;
+}
+
+/** Maps stored health to the seven admin-facing states. */
 export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
   if (link.adminDisabled) return "disabled";
+  if (link.browserBlocker) return "unplayable";
   if (link.status === "broken" || link.failedAttempts >= MAX_CONSECUTIVE_FAILURES) return "dead";
   if (link.failedAttempts > 0 || link.status === "degraded") return "temporarily-failed";
   if (!link.lastCheckedAt) return "unverified";
@@ -100,6 +118,23 @@ export function decideStreamHealth(
       lastCheckedAt: checkedAt,
       latency: result.latency > 0 ? result.latency : 0,
       lastCountedFailureDay: null,
+      browserBlocker: null,
+    };
+  }
+
+  if (result.browserBlocker) {
+    // Structural, not a bad minute at the CDN: hiding it behind three daily
+    // checks would keep serving a link no viewer can ever play. The streak is
+    // parked at the hiding threshold rather than inflated, so the 7-day purge
+    // still has to earn its own evidence before deleting anything.
+    return {
+      status: "broken",
+      failedAttempts: Math.max((previousFailedAttempts || 0) + 1, MAX_CONSECUTIVE_FAILURES),
+      firstFailedAt: previousFirstFailedAt || checkedAt,
+      lastCheckedAt: checkedAt,
+      latency: 0,
+      lastCountedFailureDay: utcDayKey(checkedAt),
+      browserBlocker: result.browserBlocker,
     };
   }
 
@@ -120,6 +155,7 @@ export function decideStreamHealth(
     lastCheckedAt: checkedAt,
     latency: 0,
     lastCountedFailureDay: alreadyCountedToday ? (previousCountedFailureDay ?? today) : today,
+    browserBlocker: null,
   };
 }
 

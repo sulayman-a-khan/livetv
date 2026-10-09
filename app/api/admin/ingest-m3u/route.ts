@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
                 latency: probe.latency,
                 failedAttempts: probe.ok ? 0 : 1,
                 firstFailedAt: probe.ok ? null : new Date(),
+                browserBlocker: probe.browserBlocker,
               });
 
               if (probe.ok) activeLinksAdded++;
@@ -210,6 +211,7 @@ export async function POST(req: NextRequest) {
                 firstFailedAt: probe.ok ? null : new Date(),
                 lastCheckedAt: new Date(),
                 latency: probe.latency || 120,
+                browserBlocker: probe.browserBlocker,
                 createdAt: new Date(),
                 updatedAt: new Date(),
               });

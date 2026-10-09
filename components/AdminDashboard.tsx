@@ -73,6 +73,7 @@ interface ChannelWithStreams {
     lastCheckedAt?: string | Date | null;
     manual?: boolean;
     adminDisabled?: boolean;
+    browserBlocker?: string | null;
   }>;
 }
 
@@ -574,6 +575,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       let active = 0;
       let degraded = 0;
       let broken = 0;
+      let unplayable = 0;
       let remaining = 0;
       let skippedDisabled = 0;
       let hasMore = true;
@@ -603,6 +605,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         active += data.summary.activeCount;
         degraded += data.summary.degradedCount;
         broken += data.summary.brokenCount;
+        unplayable += Number(data.summary.unplayableCount ?? 0);
         remaining = Number(data.remaining ?? 0);
         skippedDisabled = Number(data.skippedDisabled ?? 0);
         hasMore = data.hasMore === true;
@@ -621,7 +624,9 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       }
 
       setHealthCheckLog(
-        `All pinned links checked: ${checked} tested (${active} Active, ${degraded} Degraded, ${broken} Broken).` +
+        `All pinned links checked: ${checked} tested (${active} Active, ${degraded} Degraded, ${broken} Broken${
+          unplayable > 0 ? `, ${unplayable} of them not playable in a browser — hidden from the UI` : ""
+        }).` +
           (skippedDisabled > 0 ? ` ${skippedDisabled} admin-disabled link(s) were left as you set them.` : "")
       );
       fetchStats();

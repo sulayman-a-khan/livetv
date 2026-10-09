@@ -152,6 +152,8 @@ function toLastCheckDetail(result: HlsCheckResult) {
     attempts: result.attempts,
     error: result.error,
     checkedAt: result.checkedAt,
+    browserCors: result.browserCors,
+    browserBlocker: result.browserBlocker,
   };
 }
 
@@ -226,6 +228,7 @@ async function runInMemoryHealthCheck(
     stream.firstFailedAt = decision.firstFailedAt;
     stream.lastCheckedAt = decision.lastCheckedAt;
     stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+    stream.browserBlocker = decision.browserBlocker;
 
     if (decision.status === "active") {
       // Stream is WORKING — mark active (re-activate if was broken)
@@ -341,6 +344,7 @@ async function runMongoHealthCheck(
       stream.firstFailedAt = decision.firstFailedAt;
       stream.lastCheckedAt = decision.lastCheckedAt;
       stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+      stream.browserBlocker = decision.browserBlocker;
 
       if (decision.status !== previousStatus) {
         changedChannelIds.add(String(stream.channelId));

@@ -474,6 +474,7 @@ async function applyPlan(sourceId: string, plan: PlaylistSyncPlan): Promise<void
       failedAttempts: create.failedAttempts,
       firstFailedAt: create.firstFailedAt,
       lastCheckedAt: create.lastCheckedAt,
+      browserBlocker: create.browserBlocker,
     });
   }
 

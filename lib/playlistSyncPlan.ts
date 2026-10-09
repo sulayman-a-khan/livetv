@@ -29,7 +29,7 @@
  */
 
 import { decideStreamHealth, type StoredStreamStatus } from "./streamHealth";
-import type { HlsCheckResult } from "./streamProbe";
+import type { BrowserBlocker, HlsCheckResult } from "./streamProbe";
 
 /** One `#EXTINF` + URL pair as it appears in the playlist right now. */
 export interface DesiredEntry {
@@ -108,6 +108,7 @@ export interface PlaylistSyncPlan {
     failedAttempts: number;
     firstFailedAt: Date | null;
     lastCheckedAt: Date;
+    browserBlocker: BrowserBlocker | null;
   }[];
   linkPatches: { _id: string; patch: Record<string, unknown> }[];
   /** Old URLs of this source that are dead, gone from the playlist and replaced. */
@@ -284,6 +285,7 @@ export function planPlaylistSync(
           failedAttempts: working ? 0 : probe ? 1 : 0,
           firstFailedAt: working ? null : probe ? now : null,
           lastCheckedAt: now,
+          browserBlocker: probe?.browserBlocker ?? null,
         });
         if (working) plan.stats.linksAddedActive++;
         else plan.stats.linksAddedBroken++;

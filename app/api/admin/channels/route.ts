@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
         lastCheckedAt: now,
         // Hand-added: a playlist sync or the dead-link purge may never retire it.
         manual: true,
+        browserBlocker: probe.browserBlocker,
       });
 
       return NextResponse.json({
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest) {
       firstFailedAt: probe.ok ? null : now,
       lastCheckedAt: now,
       manual: true,
+      browserBlocker: probe.browserBlocker,
       createdAt: now,
       updatedAt: now,
     });

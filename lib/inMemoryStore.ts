@@ -46,6 +46,11 @@ export interface InMemoryStreamLink {
   lastCountedFailureDay?: string | null;
   /** Why a viewer's browser cannot fetch this link; null/absent when it can. */
   browserBlocker?: string | null;
+  /** Probe runs / report pairs that got no media inside the 10s delivery budget. */
+  deliveryMisses?: number;
+  lastDeliveryMissAt?: Date | null;
+  /** Hidden for not delivering; the hourly re-check shows it again once it serves. */
+  deliveryHidden?: boolean;
   /** Hand-added link: automation may probe and rank it, never delete it. */
   manual?: boolean;
   /** Admin took the link out of service; hidden until an admin restores it. */
@@ -85,6 +90,8 @@ export interface InMemoryStreamLink {
     /** Whether the origin granted CORS to this site; null when it could not be judged. */
     browserCors?: boolean | null;
     browserBlocker?: string | null;
+    /** Delivery-budget misses counted inside that probe run. */
+    deliveryMisses?: number;
   };
 }
 

@@ -26,6 +26,12 @@
  *                           happily to us. The gate re-tests what the browser
  *                           will really request, with the headers a browser is
  *                           allowed to send, and demands a CORS grant.
+ *   8. Delivery budget    — reachable is not the same as usable. A link has 10
+ *                           seconds to hand over real media (a playlist plus a
+ *                           segment, or raw `.ts` bytes); a miss is confirmed by
+ *                           a second attempt ~15 seconds later, and two of them
+ *                           hide the link from viewers until some later check
+ *                           delivers.
  *
  * A normal HTTP 200 is never treated as "online" by itself — every one of
  * the steps above has to agree the stream is actually serving playable
@@ -55,6 +61,8 @@ export type HlsHealthStatus =
   | "DEGRADED"
   /** The origin serves real media, but no browser on this HTTPS site can fetch it. */
   | "UNPLAYABLE"
+  /** Reachable, but it did not put media in our hands inside the delivery budget. */
+  | "UNDELIVERABLE"
   | "OFFLINE"
   | "EXPIRED"
   | "BLOCKED"
@@ -82,6 +90,7 @@ export type HlsErrorCode =
   | "SEGMENTS_UNAVAILABLE"
   | "PARTIAL_SEGMENTS_UNAVAILABLE"
   | "FFPROBE_DECODE_FAILED"
+  | "DELIVERY_DEADLINE"
   | "BROWSER_MIXED_CONTENT"
   | "BROWSER_CORS_BLOCKED"
   | "BROWSER_HEADERS_UNSUPPORTED"
@@ -136,6 +145,11 @@ export interface HlsCheckResult {
   browserCors: boolean | null;
   /** Set only when `status === "UNPLAYABLE"`. */
   browserBlocker: BrowserBlocker | null;
+  /**
+   * Delivery attempts that ran out the 10-second budget inside this probe run.
+   * Zero whenever media arrived in time; `UNDELIVERABLE` only ever carries it.
+   */
+  deliveryMisses: number;
 }
 
 /** Kept for backward compatibility with existing imports. */
@@ -154,6 +168,14 @@ export interface ProbeOptions {
   useFfprobe?: boolean;
   /** Max attempts for the retry/backoff wrapper. Default 3. */
   maxAttempts?: number;
+  /**
+   * How long a link gets to put real media in our hands — playlist plus a
+   * segment, or raw `.ts` bytes — before the attempt counts as a delivery miss.
+   * Default 10000ms.
+   */
+  deliveryDeadlineMs?: number;
+  /** Wait before the confirming delivery retry. Default 15000ms. */
+  deliveryConfirmDelayMs?: number;
   /** Extra headers merged over the defaults (User-Agent, Referer, Origin, Authorization, Cookie...). */
   headers?: Record<string, string>;
 }
@@ -165,7 +187,15 @@ const DEFAULTS = {
   liveRefreshDelayMs: 3500,
   useFfprobe: true,
   maxAttempts: 3,
+  deliveryDeadlineMs: 10_000,
+  deliveryConfirmDelayMs: 15_000,
 };
+
+/**
+ * Misses required before a link is called undeliverable. One slow read is a
+ * bad second; two, ~15 seconds apart, is a link that cannot serve a viewer.
+ */
+const DELIVERY_MISSES_TO_CONFIRM = 2;
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -689,6 +719,7 @@ function baseResult(overrides: Partial<HlsCheckResult>): HlsCheckResult {
     error: overrides.error ?? null,
     browserCors: overrides.browserCors ?? null,
     browserBlocker: overrides.browserBlocker ?? null,
+    deliveryMisses: overrides.deliveryMisses ?? 0,
   };
 }
 
@@ -736,11 +767,38 @@ function classifyHttpStatus(status: number, url: string): { status: HlsHealthSta
  * One full pass through steps 1-6 (no retry — the caller wraps this)
  * ------------------------------------------------------------------ */
 
+/**
+ * A link that answers, but not in time, is useless to a viewer who pressed play
+ * ten seconds ago. Every fetch before the first media bytes land is clamped to
+ * this budget, and the pass reports `UNDELIVERABLE` once it runs out — it is the
+ * caller that decides whether one miss means anything.
+ */
+function deliveryMiss(deadlineMs: number, elapsedMs: number): HlsCheckResult {
+  const reason = `No media delivered within ${Math.round(deadlineMs / 1000)}s (took ${Math.round(elapsedMs)}s)`;
+  return baseResult({
+    status: "UNDELIVERABLE",
+    errorCode: "DELIVERY_DEADLINE",
+    responseTime: elapsedMs,
+    error: reason,
+    deliveryMisses: 1,
+  });
+}
+
 async function probeOnce(
   url: string,
   options: typeof DEFAULTS & { headers?: Record<string, string> }
 ): Promise<HlsCheckResult> {
   const headers = buildHeaders(options.headers);
+
+  // The delivery budget starts here and stops mattering the moment real media
+  // is in hand — the checks after that point (live refresh, ffprobe) are
+  // diagnostics, not whether a viewer gets a picture.
+  const startedAt = Date.now();
+  const elapsed = () => Date.now() - startedAt;
+  const budgetLeft = () => options.deliveryDeadlineMs - elapsed();
+  /** Timeout for the next fetch: never longer than what the budget allows. */
+  const clipped = (timeoutMs: number) => Math.max(1, Math.min(timeoutMs, budgetLeft()));
+  const outOfTime = () => budgetLeft() <= 0;
 
   // The player fetches every playlist and every segment with XHR, so each
   // response it touches needs the browser's permission slip. Without a known
@@ -754,9 +812,12 @@ async function probeOnce(
   };
 
   // ---- STEP 1: HTTP request for the playlist itself ----
-  const playlistFetch = await timedFetch(url, { method: "GET", headers }, options.timeoutMs);
+  const playlistFetch = await timedFetch(url, { method: "GET", headers }, clipped(options.timeoutMs));
 
   if (!playlistFetch.response) {
+    // Nothing came back before the budget ran out: that is a delivery miss,
+    // whatever the individual request would have called itself.
+    if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
     return baseResult({
       status: playlistFetch.errorCode === "TIMEOUT" ? "TIMEOUT" : "OFFLINE",
       errorCode: playlistFetch.errorCode || "UNKNOWN_ERROR",
@@ -814,6 +875,9 @@ async function probeOnce(
   let mediaParsed = parsed;
   const playlistType: PlaylistType = parsed.isMaster ? "MASTER" : "MEDIA";
 
+  // A playlist alone is not a picture: the budget still has to cover a segment.
+  if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
+
   // ---- STEP 3: Master playlist -> resolve + fetch a playable variant ----
   if (parsed.isMaster) {
     if (parsed.variants.length === 0) {
@@ -836,8 +900,9 @@ async function probeOnce(
     for (const variant of orderedVariants.slice(0, 3)) {
       const variantUrl = resolveUrl(variant.uri, finalUrl);
       if (!variantUrl) continue;
+      if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
 
-      const variantFetch = await timedFetch(variantUrl, { method: "GET", headers }, options.timeoutMs);
+      const variantFetch = await timedFetch(variantUrl, { method: "GET", headers }, clipped(options.timeoutMs));
       if (!variantFetch.response || (!variantFetch.response.ok && variantFetch.response.status !== 206)) {
         continue;
       }
@@ -861,6 +926,7 @@ async function probeOnce(
     }
 
     if (!resolvedOk) {
+      if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
       return baseResult({
         status: "OFFLINE",
         errorCode: "NO_PLAYABLE_VARIANT",
@@ -872,6 +938,8 @@ async function probeOnce(
       });
     }
   }
+
+  if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
 
   // ---- STEP 4: Check the most recent media segments ----
   if (mediaParsed.segments.length === 0) {
@@ -898,7 +966,15 @@ async function probeOnce(
       segmentResults.push({ ok: false, status: null, bytesRead: 0, acao: null });
       continue;
     }
-    segmentResults.push(await checkSegment(segUrl, headers, Math.min(options.timeoutMs, 6000)));
+    // One segment in hand is the delivery proof the budget was waiting for, so
+    // from here on a spent budget is simply "no more sampling".
+    if (outOfTime()) {
+      if (segmentResults.some((s) => s.ok)) break;
+      return deliveryMiss(options.deliveryDeadlineMs, elapsed());
+    }
+    segmentResults.push(
+      await checkSegment(segUrl, headers, Math.min(clipped(options.timeoutMs), 6000))
+    );
   }
 
   const okSegments = segmentResults.filter((s) => s.ok).length;
@@ -908,6 +984,7 @@ async function probeOnce(
   if (originKnown && segmentResults.some((s) => s.ok && !s.acao)) corsGranted = false;
 
   if (okSegments === 0) {
+    if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
     return baseResult({
       status: "OFFLINE",
       errorCode: "SEGMENTS_UNAVAILABLE",
@@ -1138,6 +1215,7 @@ async function probeTsStream(
   url: string,
   options: typeof DEFAULTS & { headers?: Record<string, string> }
 ): Promise<HlsCheckResult> {
+  const startedAt = Date.now();
   const headers = {
     ...buildHeaders(options.headers),
     "User-Agent": "IPTVSmartersPlayer",
@@ -1145,10 +1223,19 @@ async function probeTsStream(
     Range: "bytes=0-3759", // ~20 TS packets — enough to confirm the sync cadence
   };
 
-  const res = await timedFetch(url, { method: "GET", headers }, options.timeoutMs);
+  const res = await timedFetch(
+    url,
+    { method: "GET", headers },
+    Math.max(1, Math.min(options.timeoutMs, options.deliveryDeadlineMs))
+  );
   if (!res.response) {
+    // A `.ts` feed that hands over no bytes inside the budget is exactly the
+    // failure mode this check exists for.
+    if (res.errorCode === "TIMEOUT" || res.responseTime >= options.deliveryDeadlineMs) {
+      return deliveryMiss(options.deliveryDeadlineMs, res.responseTime);
+    }
     return baseResult({
-      status: res.errorCode === "TIMEOUT" ? "TIMEOUT" : "OFFLINE",
+      status: "OFFLINE",
       errorCode: res.errorCode || "UNKNOWN_ERROR",
       responseTime: res.responseTime,
       playlistType: null,
@@ -1181,6 +1268,12 @@ async function probeTsStream(
 
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   const bytes = await readBytesCapped(response, 3760);
+
+  // Headers are cheap; the feed itself is the point. Bytes that never arrived
+  // inside the budget is a miss, not a healthy link.
+  if (bytes.length === 0 && Date.now() - startedAt >= options.deliveryDeadlineMs) {
+    return deliveryMiss(options.deliveryDeadlineMs, Date.now() - startedAt);
+  }
 
   // An HTML error/forbidden page disguised behind a 200 is still a failure.
   if (bytes.length > 0 && contentType.includes("text/html")) {
@@ -1291,18 +1384,36 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
   // /api/stream proxy) have no #EXTM3U playlist, so the HLS pipeline below
   // would reject them as NOT_HLS_PLAYLIST. Give them their own lenient probe
   // so a working `.ts` link is stored "active" instead of "broken"/hidden.
-  if (isMpegTsUrl(url)) {
-    const tsResult = await probeTsStream(url, merged);
-    tsResult.attempts = 1;
-    return applyBrowserGate(tsResult, url, merged, gateApplies);
-  }
+  const isTsFeed = isMpegTsUrl(url);
+  const probeAttempt = () => (isTsFeed ? probeTsStream(url, merged) : probeOnce(url, merged));
 
   let lastResult: HlsCheckResult | null = null;
+  let deliveryMisses = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    lastResult = await probeOnce(url, merged);
+    lastResult = await probeAttempt();
     lastResult.attempts = attempt;
 
-    const shouldRetry = RETRYABLE_STATUSES.includes(lastResult.status) && attempt < maxAttempts;
+    if (lastResult.status === "UNDELIVERABLE") {
+      deliveryMisses++;
+      // Two misses, ~15s apart, is what hides a link. A caller that asked for a
+      // single attempt (the hourly re-check) gets exactly that.
+      if (deliveryMisses >= DELIVERY_MISSES_TO_CONFIRM || attempt >= maxAttempts) break;
+      console.log(
+        `[StreamProbe] ${redactUrl(url)} handed over no media inside ${Math.round(
+          merged.deliveryDeadlineMs / 1000
+        )}s (miss ${deliveryMisses}/${DELIVERY_MISSES_TO_CONFIRM}), re-testing in ${merged.deliveryConfirmDelayMs}ms`
+      );
+      await sleep(merged.deliveryConfirmDelayMs);
+      continue;
+    }
+
+    // Media arrived, so whatever the earlier attempts were is settled.
+    deliveryMisses = 0;
+
+    // A `.ts` feed keeps its deliberately lenient single pass: nothing but a
+    // delivery miss earns it a second look.
+    const shouldRetry =
+      !isTsFeed && RETRYABLE_STATUSES.includes(lastResult.status) && attempt < maxAttempts;
     if (!shouldRetry) break;
 
     // 1-2s after the first failure, 2-3s after the second, etc.
@@ -1313,7 +1424,9 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
     await sleep(backoffMs);
   }
 
-  return applyBrowserGate(lastResult as HlsCheckResult, url, merged, gateApplies);
+  const final = lastResult as HlsCheckResult;
+  final.deliveryMisses = final.status === "UNDELIVERABLE" ? deliveryMisses : 0;
+  return applyBrowserGate(final, url, merged, gateApplies);
 }
 
 /**

@@ -777,6 +777,7 @@ export default function WatchPage() {
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
+                      onStreamFailed={handleStreamFailed}
                       onAllServersFailed={handleAllServersFailed}
                       onSwitchingChange={handleSwitchingChange}
                       onSwitchFailed={handleSwitchFailed}

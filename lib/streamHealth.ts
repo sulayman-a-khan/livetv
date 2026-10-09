@@ -7,6 +7,13 @@
  * exactly the false failure these rules exist to prevent. One UTC day advances
  * the streak once, whatever else happened in it, so
  * `MAX_CONSECUTIVE_FAILURES` means "3 consecutive daily health checks".
+ *
+ * On top of that sits the delivery rule, because a link that answers slowly is
+ * as good as gone for anyone who pressed play: a probe gets 10 seconds to hand
+ * over real media, and a miss confirmed by a second attempt ~15 seconds later
+ * hides the link immediately instead of waiting three days. Hidden is not gone —
+ * the hourly re-check (`runDeliveryRecheck`) shows it again as soon as it
+ * delivers.
  */
 
 import type { BrowserBlocker, HlsCheckResult } from "./streamProbe";
@@ -31,6 +38,8 @@ export type LinkHealthState =
   | "dead"
   /** The origin serves it, but a viewer's browser is never allowed to fetch it. */
   | "unplayable"
+  /** Alive but too slow to put media in a player's hands; hidden pending re-check. */
+  | "delivery-failed"
   /** Hidden by an admin on purpose; automation never re-enables it. */
   | "disabled";
 
@@ -44,6 +53,12 @@ export interface StreamHealthDecision {
   lastCountedFailureDay: string | null;
   /** Why the browser cannot fetch this link; null whenever it can. */
   browserBlocker: BrowserBlocker | null;
+  /** Delivery misses seen in the probe run behind this decision. */
+  deliveryMisses: number;
+  /** Hidden for delivery: kept out of the UI until a probe actually delivers. */
+  deliveryHidden: boolean;
+  /** When a delivery miss last happened — starts the player-report window. */
+  lastDeliveryMissAt: Date | null;
 }
 
 /** The number of consecutive failed DAILY checks required before hiding a link. */
@@ -59,6 +74,16 @@ export const DEAD_LINK_PURGE_DAYS = 7;
 /** A working link slower than this is ranked below quicker mirrors, not hidden. */
 export const SLOW_LATENCY_MS = 1200;
 
+/**
+ * Misses that hide a link for delivery. The probe confirms a miss with a second
+ * attempt ~15 seconds later, and a player's report counts the same way, so two
+ * is "this link cannot serve a viewer right now" — never one bad connection.
+ */
+export const DELIVERY_MISSES_TO_HIDE = 2;
+
+/** Player reports this close together count as the same failing stream. */
+export const DELIVERY_MISS_WINDOW_MS = 2 * 60 * 1000;
+
 /** UTC `YYYY-MM-DD` for a timestamp — the unit the failure streak counts in. */
 export function utcDayKey(at: Date): string {
   return at.toISOString().slice(0, 10);
@@ -71,6 +96,8 @@ export interface LinkHealthInput {
   lastCheckedAt?: Date | string | null;
   adminDisabled?: boolean;
   browserBlocker?: BrowserBlocker | null;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
 }
 
 /** One line for the admin: what the browser could not do, in plain terms. */
@@ -85,10 +112,14 @@ export function browserBlockerLabel(blocker: BrowserBlocker | null | undefined):
   return BLOCKER_LABEL[blocker] || null;
 }
 
-/** Maps stored health to the seven admin-facing states. */
+/** Maps stored health to the eight admin-facing states. */
 export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
   if (link.adminDisabled) return "disabled";
   if (link.browserBlocker) return "unplayable";
+  // Ahead of `dead` on purpose: a link hidden for delivery is stored `broken`
+  // too, and "it would not deliver" is the more useful half of that story — it
+  // says the hourly re-check is already working on bringing it back.
+  if (link.deliveryHidden || (link.deliveryMisses ?? 0) > 0) return "delivery-failed";
   if (link.status === "broken" || link.failedAttempts >= MAX_CONSECUTIVE_FAILURES) return "dead";
   if (link.failedAttempts > 0 || link.status === "degraded") return "temporarily-failed";
   if (!link.lastCheckedAt) return "unverified";
@@ -101,6 +132,10 @@ export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
  * A DEGRADED result verified downloadable media, so it counts as working. A
  * same-day repeat of an already-counted failure leaves the streak alone — that
  * is what keeps 6-hourly checks from maturing a 3-day rule in 18 hours.
+ *
+ * `previousDeliveryHidden` carries the delivery verdict forward: a link hidden
+ * for not delivering stays hidden until something actually delivers, even if the
+ * next probe fails for a different reason.
  */
 export function decideStreamHealth(
   previousStatus: StoredStreamStatus,
@@ -108,7 +143,8 @@ export function decideStreamHealth(
   previousFirstFailedAt: Date | null | undefined,
   result: HlsCheckResult,
   checkedAt: Date = new Date(),
-  previousCountedFailureDay?: string | null
+  previousCountedFailureDay?: string | null,
+  previousDeliveryHidden?: boolean
 ): StreamHealthDecision {
   if (result.ok || result.status === "DEGRADED") {
     return {
@@ -119,6 +155,9 @@ export function decideStreamHealth(
       latency: result.latency > 0 ? result.latency : 0,
       lastCountedFailureDay: null,
       browserBlocker: null,
+      deliveryMisses: 0,
+      deliveryHidden: false,
+      lastDeliveryMissAt: null,
     };
   }
 
@@ -135,14 +174,24 @@ export function decideStreamHealth(
       latency: 0,
       lastCountedFailureDay: utcDayKey(checkedAt),
       browserBlocker: result.browserBlocker,
+      deliveryMisses: 0,
+      deliveryHidden: false,
+      lastDeliveryMissAt: null,
     };
   }
 
   const today = utcDayKey(checkedAt);
   const alreadyCountedToday = previousCountedFailureDay === today;
   const failedAttempts = Math.max(0, previousFailedAttempts || 0) + (alreadyCountedToday ? 0 : 1);
+
+  // The probe confirms a delivery miss with a second attempt ~15s later, so two
+  // of them is a link that cannot put media in a player's hands — hide it now
+  // rather than waiting three more days for the streak to mature.
+  const deliveryMisses = Math.max(0, result.deliveryMisses || 0);
+  const missedDelivery = deliveryMisses >= DELIVERY_MISSES_TO_HIDE;
+  const deliveryHidden = missedDelivery || previousDeliveryHidden === true;
   const status: StoredStreamStatus =
-    failedAttempts >= MAX_CONSECUTIVE_FAILURES
+    deliveryHidden || failedAttempts >= MAX_CONSECUTIVE_FAILURES
       ? "broken"
       : previousStatus === "active"
         ? "active"
@@ -156,6 +205,37 @@ export function decideStreamHealth(
     latency: 0,
     lastCountedFailureDay: alreadyCountedToday ? (previousCountedFailureDay ?? today) : today,
     browserBlocker: null,
+    deliveryMisses,
+    deliveryHidden,
+    lastDeliveryMissAt: deliveryMisses > 0 ? checkedAt : null,
+  };
+}
+
+/** What a player report did to a link's delivery tally. */
+export interface DeliveryMissRecord {
+  deliveryMisses: number;
+  lastDeliveryMissAt: Date;
+  deliveryHidden: boolean;
+}
+
+/**
+ * Counts a viewer-side miss: the watch page gave up on this server link before
+ * it showed a frame. Reports from one viewing session only count while they keep
+ * arriving inside `DELIVERY_MISS_WINDOW_MS`; once that lapses the count restarts,
+ * so a channel-switching viewer cannot condemn a link on its own.
+ */
+export function recordDeliveryMiss(
+  previousDeliveryMisses: number | undefined | null,
+  previousLastDeliveryMissAt: Date | string | null | undefined,
+  at: Date = new Date()
+): DeliveryMissRecord {
+  const lastAt = previousLastDeliveryMissAt ? new Date(previousLastDeliveryMissAt).getTime() : 0;
+  const inWindow = Number.isFinite(lastAt) && lastAt > 0 && at.getTime() - lastAt <= DELIVERY_MISS_WINDOW_MS;
+  const deliveryMisses = (inWindow ? Math.max(0, previousDeliveryMisses || 0) : 0) + 1;
+  return {
+    deliveryMisses,
+    lastDeliveryMissAt: at,
+    deliveryHidden: deliveryMisses >= DELIVERY_MISSES_TO_HIDE,
   };
 }
 
@@ -173,20 +253,47 @@ export function recordStreamFailure(
   previousFailedAttempts: number,
   previousFirstFailedAt: Date | null | undefined,
   checkedAt: Date = new Date(),
-  previousCountedFailureDay?: string | null
+  previousCountedFailureDay?: string | null,
+  previousDelivery?: {
+    deliveryMisses?: number | null;
+    lastDeliveryMissAt?: Date | string | null;
+    deliveryHidden?: boolean;
+  }
 ): Pick<
   StreamHealthDecision,
-  "status" | "failedAttempts" | "firstFailedAt" | "lastCheckedAt" | "lastCountedFailureDay"
+  | "status"
+  | "failedAttempts"
+  | "firstFailedAt"
+  | "lastCheckedAt"
+  | "lastCountedFailureDay"
+  | "deliveryMisses"
+  | "lastDeliveryMissAt"
+  | "deliveryHidden"
 > {
   const today = utcDayKey(checkedAt);
   const alreadyCountedToday = previousCountedFailureDay === today;
   const failedAttempts = Math.max(0, previousFailedAttempts || 0) + (alreadyCountedToday ? 0 : 1);
+  const miss = recordDeliveryMiss(previousDelivery?.deliveryMisses, previousDelivery?.lastDeliveryMissAt, checkedAt);
+  const deliveryHidden = miss.deliveryHidden || previousDelivery?.deliveryHidden === true;
+
+  let status: StoredStreamStatus;
+  if (deliveryHidden) status = "broken";
+  // A viewer's report can never be the reason a hidden link comes back.
+  else if (previousStatus === "broken") status = "broken";
+  else if (previousStatus === "active" && failedAttempts < MAX_CONSECUTIVE_FAILURES) status = "active";
+  else status = "degraded";
 
   return {
-    status: failedAttempts >= MAX_CONSECUTIVE_FAILURES ? "degraded" : previousStatus === "active" ? "active" : "degraded",
+    // The streak can never retire a link on a viewer's word alone, but a player
+    // that went dark twice inside two minutes is the delivery evidence the
+    // hourly re-check is built to answer, so that alone hides it.
+    status,
     failedAttempts,
     firstFailedAt: previousFirstFailedAt || checkedAt,
     lastCheckedAt: checkedAt,
     lastCountedFailureDay: alreadyCountedToday ? (previousCountedFailureDay ?? today) : today,
+    deliveryMisses: miss.deliveryMisses,
+    lastDeliveryMissAt: miss.lastDeliveryMissAt,
+    deliveryHidden,
   };
 }

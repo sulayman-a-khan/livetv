@@ -65,6 +65,8 @@ export interface ChannelLink {
   manual?: boolean;
   /** Taken out of service by an admin: this source may not re-enable it. */
   adminDisabled?: boolean;
+  /** Hidden by the delivery rule; only a probe that delivers media lifts it. */
+  deliveryHidden?: boolean;
 }
 
 /** The channel record (if any) that a canonical key resolves to. */
@@ -342,7 +344,8 @@ export function planPlaylistSync(
             link.firstFailedAt,
             probe,
             now,
-            link.lastCountedFailureDay
+            link.lastCountedFailureDay,
+            link.deliveryHidden
           );
           const revived = link.status !== "active" && decision.status === "active";
           if (revived) plan.stats.linksRevived++;

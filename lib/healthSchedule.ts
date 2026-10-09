@@ -10,6 +10,10 @@
  * Every batch checks PINNED channels only (see `lib/autoHealthChecker.ts`), and
  * the two passes of a cycle are disjoint — a channel's category belongs to
  * exactly one batch per cycle, so nothing is checked twice in the same cycle.
+ *
+ * Alongside the batches, `DELIVERY_RECHECK_TASK` fires once in every UTC hour to
+ * re-probe the links the delivery rule hid. Hobby accepts nothing but daily
+ * expressions, so that cadence is 24 separate lines rather than one `0 * * * *`.
  */
 
 import { CHANNEL_CATEGORIES, type ChannelCategory } from "./categories";
@@ -97,9 +101,35 @@ export function resolveBatchCategories(task: string): ChannelCategory[] | null {
   return [...batch.categories];
 }
 
+/**
+ * The delivery re-check (`lib/autoHealthChecker.ts` → `runDeliveryRecheck`):
+ * probes only the links the 10-second delivery rule hid, and shows them again as
+ * soon as one hands over media. Cheap enough to run every hour.
+ */
+export const DELIVERY_RECHECK_TASK = "health-recheck";
+
+/**
+ * Hourly on paper, 24 daily expressions in practice: Vercel's Hobby plan accepts
+ * only one cron per day per job, and an expression like `0 * * * *` fails the
+ * deployment. Each line below fires once a day at its own UTC hour, so together
+ * they give the re-check its hourly cadence. They sit at minute 15 to land clear
+ * of the batch passes at :00 and :30 — a re-check and a batch fired in the same
+ * minute would have one of them lose the health lock and do nothing.
+ */
+export const DELIVERY_RECHECK_CRONS: readonly string[] = Array.from(
+  { length: 24 },
+  (_, hour) => `15 ${hour} * * *`
+);
+
 /** Cron lines this file expects to find in `vercel.json`, for verification. */
 export function expectedHealthCrons(): { path: string; schedule: string }[] {
-  return HEALTH_BATCHES.flatMap((batch) =>
-    batch.crons.map((schedule) => ({ path: `/api/admin/scheduler/${batch.task}`, schedule }))
-  );
+  return [
+    ...HEALTH_BATCHES.flatMap((batch) =>
+      batch.crons.map((schedule) => ({ path: `/api/admin/scheduler/${batch.task}`, schedule }))
+    ),
+    ...DELIVERY_RECHECK_CRONS.map((schedule) => ({
+      path: `/api/admin/scheduler/${DELIVERY_RECHECK_TASK}`,
+      schedule,
+    })),
+  ];
 }

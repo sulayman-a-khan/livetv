@@ -31,6 +31,8 @@ function linkView(link: {
   lastCheckedAt?: Date | string | null;
   lastCountedFailureDay?: string | null;
   browserBlocker?: string | null;
+  deliveryMisses?: number | null;
+  deliveryHidden?: boolean;
   manual?: boolean;
   adminDisabled?: boolean;
 }) {
@@ -44,6 +46,8 @@ function linkView(link: {
     lastCheckedAt: link.lastCheckedAt ?? null,
     lastCountedFailureDay: link.lastCountedFailureDay ?? null,
     browserBlocker: link.browserBlocker ?? null,
+    deliveryMisses: link.deliveryMisses ?? 0,
+    deliveryHidden: Boolean(link.deliveryHidden),
     manual: Boolean(link.manual),
     adminDisabled: Boolean(link.adminDisabled),
     health: classifyLinkHealth({
@@ -53,6 +57,8 @@ function linkView(link: {
       lastCheckedAt: link.lastCheckedAt,
       adminDisabled: link.adminDisabled,
       browserBlocker: (link.browserBlocker ?? null) as BrowserBlocker | null,
+      deliveryHidden: Boolean(link.deliveryHidden),
+      deliveryMisses: link.deliveryMisses ?? 0,
     }),
   };
 }
@@ -113,6 +119,9 @@ export async function PATCH(
           stream.firstFailedAt = null;
           stream.lastCountedFailureDay = null;
           stream.browserBlocker = null;
+          stream.deliveryMisses = 0;
+          stream.lastDeliveryMissAt = null;
+          stream.deliveryHidden = false;
         }
 
         const result = await checkHlsStream(stream.url, {
@@ -125,7 +134,8 @@ export async function PATCH(
           stream.firstFailedAt,
           result,
           now,
-          stream.lastCountedFailureDay
+          stream.lastCountedFailureDay,
+          stream.deliveryHidden
         );
         stream.status = decision.status;
         stream.latency = decision.latency;
@@ -134,6 +144,9 @@ export async function PATCH(
         stream.lastCheckedAt = decision.lastCheckedAt;
         stream.lastCountedFailureDay = decision.lastCountedFailureDay;
         stream.browserBlocker = decision.browserBlocker;
+        stream.deliveryMisses = decision.deliveryMisses;
+        stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+        stream.deliveryHidden = decision.deliveryHidden;
         await stream.save();
         await refreshChannelLinks(channelId);
 
@@ -148,6 +161,7 @@ export async function PATCH(
             reason: result.reason,
             resolution: result.resolution,
             browserBlocker: result.browserBlocker,
+            deliveryMisses: result.deliveryMisses,
           },
         });
       }
@@ -172,6 +186,9 @@ export async function PATCH(
       mem.firstFailedAt = null;
       mem.lastCountedFailureDay = null;
       mem.browserBlocker = null;
+      mem.deliveryMisses = 0;
+      mem.lastDeliveryMissAt = null;
+      mem.deliveryHidden = false;
     }
 
     const result = await checkHlsStream(mem.url, { ...PROBE_OPTS, headers: mem.headers });
@@ -181,7 +198,8 @@ export async function PATCH(
       mem.firstFailedAt,
       result,
       now,
-      mem.lastCountedFailureDay
+      mem.lastCountedFailureDay,
+      mem.deliveryHidden
     );
     mem.status = decision.status;
     mem.latency = decision.latency;
@@ -190,6 +208,9 @@ export async function PATCH(
     mem.lastCheckedAt = decision.lastCheckedAt;
     mem.lastCountedFailureDay = decision.lastCountedFailureDay;
     mem.browserBlocker = decision.browserBlocker;
+    mem.deliveryMisses = decision.deliveryMisses;
+    mem.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+    mem.deliveryHidden = decision.deliveryHidden;
     inMemoryDb.saveState();
     await refreshChannelLinks(mem.channelId);
 
@@ -203,6 +224,7 @@ export async function PATCH(
         latency: result.latency,
         reason: result.reason,
         browserBlocker: result.browserBlocker,
+        deliveryMisses: result.deliveryMisses,
       },
     });
   } catch (error: any) {

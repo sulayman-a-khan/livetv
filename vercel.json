@@ -32,6 +32,102 @@
     {
       "path": "/api/admin/scheduler/health-sports-indian-documentary",
       "schedule": "30 21 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 0 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 1 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 2 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 3 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 4 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 5 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 6 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 7 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 8 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 9 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 10 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 11 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 12 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 13 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 14 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 15 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 16 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 17 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 18 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 19 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 20 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 21 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 22 * * *"
+    },
+    {
+      "path": "/api/admin/scheduler/health-recheck",
+      "schedule": "15 23 * * *"
     }
   ]
 }

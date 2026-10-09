@@ -13,10 +13,13 @@
  *                                               `lib/healthSchedule.ts`
  *   GET /api/admin/scheduler/health             every pinned channel, plus the
  *                                               whole-catalogue maintenance pass
+ *   GET /api/admin/scheduler/health-recheck     only the links the delivery rule
+ *                                               hid, once in every UTC hour
  *   GET /api/admin/scheduler/sync               once a day, at the fixed hour
  *
  * The task is a path segment, not a query string: Vercel cron paths must be
- * static, and every job expression in `vercel.json` runs once per day.
+ * static, and every job expression in `vercel.json` runs once per day — which is
+ * also why the hourly re-check is 24 daily expressions instead of one per-hour.
  *
  * Safety properties that matter here:
  *   - Every health pass is pinned-only: a batch with no pinned channels probes
@@ -35,9 +38,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedAdmin, isAuthorizedByBearer } from "@/lib/adminAuth";
-import { runAutoHealthCheck, getLastFullHealthCheckTime } from "@/lib/autoHealthChecker";
+import {
+  runAutoHealthCheck,
+  runDeliveryRecheck,
+  getLastFullHealthCheckTime,
+} from "@/lib/autoHealthChecker";
 import { runPlaylistMonitorTick, getPlaylistMonitorStatus } from "@/lib/playlistMonitor";
-import { HEALTH_BATCHES, getHealthBatch } from "@/lib/healthSchedule";
+import { HEALTH_BATCHES, getHealthBatch, DELIVERY_RECHECK_TASK } from "@/lib/healthSchedule";
 
 export const dynamic = "force-dynamic";
 /** Vercel kills the function at this wall-clock limit; the budget stays under it. */
@@ -45,11 +52,19 @@ export const maxDuration = 60;
 
 /** Leave enough room to answer the request after the last batch. */
 const HEALTH_BUDGET_MS = 45_000;
+/**
+ * The re-check that goes before a batch: one 10-second window per hidden link,
+ * so a channel that recovered is visible again without waiting for the batch to
+ * reach it. Small, because the batch underneath it needs the rest of the hour.
+ */
+const RECHECK_BUDGET_MS = 12_000;
 /** A manual pass is only skipped if a recent one already covered the window. */
 const HEALTH_DUE_MS = 6 * 60 * 60 * 1000;
 
-const STATIC_TASKS = ["health", "sync", "all"] as const;
-/** `health`, `sync`, `all`, plus one path per category batch. */
+const STATIC_TASKS = ["health", "sync", "all", DELIVERY_RECHECK_TASK] as const;
+/**
+ * `health`, `sync`, `all`, the delivery re-check, plus one path per category batch.
+ */
 const TASKS: readonly string[] = [...STATIC_TASKS, ...HEALTH_BATCHES.map((b) => b.task)];
 
 function authorized(req: NextRequest): boolean {
@@ -98,7 +113,7 @@ async function handle(
     return NextResponse.json(
       {
         success: false,
-        error: `Unknown task "${task}" — use health, sync, all or one of ${HEALTH_BATCHES.map(
+        error: `Unknown task "${task}" — use health, health-recheck, sync, all or one of ${HEALTH_BATCHES.map(
           (b) => b.task
         ).join(", ")}`,
       },
@@ -109,10 +124,25 @@ async function handle(
   const ran: Record<string, unknown> = {};
 
   try {
+    if (task === DELIVERY_RECHECK_TASK) {
+      // The only job the 24 hourly cron lines perform: links the delivery rule
+      // hid get a fresh 10-second window, and one that delivers is visible again
+      // within the hour instead of waiting for its category batch.
+      ran.recheck = await runDeliveryRecheck(HEALTH_BUDGET_MS);
+      return NextResponse.json(
+        { success: true, task, force, ran, monitor: getPlaylistMonitorStatus() },
+        responseInit
+      );
+    }
+
     const batch = getHealthBatch(task);
     const wantsHealth = batch !== undefined || task === "health" || task === "all";
 
     if (wantsHealth) {
+      // Hidden links go first even inside a batch run: one 10-second window each,
+      // then the batch uses whatever is left of the hour.
+      ran.recheck = await runDeliveryRecheck(RECHECK_BUDGET_MS);
+
       // A batch pass covers its own categories; `health`/`all` cover every
       // pinned channel and are the only runs that follow up with maintenance.
       const sweep = batch ? batch.sweep === true : true;

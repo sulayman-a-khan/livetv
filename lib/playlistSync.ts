@@ -189,6 +189,7 @@ async function loadChannelStates(
         lastCountedFailureDay: l.lastCountedFailureDay ?? null,
         manual: Boolean(l.manual),
         adminDisabled: Boolean(l.adminDisabled),
+        deliveryHidden: Boolean(l.deliveryHidden),
       })),
       sourceLinkIds,
     };

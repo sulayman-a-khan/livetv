@@ -35,6 +35,14 @@ interface LevelInfo {
   bitrate: number;
 }
 
+/**
+ * The viewer's own copy of the health checker's delivery budget: this many
+ * milliseconds to put a real frame on screen before the mirror is reported and
+ * the ladder moves on. A miss is only one of two reports the backend needs, so a
+ * bad second on a working link cannot hide a channel by itself.
+ */
+const FIRST_FRAME_DEADLINE_MS = 10_000;
+
 export default function DirectHlsPlayer({
   channelName,
   channelId,
@@ -50,6 +58,8 @@ export default function DirectHlsPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Set by the first real frame; the loader effect's deadline reads it. */
+  const frameDeliveredRef = useRef(false);
 
   // Parent pages re-render often (sidebar health polls, category filter
   // clicks) and hand us freshly-created callback props each time. Reading them
@@ -172,6 +182,28 @@ export default function DirectHlsPlayer({
 
     const streamUrl = activeStream.url;
     const maxHeightCap = getDeviceMaxHeight();
+
+    // Arm the delivery deadline for this connection. `playing` below disarms it;
+    // a video that is buffered but paused (autoplay blocked until a tap) counts
+    // as delivered too, so the timer blames the link only for a picture that
+    // genuinely never arrived.
+    frameDeliveredRef.current = false;
+    const missedStreamId = activeStream._id;
+    const deadline = setTimeout(() => {
+      if (frameDeliveredRef.current) return;
+      const v = videoRef.current;
+      if (v && (v.readyState >= 2 || v.currentTime > 0)) {
+        frameDeliveredRef.current = true;
+        return;
+      }
+      console.warn(
+        `[DirectHlsPlayer] Server ${activeIndex + 1} of ${channelName} delivered no frame in ${
+          FIRST_FRAME_DEADLINE_MS / 1000
+        }s`
+      );
+      callbacksRef.current.onStreamFailed?.(missedStreamId);
+      handleNextServer();
+    }, FIRST_FRAME_DEADLINE_MS);
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -309,11 +341,14 @@ export default function DirectHlsPlayer({
         handleNextServer();
       });
     } else {
+      // Nothing on this device can play HLS — the link is not on trial here.
+      clearTimeout(deadline);
       setErrorMsg("HLS streaming is not supported on this device");
       setIsLoadingStream(false);
     }
 
     return () => {
+      clearTimeout(deadline);
       purgeAndDestroyPlayer();
     };
     // onStreamIndexChange/onAllServersFailed/onStreamFailed intentionally read
@@ -410,7 +445,9 @@ export default function DirectHlsPlayer({
           onClick={togglePlay}
           onPlay={() => setIsPlaying(true)}
           onPlaying={() => {
-            // Frames are actually rendering — the switch is truly done.
+            // Frames are actually rendering — the switch is truly done, and this
+            // link has met its delivery deadline.
+            frameDeliveredRef.current = true;
             setIsPlaying(true);
             setIsLoadingStream(false);
           }}

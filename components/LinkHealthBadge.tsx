@@ -13,6 +13,7 @@ const PRESENTATION: Record<LinkHealthState, { label: string; dot: string; text: 
   slow: { label: "Slow", dot: "bg-lime-400", text: "text-lime-400" },
   unverified: { label: "Unverified", dot: "bg-slate-400", text: "text-slate-400" },
   "temporarily-failed": { label: "Retrying", dot: "bg-amber-400", text: "text-amber-400" },
+  "delivery-failed": { label: "Not delivering", dot: "bg-orange-500", text: "text-orange-400" },
   dead: { label: "Dead", dot: "bg-red-400", text: "text-red-400" },
   "unplayable": { label: "Not playable", dot: "bg-rose-500", text: "text-rose-400" },
   disabled: { label: "Disabled", dot: "bg-slate-600", text: "text-slate-500" },
@@ -30,6 +31,8 @@ export interface LinkHealthInput {
   manual?: boolean;
   adminDisabled?: boolean;
   browserBlocker?: string | null;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
 }
 
 /**
@@ -44,12 +47,17 @@ export default function LinkHealthBadge({ link }: { link: LinkHealthInput }) {
     lastCheckedAt: link.lastCheckedAt ?? null,
     adminDisabled: link.adminDisabled,
     browserBlocker: (link.browserBlocker ?? null) as BrowserBlocker | null,
+    deliveryHidden: link.deliveryHidden,
+    deliveryMisses: link.deliveryMisses,
   });
   const view = PRESENTATION[state];
   const streak = link.failedAttempts || 0;
   const title = [
     view.label,
     browserBlockerLabel(link.browserBlocker as BrowserBlocker | null),
+    link.deliveryHidden
+      ? "No media inside 10 seconds, twice — hidden; the hourly re-check brings it back when it delivers"
+      : "",
     streak > 0 ? `${streak} failed daily check(s)` : "",
     link.manual ? "added by admin — never auto-deleted" : "",
   ]

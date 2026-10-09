@@ -21,21 +21,35 @@ export async function POST(req: NextRequest) {
     if (conn && mongoose.isValidObjectId(streamId)) {
       const stream = await StreamLink.findById(streamId);
       if (stream) {
+        if (stream.adminDisabled) {
+          return NextResponse.json({ success: true, status: stream.status, skipped: "admin-disabled" });
+        }
         // A viewer's report may demote a link inside its grace window, but it can
-        // never mark one dead: hiding a channel on a single failed request is how
-        // working channels vanish. The 6-hourly check makes that call.
+        // never mark one dead on the streak alone: hiding a channel on a single
+        // failed request is how working channels vanish. What it can do is count
+        // as a delivery miss — two players that went dark inside two minutes is
+        // the same evidence two probe windows are, so the link hides until the
+        // hourly re-check gets media out of it.
         const decision = recordStreamFailure(
           stream.status as StoredStreamStatus,
           stream.failedAttempts || 0,
           stream.firstFailedAt,
           now,
-          stream.lastCountedFailureDay
+          stream.lastCountedFailureDay,
+          {
+            deliveryMisses: stream.deliveryMisses,
+            lastDeliveryMissAt: stream.lastDeliveryMissAt,
+            deliveryHidden: stream.deliveryHidden,
+          }
         );
         stream.status = decision.status;
         stream.failedAttempts = decision.failedAttempts;
         stream.firstFailedAt = decision.firstFailedAt;
         stream.lastCheckedAt = decision.lastCheckedAt;
         stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+        stream.deliveryMisses = decision.deliveryMisses;
+        stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+        stream.deliveryHidden = decision.deliveryHidden;
 
         await stream.save();
 
@@ -62,18 +76,29 @@ export async function POST(req: NextRequest) {
     const streams = inMemoryDb.getStreams();
     const stream = streams.find((s) => s._id === streamId);
     if (stream) {
+      if (stream.adminDisabled) {
+        return NextResponse.json({ success: true, status: stream.status, skipped: "admin-disabled" });
+      }
       const decision = recordStreamFailure(
         stream.status as StoredStreamStatus,
         stream.failedAttempts || 0,
         stream.firstFailedAt,
         now,
-        stream.lastCountedFailureDay
+        stream.lastCountedFailureDay,
+        {
+          deliveryMisses: stream.deliveryMisses,
+          lastDeliveryMissAt: stream.lastDeliveryMissAt,
+          deliveryHidden: stream.deliveryHidden,
+        }
       );
       stream.status = decision.status;
       stream.failedAttempts = decision.failedAttempts;
       stream.firstFailedAt = decision.firstFailedAt;
       stream.lastCheckedAt = decision.lastCheckedAt;
       stream.lastCountedFailureDay = decision.lastCountedFailureDay;
+      stream.deliveryMisses = decision.deliveryMisses;
+      stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+      stream.deliveryHidden = decision.deliveryHidden;
       inMemoryDb.saveState();
 
       const remainingActive = streams.filter(

@@ -34,6 +34,8 @@ export interface EditableStream {
   manual?: boolean;
   adminDisabled?: boolean;
   browserBlocker?: string | null;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
 }
 
 export interface EditableChannel {
@@ -173,6 +175,8 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             ? `Probe passed (${data.probe.latency}ms). Link is now ${label.toLowerCase()}.`
             : data.stream?.health === "unplayable"
             ? `The origin serves it, but a viewer's browser cannot: ${data.probe?.reason || "blocked"}. Link is hidden from the UI now — no daily-failure streak needed.`
+            : data.stream?.health === "delivery-failed"
+            ? `It would not hand over media inside 10 seconds, twice: ${data.probe?.reason || "too slow"}. Hidden from viewers; the hourly re-check puts it back the moment it delivers.`
             : `Probe failed: ${data.probe?.reason || "unreachable"}. Link is now ${label.toLowerCase()} — a single failure never removes it.`,
         });
       } else if (action === "disable") {

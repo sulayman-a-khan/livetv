@@ -18,7 +18,8 @@ export const maxDuration = 60;
 // Keep each serverless request short; the admin UI repeats batches until done.
 // The batch is a single parallel wave (concurrency === limit), so the worst-case
 // wall clock is one probe budget (8s x 2 attempts) plus save time — no chance of
-// a second wave being cut off mid-flight.
+// a second wave being cut off mid-flight. A link that misses the 10s delivery
+// budget adds the 15s confirmation wait, which still lands well inside 60s.
 const BATCH_LIMIT = 12;
 const BATCH_CONCURRENCY = BATCH_LIMIT;
 const PROBE_OPTS = {
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
           degradedCount: 0,
           brokenCount: 0,
           unplayableCount: 0,
+          notDeliveringCount: 0,
           deletedCount: 0,
         },
       });
@@ -82,6 +84,8 @@ export async function POST(req: NextRequest) {
     let brokenCount = 0;
     /** Links the origin serves but no viewer's browser may fetch — hidden at once. */
     let unplayableCount = 0;
+    /** Links that would not hand over media inside the 10-second budget. */
+    let notDeliveringCount = 0;
     const deletedCount = 0;
 
     if (conn) {
@@ -116,7 +120,8 @@ export async function POST(req: NextRequest) {
           stream.firstFailedAt,
           result,
           now,
-          stream.lastCountedFailureDay
+          stream.lastCountedFailureDay,
+          stream.deliveryHidden
         );
 
         stream.status = decision.status;
@@ -126,9 +131,13 @@ export async function POST(req: NextRequest) {
         stream.lastCheckedAt = decision.lastCheckedAt;
         stream.lastCountedFailureDay = decision.lastCountedFailureDay;
         stream.browserBlocker = decision.browserBlocker;
+        stream.deliveryMisses = decision.deliveryMisses;
+        stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+        stream.deliveryHidden = decision.deliveryHidden;
         await stream.save();
         checkedCount++;
         if (decision.browserBlocker) unplayableCount++;
+        if (decision.deliveryHidden) notDeliveringCount++;
         if (decision.status === "active") activeCount++;
         else if (decision.status === "degraded") degradedCount++;
         else brokenCount++;
@@ -156,6 +165,7 @@ export async function POST(req: NextRequest) {
           degradedCount,
           brokenCount,
           unplayableCount,
+          notDeliveringCount,
           deletedCount,
         },
       });
@@ -203,6 +213,7 @@ export async function POST(req: NextRequest) {
               checkedAt: result.checkedAt,
               browserCors: result.browserCors,
               browserBlocker: result.browserBlocker,
+              deliveryMisses: result.deliveryMisses,
             };
             const previous = stream.status as StoredStreamStatus;
             const decision = decideStreamHealth(
@@ -211,7 +222,8 @@ export async function POST(req: NextRequest) {
               stream.firstFailedAt,
               result,
               now,
-              stream.lastCountedFailureDay
+              stream.lastCountedFailureDay,
+              stream.deliveryHidden
             );
             stream.status = decision.status;
             stream.latency = decision.latency;
@@ -220,8 +232,12 @@ export async function POST(req: NextRequest) {
             stream.lastCheckedAt = decision.lastCheckedAt;
             stream.lastCountedFailureDay = decision.lastCountedFailureDay;
             stream.browserBlocker = decision.browserBlocker;
+            stream.deliveryMisses = decision.deliveryMisses;
+            stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+            stream.deliveryHidden = decision.deliveryHidden;
             checkedCount++;
             if (decision.browserBlocker) unplayableCount++;
+            if (decision.deliveryHidden) notDeliveringCount++;
             if (decision.status === "active") activeCount++;
             else if (decision.status === "degraded") degradedCount++;
             else brokenCount++;
@@ -247,6 +263,7 @@ export async function POST(req: NextRequest) {
           degradedCount,
           brokenCount,
           unplayableCount,
+          notDeliveringCount,
           deletedCount: 0,
         },
       });

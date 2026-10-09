@@ -10,6 +10,9 @@
  *                          across 09:00/09:30, 15:00/15:30 and 21:00/21:30 UTC,
  *                          plus a 03:00 sweep over every pinned channel.
  *   - Every 6 hours      : a long-lived process re-checks the whole pinned set.
+ *   - Every hour         : `runDeliveryRecheck` gives another 10-second window to
+ *                          the links the delivery rule hid, and shows them again
+ *                          as soon as one hands over media.
  *
  * Unpinned channels are invisible to users, so they are never probed: an
  * administrator brings a channel into health checking by pinning it. When no
@@ -34,7 +37,7 @@ import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
-import { checkHlsStream, redactUrl, type HlsCheckResult } from "@/lib/streamProbe";
+import { checkHlsStream, redactUrl, type HlsCheckResult, type ProbeOptions } from "@/lib/streamProbe";
 import { decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
 import { refreshChannelLinks, runMaintenance } from "@/lib/maintenanceRunner";
 import type { ChannelCategory } from "@/lib/categories";
@@ -42,10 +45,11 @@ import type { HealthBatchTask } from "@/lib/healthSchedule";
 
 /**
  * `"pinned"` = every pinned channel, `"full"` = every pinned channel and the
- * whole-catalogue maintenance afterwards, anything else = one category batch
- * from `lib/healthSchedule.ts`.
+ * whole-catalogue maintenance afterwards, `"recheck"` = only the links the
+ * delivery rule hid, anything else = one category batch from
+ * `lib/healthSchedule.ts`.
  */
-export type HealthCheckScope = "pinned" | "full" | HealthBatchTask;
+export type HealthCheckScope = "pinned" | "full" | "recheck" | HealthBatchTask;
 
 export interface HealthCheckOptions {
   /** Restrict the pass to these categories (pinned channels only either way). */
@@ -57,6 +61,7 @@ export interface HealthCheckOptions {
 }
 
 const FULL_INTERVAL_MS = 6 * 60 * 60 * 1000;       // every 6 hours
+const RECHECK_INTERVAL_MS = 60 * 60 * 1000;        // hourly: is what we hid delivering again?
 const RETRY_DELAY_MS = 15 * 60 * 1000;             // a skipped/failed pass retries soon
 const MAX_RETRIES_PER_CYCLE = 4;                  // then the regular 6-hour tick resumes
 const PROBE_TIMEOUT_MS = 12000;
@@ -69,11 +74,28 @@ const BATCH_CONCURRENCY = 15;                      // Probe 15 streams in parall
  */
 const MAX_LINKS_PER_RUN = 400;
 
+/**
+ * The hourly delivery re-check gives each hidden link one 10-second window —
+ * enough to answer "does it serve a viewer now", not a fresh verdict on its
+ * health. Oldest miss first, bounded, so a long tail of dead links cannot
+ * starve the ones that just came back.
+ */
+const RECHECK_LINKS_PER_RUN = 60;
+const RECHECK_PROBE_OPTS = {
+  timeoutMs: 9000,
+  maxAttempts: 1,
+  checkLiveRefresh: false,
+  useFfprobe: false,
+  segmentSampleSize: 1,
+} as const;
+
 declare global {
   // eslint-disable-next-line no-var
   var __freetv_health_checker_started: boolean | undefined;
   // eslint-disable-next-line no-var
   var __freetv_full_check_interval: NodeJS.Timeout | undefined;
+  // eslint-disable-next-line no-var
+  var __freetv_delivery_recheck_interval: NodeJS.Timeout | undefined;
   // eslint-disable-next-line no-var
   var __freetv_health_retry_timer: NodeJS.Timeout | undefined;
   // eslint-disable-next-line no-var
@@ -117,14 +139,17 @@ function emptyResult(scope: HealthCheckScope, truncated = false): HealthCheckRes
  */
 async function probeBatch<T extends { url: string; headers?: Record<string, string> }>(
   streams: T[],
-  timeoutMs: number
+  probeOptions: ProbeOptions
 ): Promise<Map<string, HlsCheckResult>> {
   const results = new Map<string, HlsCheckResult>();
 
   for (let i = 0; i < streams.length; i += BATCH_CONCURRENCY) {
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
-      const result = await checkHlsStream(stream.url, { timeoutMs, headers: stream.headers });
+      const result = await checkHlsStream(stream.url, {
+        ...probeOptions,
+        headers: stream.headers,
+      });
       results.set(stream.url, result);
     });
     await Promise.allSettled(probePromises);
@@ -154,6 +179,7 @@ function toLastCheckDetail(result: HlsCheckResult) {
     checkedAt: result.checkedAt,
     browserCors: result.browserCors,
     browserBlocker: result.browserBlocker,
+    deliveryMisses: result.deliveryMisses,
   };
 }
 
@@ -190,11 +216,26 @@ async function runInMemoryHealthCheck(
   scope: HealthCheckScope,
   channelIds: string[]
 ): Promise<HealthCheckResult> {
+  const recheck = scope === "recheck";
   const allowed = new Set(channelIds);
   const streams = inMemoryDb
     .getStreams()
-    .filter((s) => !s.adminDisabled && allowed.has(s.channelId))
-    .slice(0, MAX_LINKS_PER_RUN);
+    .filter((s) => !s.adminDisabled && allowed.has(s.channelId) && (!recheck || s.deliveryHidden === true))
+    .sort((a, b) => {
+      // A re-check works the oldest miss first; a normal pass puts hidden links
+      // ahead of the queue and is otherwise least-recently-checked first.
+      if (recheck) {
+        const aMiss = a.lastDeliveryMissAt ? new Date(a.lastDeliveryMissAt).getTime() : 0;
+        const bMiss = b.lastDeliveryMissAt ? new Date(b.lastDeliveryMissAt).getTime() : 0;
+        return aMiss - bMiss;
+      }
+      const hiddenFirst = Number(b.deliveryHidden === true) - Number(a.deliveryHidden === true);
+      if (hiddenFirst !== 0) return hiddenFirst;
+      const aTime = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
+      const bTime = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
+      return aTime - bTime;
+    })
+    .slice(0, recheck ? RECHECK_LINKS_PER_RUN : MAX_LINKS_PER_RUN);
   const now = new Date();
   let active = 0;
   let degraded = 0;
@@ -203,7 +244,7 @@ async function runInMemoryHealthCheck(
 
   console.log(`[AutoHealthChecker] (${scope}) Probing ${streams.length} stream links (in-memory mode)...`);
 
-  const probeResults = await probeBatch(streams, PROBE_TIMEOUT_MS);
+  const probeResults = await probeBatch(streams, recheck ? RECHECK_PROBE_OPTS : { timeoutMs: PROBE_TIMEOUT_MS });
 
   for (const stream of streams) {
     const result = probeResults.get(stream.url);
@@ -219,7 +260,8 @@ async function runInMemoryHealthCheck(
       stream.firstFailedAt,
       result,
       now,
-      stream.lastCountedFailureDay
+      stream.lastCountedFailureDay,
+      stream.deliveryHidden
     );
 
     stream.status = decision.status;
@@ -229,6 +271,9 @@ async function runInMemoryHealthCheck(
     stream.lastCheckedAt = decision.lastCheckedAt;
     stream.lastCountedFailureDay = decision.lastCountedFailureDay;
     stream.browserBlocker = decision.browserBlocker;
+    stream.deliveryMisses = decision.deliveryMisses;
+    stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+    stream.deliveryHidden = decision.deliveryHidden;
 
     if (decision.status === "active") {
       // Stream is WORKING — mark active (re-activate if was broken)
@@ -240,7 +285,11 @@ async function runInMemoryHealthCheck(
     } else if (decision.status === "broken") {
       broken++;
       console.log(
-        `  [BROKEN] ${redactUrl(stream.url)} (${stream.failedAttempts} daily fails: ${result.status} — ${result.reason})`
+        `  [BROKEN] ${redactUrl(stream.url)} (${
+          decision.deliveryHidden
+            ? `no media in ${decision.deliveryMisses} delivery windows`
+            : `${stream.failedAttempts} daily fails`
+        }: ${result.status} — ${result.reason})`
       );
     } else {
       degraded++;
@@ -276,19 +325,25 @@ async function runMongoHealthCheck(
   deadlineAt?: number
 ): Promise<HealthCheckResult> {
   const now = new Date();
+  const recheck = scope === "recheck";
   let active = 0;
   let degraded = 0;
   let broken = 0;
   let recovered = 0;
 
   // Least-recently-checked first, so a bounded run rotates through the batch
-  // instead of re-probing the same links and starving the rest.
-  const streams = await StreamLink.find({
+  // instead of re-probing the same links and starving the rest. Links the
+  // delivery rule hid go first: a budget-truncated pass still lifts the ones
+  // that have started working again. A re-check covers only those, oldest miss
+  // first.
+  const filter: Record<string, unknown> = {
     adminDisabled: { $ne: true },
     channelId: { $in: channelIds },
-  })
-    .sort({ lastCheckedAt: 1 })
-    .limit(MAX_LINKS_PER_RUN);
+  };
+  if (recheck) filter.deliveryHidden = true;
+  const streams = await StreamLink.find(filter)
+    .sort(recheck ? { lastDeliveryMissAt: 1 } : { deliveryHidden: -1, lastCheckedAt: 1 })
+    .limit(recheck ? RECHECK_LINKS_PER_RUN : MAX_LINKS_PER_RUN);
 
   const skippedDisabled = await StreamLink.countDocuments({
     adminDisabled: true,
@@ -317,7 +372,7 @@ async function runMongoHealthCheck(
     const batch = streams.slice(i, i + BATCH_CONCURRENCY);
     const probePromises = batch.map(async (stream) => {
       const result = await checkHlsStream(stream.url, {
-        timeoutMs: PROBE_TIMEOUT_MS,
+        ...(recheck ? RECHECK_PROBE_OPTS : { timeoutMs: PROBE_TIMEOUT_MS }),
         headers: (stream as unknown as { headers?: Record<string, string> }).headers,
       });
       const previousStatus = stream.status as StoredStreamStatus;
@@ -336,7 +391,8 @@ async function runMongoHealthCheck(
         stream.firstFailedAt,
         result,
         now,
-        stream.lastCountedFailureDay
+        stream.lastCountedFailureDay,
+        stream.deliveryHidden
       );
       stream.status = decision.status;
       stream.latency = decision.latency;
@@ -345,6 +401,9 @@ async function runMongoHealthCheck(
       stream.lastCheckedAt = decision.lastCheckedAt;
       stream.lastCountedFailureDay = decision.lastCountedFailureDay;
       stream.browserBlocker = decision.browserBlocker;
+      stream.deliveryMisses = decision.deliveryMisses;
+      stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
+      stream.deliveryHidden = decision.deliveryHidden;
 
       if (decision.status !== previousStatus) {
         changedChannelIds.add(String(stream.channelId));
@@ -361,7 +420,11 @@ async function runMongoHealthCheck(
         if (decision.status === "broken") {
           broken++;
           console.log(
-            `  [BROKEN] ${redactUrl(stream.url)} (${decision.failedAttempts} daily fails: ${result.status} — ${result.reason})`
+            `  [BROKEN] ${redactUrl(stream.url)} (${
+              decision.deliveryHidden
+                ? `no media in ${decision.deliveryMisses} delivery windows`
+                : `${decision.failedAttempts} daily fails`
+            }: ${result.status} — ${result.reason})`
           );
         } else {
           degraded++;
@@ -561,7 +624,11 @@ async function runAutoHealthCheck(
     console.log(`  Degraded      : ${result.degraded}`);
     console.log(`  Broken        : ${result.broken}`);
     console.log(`  Recovered     : ${result.recovered}`);
-    console.log(`  Next check in : ${scope === "full" ? "6 hours" : "the next scheduled batch"}`);
+    console.log(
+      `  Next check in : ${
+        scope === "recheck" ? "an hour" : scope === "full" ? "6 hours" : "the next scheduled batch"
+      }`
+    );
     console.log("══════════════════════════════════════════════════════\n");
 
     return result;
@@ -610,10 +677,30 @@ export function startAutoHealthChecker() {
     runAutoHealthCheck("full");
   }, FULL_INTERVAL_MS);
 
+  // The delivery rule hides a link the moment two 10-second windows come back
+  // empty; this is what gives it another chance, an hour later, instead of
+  // leaving a working channel invisible until the next 6-hour batch reaches it.
+  global.__freetv_delivery_recheck_interval = setInterval(() => {
+    runDeliveryRecheck();
+  }, RECHECK_INTERVAL_MS);
+
   // Don't let either timer block Node.js from exiting
   if (global.__freetv_full_check_interval?.unref) {
     global.__freetv_full_check_interval.unref();
   }
+  if (global.__freetv_delivery_recheck_interval?.unref) {
+    global.__freetv_delivery_recheck_interval.unref();
+  }
+}
+
+/**
+ * Re-probe only the links hidden for delivery, one 10-second window each. Cheap
+ * by design: it runs on every hourly cron line and before each scheduled
+ * category batch, so a link that starts working again is invisible to viewers
+ * for minutes, not until the next 6-hour pass.
+ */
+async function runDeliveryRecheck(deadlineMs?: number): Promise<HealthCheckResult> {
+  return runAutoHealthCheck("recheck", { categories: null, deadlineMs, maintenanceAfter: false });
 }
 
 /**
@@ -633,4 +720,4 @@ export function getLastFullHealthCheckTime(): string | null {
 /**
  * Manually trigger a health check (for admin API). Defaults to a full pass.
  */
-export { runAutoHealthCheck };
+export { runAutoHealthCheck, runDeliveryRecheck };

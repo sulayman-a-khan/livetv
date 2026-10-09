@@ -23,6 +23,18 @@ export interface IStreamLink extends Document {
    * otherwise — automation sets it, an admin clearing it is a deliberate act.
    */
   browserBlocker: string | null;
+  /**
+   * Delivery misses: probe runs (or pairs of player reports) that gave this link
+   * 10 seconds to hand over media and got none. Zero whenever a check delivers.
+   */
+  deliveryMisses: number;
+  lastDeliveryMissAt: Date | null;
+  /**
+   * Hidden because it would not deliver in time — not because it is dead. The
+   * hourly re-check watches only these, and shows the link again the moment it
+   * serves media inside the budget.
+   */
+  deliveryHidden: boolean;
   /** Hand-added by an admin: automation may test and rank it, never delete it. */
   manual: boolean;
   /** Admin took this link out of service: hidden, and automation won't restore it. */
@@ -50,6 +62,9 @@ const StreamLinkSchema = new Schema<IStreamLink>(
     latency: { type: Number, default: 0 },
     lastCountedFailureDay: { type: String, default: null },
     browserBlocker: { type: String, default: null },
+    deliveryMisses: { type: Number, default: 0 },
+    lastDeliveryMissAt: { type: Date, default: null },
+    deliveryHidden: { type: Boolean, default: false, index: true },
     manual: { type: Boolean, default: false },
     adminDisabled: { type: Boolean, default: false },
     // Some providers require a Referer or Origin; retain it for probes.

@@ -19,9 +19,14 @@
  * "Reconnecting…" masking. mpegts keeps a natural live buffer (stash enabled,
  * no latency chasing) so minor chunk delays don't reset the connection.
  *
- * The ONE recovery path is a frozen-progress watchdog: only when the video clock
- * has been continuously stuck for 8s (after having played) does it rebuild the
- * player against a fresh connection to re-fetch the LIVE edge — which is how the
+ * Two things watch the clock. The first is a per-connection delivery deadline:
+ * 10 seconds from connection to first frame, after which the link is reported to
+ * `/api/streams/report-broken` and the ladder steps to the next server — the same
+ * budget the health checker gives a link, measured where it matters, in a browser.
+ *
+ * The second is the frozen-progress watchdog: only when the video clock has been
+ * continuously stuck for 8s (after having played) does it rebuild the player
+ * against a fresh connection to re-fetch the LIVE edge — which is how the
  * provider's ~25s session expiry is absorbed without replaying the first
  * buffered clip. Frequent mpegts ERROR events from small buffer shifts are
  * logged and ignored, so they never flash the status bar.
@@ -69,12 +74,21 @@ interface MpegTsPlayerProps {
 const FROZEN_RELOAD_MS = 8000;
 /** How often the frozen-progress watchdog samples the video clock. */
 const PROGRESS_POLL_MS = 1000;
+/**
+ * The viewer's own copy of the health checker's delivery budget: this many
+ * milliseconds from connection to first frame before the feed is reported and
+ * the ladder moves on. One report is only half of what the backend needs to hide
+ * a link, so a slow first chunk on a working feed blanks nothing by itself.
+ */
+const FIRST_FRAME_DEADLINE_MS = 10_000;
 
 export default function MpegTsPlayer({
   channelName,
   streams,
   currentStreamIndex: controlledStreamIndex,
   onStreamIndexChange,
+  onStreamFailed,
+  onAllServersFailed,
   onSwitchingChange,
 }: MpegTsPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -120,6 +134,9 @@ export default function MpegTsPlayer({
   isMutedRef.current = isMuted;
   const hasLoadedOnceRef = useRef(false);
   const mountedRef = useRef(true);
+  /** Host callbacks read through a ref: prop identity churn must not reload a feed. */
+  const hostCallbacksRef = useRef({ onStreamFailed, onAllServersFailed });
+  hostCallbacksRef.current = { onStreamFailed, onAllServersFailed };
 
   // ---- Fullscreen state (parity with HlsPlayer) ----
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -154,6 +171,20 @@ export default function MpegTsPlayer({
     }
   }, []);
 
+  /**
+   * Stop this connection's delivery trial: the frame arrived, or the fault is
+   * the browser's rather than the link's (engine can't load / can't demux TS),
+   * or the component is going away. Marks the trial met so an already-queued
+   * timer callback no-ops.
+   */
+  const disarmFirstFrame = useCallback(() => {
+    frameDeliveredRef.current = true;
+    if (firstFrameTimerRef.current) {
+      clearTimeout(firstFrameTimerRef.current);
+      firstFrameTimerRef.current = null;
+    }
+  }, []);
+
   const destroyPlayer = useCallback(() => {
     const p = playerRef.current;
     playerRef.current = null;
@@ -184,7 +215,12 @@ export default function MpegTsPlayer({
   const createAndLoadRef = useRef<((rawUrl: string) => void) | null>(null);
   /** Late-bound so the frozen watchdog / user Play can trigger a live reload. */
   const reloadLiveRef = useRef<(() => void) | null>(null);
-  // ---- Frozen-progress watchdog (the ONLY automatic recovery trigger) ----
+  /** Late-bound so the first-frame deadline can step to the next mirror. */
+  const nextServerRef = useRef<(() => void) | null>(null);
+  // ---- Per-connection first-frame deadline ----
+  const firstFrameTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const frameDeliveredRef = useRef(false);
+  // ---- Frozen-progress watchdog (recovers a feed that played, then stalled) ----
   const progressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastClockRef = useRef(0); // last observed video.currentTime
   const frozenSinceRef = useRef(0); // when the clock last stopped advancing
@@ -209,15 +245,40 @@ export default function MpegTsPlayer({
       setIsLoading(true);
       setErrorMsg(null);
 
+      // Arm this connection's delivery deadline. A reload of a feed that already
+      // played is not a fresh trial, so the timer exempts `hasPlayedRef` — the
+      // frozen watchdog owns that case.
+      const feedId = streamsRef.current.find((s) => s.url === rawUrl)?._id;
+      frameDeliveredRef.current = false;
+      if (firstFrameTimerRef.current) clearTimeout(firstFrameTimerRef.current);
+      firstFrameTimerRef.current = setTimeout(() => {
+        firstFrameTimerRef.current = null;
+        if (!mountedRef.current || frameDeliveredRef.current || hasPlayedRef.current) return;
+        const v = videoRef.current;
+        // Buffered but paused (autoplay blocked until the viewer taps) is a
+        // delivered picture, not a slow link.
+        if (v && (v.readyState >= 2 || v.currentTime > 0)) {
+          frameDeliveredRef.current = true;
+          return;
+        }
+        console.warn(
+          `[MpegTsPlayer] feed delivered no frame in ${FIRST_FRAME_DEADLINE_MS / 1000}s — reporting and stepping on`
+        );
+        if (feedId) hostCallbacksRef.current.onStreamFailed?.(feedId);
+        nextServerRef.current?.();
+      }, FIRST_FRAME_DEADLINE_MS);
+
       void (async () => {
         const mpegts = await ensureModule();
         if (!mountedRef.current) return;
         if (!mpegts) {
+          disarmFirstFrame();
           setErrorMsg("Playback engine failed to load.");
           setIsLoading(false);
           return;
         }
         if (!mpegts.isSupported()) {
+          disarmFirstFrame();
           setErrorMsg("This browser can't play raw MPEG-TS streams (no MediaSource support).");
           setIsLoading(false);
           return;
@@ -243,6 +304,7 @@ export default function MpegTsPlayer({
           );
         } catch (err) {
           console.error("[MpegTsPlayer] createPlayer failed", err);
+          disarmFirstFrame();
           setErrorMsg("Could not initialise the transport-stream player.");
           setIsLoading(false);
           return;
@@ -267,6 +329,7 @@ export default function MpegTsPlayer({
           player.load();
         } catch (err) {
           console.error("[MpegTsPlayer] attach/load failed", err);
+          disarmFirstFrame();
           setErrorMsg("Could not start the transport stream.");
           setIsLoading(false);
           return;
@@ -293,7 +356,7 @@ export default function MpegTsPlayer({
         }
       })();
     },
-    [destroyPlayer, ensureModule]
+    [destroyPlayer, ensureModule, disarmFirstFrame]
   );
   createAndLoadRef.current = createAndLoad;
 
@@ -314,6 +377,34 @@ export default function MpegTsPlayer({
     createAndLoadRef.current?.(url);
   }, []);
   reloadLiveRef.current = reloadLive;
+
+  /**
+   * Step to the next mirror after a feed failed its delivery deadline. Only the
+   * deadline calls it: the frozen watchdog reloads the SAME feed, because a
+   * stall after a real first frame is a connection problem, not a dead link.
+   */
+  const handleNextServer = useCallback(() => {
+    const list = streamsRef.current;
+    const nextIdx = (indexRef.current + 1) % Math.max(list.length, 1);
+    const target = list[nextIdx];
+    if (list.length <= 1 || nextIdx === 0 || !target) {
+      // The whole ladder had its 10 seconds; hand the channel back to the host.
+      hostCallbacksRef.current.onAllServersFailed?.();
+      return;
+    }
+    indexRef.current = nextIdx;
+    lastAppliedIdRef.current = target._id;
+    setDisplayedIndex(nextIdx);
+    setCurrentStreamIndex(nextIdx);
+    setSwitching(true);
+    setPendingChannelLabel(channelName);
+    // Re-arm the watchdog for the fresh connection, exactly as a switch does.
+    hasPlayedRef.current = false;
+    lastClockRef.current = 0;
+    frozenSinceRef.current = Date.now();
+    createAndLoadRef.current?.(target.url);
+  }, [channelName, setCurrentStreamIndex]);
+  nextServerRef.current = handleNextServer;
 
   // ---- Initial load + channel/mirror switches driven by props ----
   useEffect(() => {
@@ -347,6 +438,7 @@ export default function MpegTsPlayer({
     return () => {
       mountedRef.current = false;
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      if (firstFrameTimerRef.current) clearTimeout(firstFrameTimerRef.current);
       destroyPlayer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -363,17 +455,20 @@ export default function MpegTsPlayer({
     setIsLoading(false);
     setSwitching(false);
     setPendingChannelLabel(null);
+    // The feed met its delivery deadline — disarm the trial.
+    disarmFirstFrame();
     // Playback reached the live edge — mark healthy and re-baseline the watchdog.
     hasPlayedRef.current = true;
     const v = videoRef.current;
     lastClockRef.current = v ? v.currentTime : 0;
     frozenSinceRef.current = Date.now();
-  }, []);
+  }, [disarmFirstFrame]);
 
   const handlePause = useCallback(() => setIsPlaying(false), []);
 
   /**
-   * Frozen-progress watchdog — the ONLY automatic recovery trigger. It samples
+   * Frozen-progress watchdog — recovery for a feed that played and then stalled.
+   * It samples
    * the video clock once a second and reloads the live edge ONLY when playback
    * has been continuously frozen for FROZEN_RELOAD_MS (8s) after having played.
    * A user pause never counts as frozen, and the frequent mpegts ERROR events

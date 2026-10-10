@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -137,11 +138,16 @@ interface PlaylistSourcePanelProps {
   secretKey: string;
   /** A sync mutates Channel / StreamLink rows, so the rest of the dashboard must re-read. */
   onCatalogueChanged: () => void;
+  /** The panel is one of the dashboard's collapsible sections; the page owns which are open. */
+  open: boolean;
+  onToggle: () => void;
 }
 
 export default function PlaylistSourcePanel({
   secretKey,
   onCatalogueChanged,
+  open,
+  onToggle,
 }: PlaylistSourcePanelProps) {
   const [sources, setSources] = useState<SourceRow[]>([]);
   const [monitor, setMonitor] = useState<MonitorStatus | null>(null);
@@ -456,13 +462,20 @@ export default function PlaylistSourcePanel({
   };
 
   return (
-    <div className="glass-panel p-6 rounded-2xl border border-slate-800">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
-          <Layers className="w-5 h-5 text-brand-500" />
-          <h2 className="text-base font-bold text-white">Direct HLS Playlist Sources</h2>
-        </div>
-
+    <AdminSection
+      title="Direct HLS Playlist Sources"
+      icon={<Layers className="w-5 h-5" />}
+      open={open}
+      onToggle={onToggle}
+      collapsedHint="Daily playlist feeds that add, refresh and retire mirrors on their own."
+      badge={
+        syncingId || (progress && !progress.done) ? (
+          <SectionBadge text="Syncing…" tone="amber" />
+        ) : (
+          <SectionBadge text={`${sources.length} Sources`} />
+        )
+      }
+      actions={
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none">
             <input
@@ -492,9 +505,9 @@ export default function PlaylistSourcePanel({
             <span>Add Playlist Source</span>
           </button>
         </div>
-      </div>
-
-      <p className="text-[11px] text-slate-400 mb-4 leading-relaxed">
+      }
+    >
+      <p className="text-[11px] text-slate-400 leading-relaxed">
         Each source is checked automatically once a day. When its playlist changes, new channels are detected,
         changed stream URLs are attached to the <span className="text-slate-300 font-semibold">same channel card</span>{" "}
         (never a duplicate), and every new URL is verified before it can become the primary link. A failed fetch never
@@ -924,6 +937,6 @@ export default function PlaylistSourcePanel({
           })}
         </div>
       )}
-    </div>
+    </AdminSection>
   );
 }

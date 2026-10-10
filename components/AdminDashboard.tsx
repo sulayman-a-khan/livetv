@@ -3,6 +3,7 @@
 import "@/lib/tvPolyfills";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { getChannelLogo } from "@/lib/utils";
+import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
 import PlaylistSourcePanel from "@/components/PlaylistSourcePanel";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory, CHANNEL_CATEGORIES, type ChannelCategory } from "@/lib/categories";
@@ -34,7 +35,8 @@ import {
   Edit2,
   Wrench,
   Clock,
-  ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Loader2,
   Ban,
   RotateCcw,
@@ -106,6 +108,33 @@ const ADMIN_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.slug, c.name])
 );
 
+/** The dashboard's sections, each of which opens and closes on its own. */
+const SECTION_IDS = ["metrics", "ingest", "manual", "sources", "pinned", "channels"] as const;
+type SectionId = (typeof SECTION_IDS)[number];
+
+/** Only the counts are open by default — everything else waits until it is asked for. */
+const DEFAULT_OPEN_SECTIONS: Record<SectionId, boolean> = {
+  metrics: true,
+  ingest: false,
+  manual: false,
+  sources: false,
+  pinned: false,
+  channels: false,
+};
+
+const SECTIONS_STORAGE_KEY = "freetv_admin_open_sections";
+
+/** Which sections were open last time, so a reload does not reset the whole page. */
+function readStoredSections(): Record<SectionId, boolean> {
+  if (typeof window === "undefined") return DEFAULT_OPEN_SECTIONS;
+  try {
+    const stored = JSON.parse(localStorage.getItem(SECTIONS_STORAGE_KEY) || "{}");
+    return { ...DEFAULT_OPEN_SECTIONS, ...stored };
+  } catch {
+    return DEFAULT_OPEN_SECTIONS;
+  }
+}
+
 /** True when a channel belongs to the given pinned-board tab ("all" or a category slug). */
 function channelInPinnedTab(
   ch: { category?: string; name?: string },
@@ -162,7 +191,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [pinningId, setPinningId] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
   const [reorderSaved, setReorderSaved] = useState(false);
-  const [pinnedExpanded, setPinnedExpanded] = useState(false);
   const [pinnedOrder, setPinnedOrder] = useState<ChannelWithStreams[]>([]);
   const [pinCategoryTab, setPinCategoryTab] = useState<string>("all");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -173,6 +201,27 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   // Catalogue maintenance pass
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceLog, setMaintenanceLog] = useState<string | null>(null);
+
+  // Which sections are open — one flag per section, remembered across reloads.
+  const [openSections, setOpenSections] = useState<Record<SectionId, boolean>>(readStoredSections);
+
+  const toggleSection = useCallback((id: SectionId) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const setEverySection = useCallback((open: boolean) => {
+    setOpenSections(
+      Object.fromEntries(SECTION_IDS.map((id) => [id, open])) as Record<SectionId, boolean>
+    );
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SECTIONS_STORAGE_KEY, JSON.stringify(openSections));
+    } catch {
+      // A browser in private mode refuses the write; the in-memory state still works.
+    }
+  }, [openSections]);
 
   // Fetch admin dashboard statistics and channel breakdown
   const fetchStats = useCallback(async () => {
@@ -1035,6 +1084,22 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           </button>
 
           <button
+            onClick={() => setEverySection(true)}
+            title="Expand every section"
+            className="p-2.5 bg-slate-900 text-slate-300 hover:text-white rounded-xl border border-slate-800 hover:border-slate-700 transition-colors"
+          >
+            <ChevronsUpDown className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setEverySection(false)}
+            title="Collapse every section"
+            className="p-2.5 bg-slate-900 text-slate-300 hover:text-white rounded-xl border border-slate-800 hover:border-slate-700 transition-colors"
+          >
+            <ChevronsDownUp className="w-4 h-4" />
+          </button>
+
+          <button
             onClick={fetchStats}
             disabled={loading}
             className="p-2.5 bg-slate-900 text-slate-300 hover:text-white rounded-xl border border-slate-800 hover:border-slate-700 transition-colors"
@@ -1101,7 +1166,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
       {/* Metrics Cards */}
       {stats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <AdminSection
+          title="Catalogue Metrics"
+          icon={<Database className="w-5 h-5" />}
+          open={openSections.metrics}
+          onToggle={() => toggleSection("metrics")}
+          collapsedHint="Channel, mirror and link counts for the whole catalogue."
+          badge={<SectionBadge text={`${stats.totalChannels} Channels`} />}
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="glass-card p-5 rounded-2xl flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
               <Radio className="w-6 h-6" />
@@ -1152,15 +1225,19 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             </div>
           </div>
         </div>
+        </AdminSection>
       )}
 
       {/* M3U Ingestion Console */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800">
-        <div className="flex items-center gap-2 mb-4">
-          <FileCode className="w-5 h-5 text-brand-500" />
-          <h2 className="text-base font-bold text-white">Ingest M3U Playlist</h2>
-        </div>
-
+      <AdminSection
+        title="Ingest M3U Playlist"
+        icon={<FileCode className="w-5 h-5" />}
+        open={openSections.ingest}
+        onToggle={() => toggleSection("ingest")}
+        collapsedHint="Bulk-add channels and mirrors from a playlist URL or pasted #EXTM3U text."
+        expandedHint="Paste a playlist URL or raw M3U text, then ingest it."
+        badge={ingestLoading ? <SectionBadge text="Ingesting…" tone="amber" /> : undefined}
+      >
         <form onSubmit={handleIngest} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-400 mb-1">
@@ -1270,15 +1347,17 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             {ingestLog}
           </div>
         )}
-      </div>
+      </AdminSection>
 
       {/* Manual Channel Entry — one curated channel, typed by hand */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800">
-        <div className="flex items-center gap-2 mb-1">
-          <SlidersHorizontal className="w-5 h-5 text-brand-500" />
-          <h2 className="text-base font-bold text-white">Manual Channel Entry</h2>
-        </div>
-        <p className="text-[11px] text-slate-400 mb-4">
+      <AdminSection
+        title="Manual Channel Entry"
+        icon={<SlidersHorizontal className="w-5 h-5" />}
+        open={openSections.manual}
+        onToggle={() => toggleSection("manual")}
+        collapsedHint="Type in one channel and its first stream link by hand."
+      >
+        <p className="text-[11px] text-slate-400">
           Adds one unpinned channel with a single hand-verified link. It stays hidden from
           viewers until you pin it, and no playlist sync or cleanup pass can rewrite it.
         </p>
@@ -1372,71 +1451,48 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             {manualLog.text}
           </div>
         )}
-      </div>
+      </AdminSection>
 
       {/* Direct HLS playlist source monitoring */}
-      <PlaylistSourcePanel secretKey={secretKey} onCatalogueChanged={fetchStats} />
+      <PlaylistSourcePanel
+        secretKey={secretKey}
+        onCatalogueChanged={fetchStats}
+        open={openSections.sources}
+        onToggle={() => toggleSection("sources")}
+      />
 
 
 
       {/* ========================================================= */}
       {/* 📌 MANAGE & REORDER PINNED CHANNELS SECTION */}
       {/* ========================================================= */}
-      <div className="glass-panel p-6 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/5 via-slate-900/40 to-slate-950 space-y-4">
-        {/* Collapsible header — click to expand/collapse the pinned board */}
-        <button
-          type="button"
-          onClick={() => setPinnedExpanded((v) => !v)}
-          aria-expanded={pinnedExpanded}
-          className="w-full flex items-center justify-between gap-4 text-left group"
-        >
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-              <Pin className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white truncate">Manage & Reorder Pinned Channels</h2>
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                  {pinnedOrder.length} Pinned
-                </span>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5 hidden sm:block truncate">
-                {pinnedExpanded
-                  ? "Drag a row by its handle to reorder — save the order with the button above. Each row also carries its category, mirrors, health and links."
-                  : "Click to expand and manage the pinned channels — order, mirrors, health and links all live here."}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            {reorderSaved && (
-              <span className="hidden sm:flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl animate-fade-in">
-                <Check className="w-3.5 h-3.5" /> Saved!
-              </span>
-            )}
-            <span
-              className={`w-8 h-8 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-400 group-hover:text-white transition-transform ${
-                pinnedExpanded ? "rotate-180" : ""
-              }`}
-            >
-              <ChevronDown className="w-4 h-4" />
+      <AdminSection
+        title="Manage & Reorder Pinned Channels"
+        icon={<Pin className="w-5 h-5" />}
+        tone="amber"
+        open={openSections.pinned}
+        onToggle={() => toggleSection("pinned")}
+        collapsedHint="What viewers see first — order, mirrors, health and links all live here."
+        expandedHint="Drag a row by its handle to reorder, then save the order below."
+        badge={<SectionBadge text={`${pinnedOrder.length} Pinned`} tone="amber" />}
+        actions={
+          reorderSaved ? (
+            <span className="hidden sm:flex items-center gap-1 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl animate-fade-in">
+              <Check className="w-3.5 h-3.5" /> Saved!
             </span>
-          </div>
-        </button>
-
-        {pinnedExpanded && (
-          <>
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={handleSavePinnedOrder}
-                disabled={reordering || pinnedOrder.length === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                <span>{reordering ? "Saving Order..." : "Save Custom Order"}</span>
-              </button>
-            </div>
+          ) : null
+        }
+      >
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={handleSavePinnedOrder}
+            disabled={reordering || pinnedOrder.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20 disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" />
+            <span>{reordering ? "Saving Order..." : "Save Custom Order"}</span>
+          </button>
+        </div>
 
         {/* Category Tabs for Pinned Channels */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -1571,28 +1627,18 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             </table>
           </div>
         )}
-          </>
-        )}
-      </div>
+      </AdminSection>
 
       {/* Managed Channels Breakdown Table with Filter & Bulk Actions */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-white">Channel & Stream Links Manager</h2>
-              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-brand-400">
-                {filteredChannels.length} of {unpinnedTotal} Unpinned Channels
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              The unpinned shelf — pinned channels live on the board above with their own mirrors, health and actions.
-              Filter by name, status or category, pin a channel to move it up there, or mark checkboxes for bulk actions.
-            </p>
-          </div>
-
-          {/* Bulk Delete Bar */}
-          {selectedIds.length > 0 && (
+      <AdminSection
+        title="Channel & Stream Links Manager"
+        icon={<Layers className="w-5 h-5" />}
+        open={openSections.channels}
+        onToggle={() => toggleSection("channels")}
+        collapsedHint="Search, filter, pin, edit or bulk-delete anything on the unpinned shelf."
+        badge={<SectionBadge text={`${filteredChannels.length} of ${unpinnedTotal} Unpinned`} />}
+        actions={
+          selectedIds.length > 0 ? (
             <div className="flex items-center gap-3 bg-red-500/10 border border-red-500/30 px-4 py-2 rounded-xl animate-fade-in">
               <span className="text-xs font-bold text-red-400">
                 {selectedIds.length} {selectedIds.length === 1 ? "Channel" : "Channels"} Marked
@@ -1606,8 +1652,13 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
                 <span>{bulkDeleting ? "Deleting Marked..." : `Delete Marked (${selectedIds.length})`}</span>
               </button>
             </div>
-          )}
-        </div>
+          ) : null
+        }
+      >
+        <p className="text-xs text-slate-400">
+          The unpinned shelf — pinned channels live on the board above with their own mirrors, health and actions.
+          Filter by name, status or category, pin a channel to move it up there, or mark checkboxes for bulk actions.
+        </p>
 
         {/* ========== FILTER CONTROLS TOOLBAR ========== */}
         <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-3">
@@ -1833,7 +1884,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             </tbody>
           </table>
         </div>
-      </div>
+      </AdminSection>
 
       {/* ========================================================= */}
       {/* ✏️ FULL CHANNEL EDITOR (metadata + manual server links)   */}

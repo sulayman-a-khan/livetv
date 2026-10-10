@@ -31,7 +31,20 @@
  *                           segment, or raw `.ts` bytes); a miss is confirmed by
  *                           a second attempt ~15 seconds later, and two of them
  *                           hide the link from viewers until some later check
- *                           delivers.
+ *                           delivers. The budget covers the body transfer too,
+ *                           not just the headers — fetch()'s timeout stops at the
+ *                           headers, and an origin that stalls after them would
+ *                           otherwise report a minute of waiting as 10 seconds.
+ *   9. Chain tolerance     — Node verifies a certificate chain only from the
+ *                           roots it ships with, so an origin that omits its
+ *                           intermediate fails here while a browser, which
+ *                           closes that gap, plays it. When — and only when — the
+ *                           failure is a chain-building one on a link the browser
+ *                           fetches itself, the origin is asked again with that
+ *                           tolerance; a real playlist plus a segment is then
+ *                           filed as DEGRADED with the gap named, never as a link
+ *                           that delivers nothing, and never over stored
+ *                           credentials.
  *
  * A normal HTTP 200 is never treated as "online" by itself — every one of
  * the steps above has to agree the stream is actually serving playable
@@ -44,6 +57,7 @@
  */
 
 import { execFile } from "child_process";
+import { request as httpsRequest } from "https";
 import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
@@ -75,6 +89,8 @@ export type HlsErrorCode =
   | "DNS_FAILURE"
   | "CONNECTION_REFUSED"
   | "TLS_FAILURE"
+  /** Node could not build the origin's certificate chain; a browser often can. */
+  | "TLS_CHAIN_UNVERIFIED"
   | "TIMEOUT"
   | "PLAYLIST_NOT_FOUND"
   | "PLAYLIST_GONE"
@@ -325,6 +341,244 @@ function isRelayedUrl(url: string): boolean {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * Certificate-chain tolerance — direct links only
+ * ------------------------------------------------------------------ */
+
+/**
+ * The chain-building failures, as distinct from untrustworthy certificates.
+ *
+ * These codes say Node was handed too little of the chain, or a root newer than
+ * the store it ships with. A viewer's browser closes that gap — Windows
+ * retrieves the missing intermediate, other trust stores carry the newer root —
+ * which is why the same channel plays in VLC and in the admin panel's own test
+ * player while our probe filed it as delivering nothing. Expired, revoked,
+ * self-signed and wrong-hostname certificates are deliberately not here: a
+ * browser refuses those as well, so they stay plain failures.
+ */
+const CHAIN_BUILDING_CODES: string[] = [
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "UNKNOWN_CA",
+  "ONLY_LEAF_CERTIFICATE",
+];
+
+function isChainBuildingCode(code: string): boolean {
+  return CHAIN_BUILDING_CODES.includes(code);
+}
+
+interface BrowserTrustResponse {
+  status: number | null;
+  finalUrl: string;
+  contentType: string;
+  acao: string | null;
+  text: string;
+  bytes: number;
+  error: string | null;
+}
+
+/**
+ * One request made the way the viewer's browser makes it: same URL, only headers
+ * a browser is allowed to send, and a deadline that covers the body as well as
+ * the headers. Certificate verification is off for this request alone — that is
+ * its entire purpose, and the reason its answer is never filed as a clean
+ * ONLINE. Per-link credentials never ride on it.
+ */
+function browserTrustGet(url: string, maxBytes: number, timeoutMs: number): Promise<BrowserTrustResponse> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (patch: Partial<BrowserTrustResponse>) => {
+      if (settled) return;
+      settled = true;
+      resolve({ status: null, finalUrl: url, contentType: "", acao: null, text: "", bytes: 0, error: null, ...patch });
+    };
+
+    if (!url.toLowerCase().startsWith("https://")) {
+      done({ error: "not an HTTPS origin" });
+      return;
+    }
+
+    const req = httpsRequest(
+      url,
+      { method: "GET", headers: buildHeaders(), rejectUnauthorized: false, timeout: timeoutMs },
+      (res) => {
+        const code = res.statusCode || 0;
+        const location = res.headers.location;
+        if (code >= 300 && code < 400 && location) {
+          res.resume();
+          let next: string;
+          try {
+            next = new URL(location, url).toString();
+          } catch {
+            done({ status: code, error: "unreadable redirect" });
+            return;
+          }
+          if (!next.toLowerCase().startsWith("https://")) {
+            done({ status: code, error: "redirect left HTTPS" });
+            return;
+          }
+          browserTrustGet(next, maxBytes, Math.max(1, timeoutMs - 250)).then(done);
+          return;
+        }
+
+        const contentType = String(res.headers["content-type"] || "").toLowerCase();
+        const acao = res.headers["access-control-allow-origin"] || null;
+        const chunks: Buffer[] = [];
+        let kept = 0;
+        let bytes = 0;
+        const collect = () => Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
+        res.on("data", (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (kept < maxBytes) {
+            chunks.push(chunk);
+            kept += chunk.length;
+          } else {
+            req.destroy();
+          }
+        });
+        res.on("end", () => done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes }));
+        res.on("error", () =>
+          done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes, error: "body transfer failed" })
+        );
+      }
+    );
+
+    req.on("timeout", () => {
+      req.destroy();
+      done({ error: `no response within ${timeoutMs}ms` });
+    });
+    req.on("error", (e: { code?: string; message?: string }) => done({ error: e?.code || e?.message || "request failed" }));
+    req.end();
+  });
+}
+
+interface BrowserTrustVerdict {
+  delivered: boolean;
+  playlistType: PlaylistType;
+  isLive: boolean | null;
+  segmentCount: number | null;
+  httpStatus: number | null;
+  browserCors: boolean | null;
+  ms: number;
+  detail: string;
+}
+
+/**
+ * Walks the same first steps the player walks — the playlist, a variant if the
+ * playlist is a master, then one segment — under the browser's chain tolerance,
+ * and answers exactly one question: does this origin put media in a viewer's
+ * hands? Anything that is not a playlist, or a segment that will not transfer,
+ * is answered "no", so a tolerant handshake can never invent a working channel.
+ */
+async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise<BrowserTrustVerdict> {
+  const started = Date.now();
+  const left = () => Math.max(1, budgetMs - (Date.now() - started));
+  const originKnown = Boolean(siteOrigin());
+  let acaoSeen: boolean | null = originKnown ? true : null;
+  const noteCors = (value: string | null) => {
+    if (originKnown && !value) acaoSeen = false;
+  };
+
+  const fail = (detail: string, httpStatus: number | null, playlistType: PlaylistType = null): BrowserTrustVerdict => ({
+    delivered: false,
+    playlistType,
+    isLive: null,
+    segmentCount: null,
+    httpStatus,
+    browserCors: acaoSeen,
+    ms: Date.now() - started,
+    detail,
+  });
+
+  // A raw MPEG-TS feed has no playlist to parse; for it the player's whole
+  // question is whether bytes flow.
+  if (isMpegTsUrl(url)) {
+    const ts = await browserTrustGet(url, 8192, left());
+    noteCors(ts.acao);
+    if (ts.status === null) return fail(ts.error || "origin did not answer", null);
+    if ((ts.status === 200 || ts.status === 206) && ts.bytes > 0 && !looksLikeHtmlErrorPage(ts.text, ts.contentType)) {
+      return {
+        delivered: true,
+        playlistType: null,
+        isLive: true,
+        segmentCount: null,
+        httpStatus: ts.status,
+        browserCors: acaoSeen,
+        ms: Date.now() - started,
+        detail: `${ts.bytes} bytes of MPEG-TS transferred`,
+      };
+    }
+    return fail(`MPEG-TS feed gave no bytes (HTTP ${ts.status})`, ts.status);
+  }
+
+  const playlist = await browserTrustGet(url, 256 * 1024, left());
+  noteCors(playlist.acao);
+  if (playlist.status === null) return fail(playlist.error || "origin did not answer", null);
+  if (playlist.status !== 200 && playlist.status !== 206) return fail(`HTTP ${playlist.status}`, playlist.status);
+
+  const parsed = parseM3U8(playlist.text);
+  if (!parsed.isValidHls || looksLikeHtmlErrorPage(playlist.text, playlist.contentType)) {
+    return fail("answered without an HLS playlist", playlist.status);
+  }
+
+  let media = parsed;
+  let mediaUrl = playlist.finalUrl;
+  let playlistType: PlaylistType = parsed.isMaster ? "MASTER" : "MEDIA";
+
+  if (parsed.isMaster) {
+    const cheapest = [...parsed.variants].sort((a, b) => (a.bandwidth ?? 0) - (b.bandwidth ?? 0))[0];
+    const variantUrl = cheapest ? resolveUrl(cheapest.uri, playlist.finalUrl) : null;
+    if (!variantUrl) return fail("master playlist declares no variant", playlist.status, "MASTER");
+    const variant = await browserTrustGet(variantUrl, 256 * 1024, left());
+    noteCors(variant.acao);
+    const variantParsed = parseM3U8(variant.text);
+    if (!variantParsed.isValidHls || variantParsed.isMaster || looksLikeHtmlErrorPage(variant.text, variant.contentType)) {
+      return fail("its variant is not a media playlist", variant.status ?? playlist.status, "MASTER");
+    }
+    media = variantParsed;
+    mediaUrl = variant.finalUrl;
+    playlistType = "MEDIA";
+  }
+
+  if (media.segments.length === 0) {
+    // The strict probe calls an momentarily empty live window DEGRADED, not
+    // missing, so this one does too: the manifest is being served.
+    return {
+      delivered: true,
+      playlistType,
+      isLive: media.isLive,
+      segmentCount: 0,
+      httpStatus: playlist.status,
+      browserCors: acaoSeen,
+      ms: Date.now() - started,
+      detail: "playlist served, no segments listed right now",
+    };
+  }
+
+  const segmentUrl = resolveUrl(media.segments[media.segments.length - 1].uri, mediaUrl);
+  if (!segmentUrl) return fail("a segment URI could not be resolved", playlist.status, playlistType);
+  const segment = await browserTrustGet(segmentUrl, 8192, left());
+  noteCors(segment.acao);
+  if (segment.status !== 200 && segment.status !== 206) {
+    return fail(`segment answered HTTP ${segment.status ?? "nothing"}`, segment.status, playlistType);
+  }
+  if (segment.bytes === 0 || looksLikeHtmlErrorPage(segment.text, segment.contentType)) {
+    return fail("segment handed over no media bytes", segment.status, playlistType);
+  }
+
+  return {
+    delivered: true,
+    playlistType,
+    isLive: media.isLive,
+    segmentCount: media.segments.length,
+    httpStatus: playlist.status,
+    browserCors: acaoSeen,
+    ms: Date.now() - started,
+    detail: `playlist + 1 of ${media.segments.length} segments transferred`,
+  };
+}
+
 interface FetchOutcome {
   response: Response | null;
   responseTime: number;
@@ -368,6 +622,16 @@ async function timedFetch(
     if (code.startsWith("CERT_") || code.startsWith("ERR_TLS") || code.includes("SSL")) {
       return { response: null, responseTime, errorCode: "TLS_FAILURE", errorMessage: `TLS error (${code})` };
     }
+    if (isChainBuildingCode(code)) {
+      // Not a broken stream and not an unsafe one: our trust anchors are simply
+      // narrower than the viewer's browser, which resolves the chain further.
+      return {
+        response: null,
+        responseTime,
+        errorCode: "TLS_CHAIN_UNVERIFIED",
+        errorMessage: `Certificate chain incomplete for Node (${code})`,
+      };
+    }
 
     return {
       response: null,
@@ -380,41 +644,71 @@ async function timedFetch(
   }
 }
 
-/** Reads at most `maxBytes` of a response body as text, then cancels the underlying connection — never buffers a whole (potentially endless) stream. */
+/**
+ * Reads at most `maxBytes` of a response body as text, then cancels the
+ * underlying connection — never buffers a whole (potentially endless) stream.
+ *
+ * `deadlineMs` bounds the read itself. fetch()'s timeout stops the moment
+ * headers arrive, so without it an origin that answers promptly and then stalls
+ * the transfer could hold a probe for a minute and still be filed as "no media
+ * within 10 seconds" — a verdict, and an admin row, that nobody can believe.
+ */
 async function readBodyCapped(
   response: Response,
-  maxBytes: number
+  maxBytes: number,
+  deadlineMs?: number
 ): Promise<{ text: string; bytesRead: number }> {
-  if (!response.body) {
-    const text = await response.text().catch(() => "");
-    return { text, bytesRead: text.length };
-  }
-
-  const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let collected = 0;
-  try {
-    while (collected < maxBytes) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value && value.length > 0) {
-        const remaining = maxBytes - collected;
-        const piece = value.length > remaining ? value.subarray(0, remaining) : value;
-        chunks.push(piece);
-        collected += piece.length;
-      }
+  /** Whatever has arrived so far: a deadline judges the bytes we hold, not zero. */
+  const snapshot = (): { text: string; bytesRead: number } => {
+    const merged = new Uint8Array(collected);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
     }
-  } finally {
-    reader.cancel().catch(() => {});
-  }
+    return { text: new TextDecoder("utf-8", { fatal: false }).decode(merged), bytesRead: collected };
+  };
 
-  const merged = new Uint8Array(collected);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
+  const clip = async (): Promise<{ text: string; bytesRead: number }> => {
+    if (!response.body) {
+      const text = await response.text().catch(() => "");
+      return { text, bytesRead: text.length };
+    }
+
+    const reader = response.body.getReader();
+    try {
+      while (collected < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) {
+          const remaining = maxBytes - collected;
+          const piece = value.length > remaining ? value.subarray(0, remaining) : value;
+          chunks.push(piece);
+          collected += piece.length;
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+
+    return snapshot();
+  };
+
+  if (deadlineMs == null) return clip();
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      clip(),
+      new Promise<{ text: string; bytesRead: number }>((resolve) => {
+        timer = setTimeout(() => resolve(snapshot()), Math.max(1, deadlineMs));
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return { text: new TextDecoder("utf-8", { fatal: false }).decode(merged), bytesRead: collected };
 }
 
 function looksLikeHtmlErrorPage(text: string, contentType: string): boolean {
@@ -575,7 +869,7 @@ async function checkSegment(
   }
 
   const contentType = (get.response.headers.get("content-type") || "").toLowerCase();
-  const { text, bytesRead } = await readBodyCapped(get.response, 4096);
+  const { text, bytesRead } = await readBodyCapped(get.response, 4096, timeoutMs);
   if (bytesRead === 0) return { ok: false, status: get.response.status, bytesRead: 0, acao };
   if (looksLikeHtmlErrorPage(text, contentType)) {
     return { ok: false, status: get.response.status, bytesRead, acao };
@@ -774,7 +1068,7 @@ function classifyHttpStatus(status: number, url: string): { status: HlsHealthSta
  * caller that decides whether one miss means anything.
  */
 function deliveryMiss(deadlineMs: number, elapsedMs: number): HlsCheckResult {
-  const reason = `No media delivered within ${Math.round(deadlineMs / 1000)}s (took ${Math.round(elapsedMs)}s)`;
+  const reason = `No media delivered within ${Math.round(deadlineMs / 1000)}s (took ${(elapsedMs / 1000).toFixed(1)}s)`;
   return baseResult({
     status: "UNDELIVERABLE",
     errorCode: "DELIVERY_DEADLINE",
@@ -853,7 +1147,7 @@ async function probeOnce(
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   // Playlists are plain text and small — a generous cap still protects us
   // from a misconfigured server handing back an entire video as "the playlist".
-  const { text: body } = await readBodyCapped(response, 512 * 1024);
+  const { text: body } = await readBodyCapped(response, 512 * 1024, Math.max(1, budgetLeft()));
 
   if (looksLikeHtmlErrorPage(body, contentType)) {
     return baseResult({
@@ -914,7 +1208,7 @@ async function probeOnce(
       if (!variantFetch.response || (!variantFetch.response.ok && variantFetch.response.status !== 206)) {
         continue;
       }
-      const variantBody = await readBodyCapped(variantFetch.response, 512 * 1024);
+      const variantBody = await readBodyCapped(variantFetch.response, 512 * 1024, Math.max(1, budgetLeft()));
       if (
         looksLikeHtmlErrorPage(
           variantBody.text,
@@ -1160,34 +1454,61 @@ async function applyBrowserGate(
 
 /** Reads at most `maxBytes` of a response body as RAW bytes (no text decode),
  *  then cancels the connection — used for the binary MPEG-TS sync check. */
-async function readBytesCapped(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readBytesCapped(
+  response: Response,
+  maxBytes: number,
+  deadlineMs?: number
+): Promise<Uint8Array> {
   if (!response.body) return new Uint8Array(0);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let collected = 0;
-  try {
-    while (collected < maxBytes) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value && value.length > 0) {
-        const remaining = maxBytes - collected;
-        const piece = value.length > remaining ? value.subarray(0, remaining) : value;
-        chunks.push(piece);
-        collected += piece.length;
-      }
+  /** A deadline keeps the bytes that did arrive — a TS sync byte is evidence. */
+  const snapshot = (): Uint8Array => {
+    const merged = new Uint8Array(collected);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
     }
-  } catch {
-    /* a mid-read reset still leaves us with whatever we already collected */
+    return merged;
+  };
+  const pump = async (): Promise<Uint8Array> => {
+    try {
+      while (collected < maxBytes) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value && value.length > 0) {
+          const remaining = maxBytes - collected;
+          const piece = value.length > remaining ? value.subarray(0, remaining) : value;
+          chunks.push(piece);
+          collected += piece.length;
+        }
+      }
+    } catch {
+      /* a mid-read reset still leaves us with whatever we already collected */
+    } finally {
+      reader.cancel().catch(() => {});
+    }
+    return snapshot();
+  };
+
+  if (deadlineMs == null) return pump();
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      pump(),
+      new Promise<Uint8Array>((resolve) => {
+        timer = setTimeout(() => {
+          reader.cancel().catch(() => {});
+          resolve(snapshot());
+        }, Math.max(1, deadlineMs));
+      }),
+    ]);
   } finally {
-    reader.cancel().catch(() => {});
+    if (timer) clearTimeout(timer);
   }
-  const merged = new Uint8Array(collected);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return merged;
 }
 
 /** MPEG-TS packets are 188 bytes and each starts with the sync byte 0x47.
@@ -1275,7 +1596,7 @@ async function probeTsStream(
   }
 
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
-  const bytes = await readBytesCapped(response, 3760);
+  const bytes = await readBytesCapped(response, 3760, Math.max(1, options.deliveryDeadlineMs - (Date.now() - startedAt)));
 
   // Headers are cheap; the feed itself is the point. Bytes that never arrived
   // inside the budget is a miss, not a healthy link.
@@ -1447,6 +1768,47 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
   // attempt that answered no is reported, not only the ones that ran out the
   // 10-second budget. A link that is refused in 400ms is not "no evidence".
   final.deliveryMisses = deliveredMedia(final) ? 0 : Math.max(1, attemptsWithoutMedia);
+
+  // A chain Node cannot build is a fact about our trust store, not about the
+  // stream, and it is the one failure a viewer's browser routinely outgrows —
+  // which is how a channel playing happily in VLC and in the admin panel's own
+  // test player ends up filed as delivering nothing. So ask the same URL the way
+  // that browser does, before the miss is allowed to hide the link. Bounded
+  // three ways: only links the browser fetches itself (relayed sources keep their
+  // own rules), only over HTTPS, and never with stored per-link headers, because
+  // those are credentials and credentials do not travel on an unverified socket.
+  if (
+    final.deliveryMisses > 0 &&
+    gateApplies &&
+    final.errorCode === "TLS_CHAIN_UNVERIFIED" &&
+    url.toLowerCase().startsWith("https://") &&
+    !merged.headers
+  ) {
+    const verdict = await browserTrustDeliveryCheck(url, merged.deliveryDeadlineMs);
+    if (verdict.delivered) {
+      return applyBrowserGate(
+        baseResult({
+          status: "DEGRADED",
+          errorCode: "TLS_CHAIN_UNVERIFIED",
+          httpStatus: verdict.httpStatus,
+          responseTime: verdict.ms,
+          finalUrl: url,
+          playlistType: verdict.playlistType,
+          isLive: verdict.isLive,
+          segmentCount: verdict.segmentCount,
+          browserCors: verdict.browserCors,
+          error:
+            `Media delivered (${verdict.detail}) once the chain was trusted the way a browser trusts it. ` +
+            "Viewers whose own trust store cannot fill the gap may still fail to play it.",
+        }),
+        url,
+        merged,
+        gateApplies
+      );
+    }
+    final.error = `${final.error || "Certificate chain incomplete"} — and the browser-tolerant re-check got no media either (${verdict.detail})`;
+  }
+
   return applyBrowserGate(final, url, merged, gateApplies);
 }
 

@@ -6,6 +6,7 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { getCategoryBySlug, isChannelCategory } from "@/lib/categories";
 import { isUsableViewerLink } from "@/lib/streamHealth";
+import { rankStreams } from "@/lib/channelMaintenance";
 
 // SoluPlay Channels API Route - Force Recompile for Logo Fix
 export const dynamic = "force-dynamic";
@@ -48,18 +49,27 @@ type ViewerLinkFields = {
   deliveryMisses?: number | null;
 };
 
-function toPublicStream(stream: {
-  _id: unknown;
-  url: string;
-  priority?: number;
-  status?: string;
-  latency?: number;
-  failedAttempts?: number;
-}) {
+/**
+ * `rank` is the place this link holds in the ladder the server has just ranked,
+ * published instead of the stored number: a player walks the ladder in `priority`
+ * order, so what it reads must be the order the rule decided, not the order some
+ * older pass happened to leave in the row.
+ */
+function toPublicStream(
+  stream: {
+    _id: unknown;
+    url: string;
+    priority?: number;
+    status?: string;
+    latency?: number;
+    failedAttempts?: number;
+  },
+  rank: number
+) {
   return {
     _id: String(stream._id),
     url: stream.url,
-    priority: stream.priority ?? 99,
+    priority: rank,
     status: stream.status || "active",
     latency: stream.latency ?? 0,
     failedAttempts: stream.failedAttempts ?? 0,
@@ -127,13 +137,16 @@ export async function GET(req: NextRequest) {
       // Only the links a viewer could actually play: a `broken` mirror is dead
       // bookkeeping and a `degraded` one is retrying, and publishing either as
       // `primaryStream` hands the player a URL that is already known to fail.
+      // `priority` is the rank the maintenance pass wrote; `_id` only breaks a tie
+      // deterministically. Latency must not break one here: an unprobed link stores
+      // 0, which would put it in front of every mirror that has actually answered.
       const usableStreams = channelIds.length
         ? await StreamLink.find({
             channelId: { $in: channelIds },
             status: "active",
             adminDisabled: { $ne: true },
           })
-            .sort({ priority: 1, latency: 1 })
+            .sort({ priority: 1, _id: 1 })
             .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
             .lean()
         : [];
@@ -151,9 +164,12 @@ export async function GET(req: NextRequest) {
       const result = channels
         .map((c) => {
           const cId = c._id.toString();
-          const streams = pickUsableStreams(streamMap.get(cId) || []);
+          // Ranked by the same rule that wrote the stored `priority`, so the
+          // `primaryStream` published here is the Server 1 of this channel's ladder
+          // — and the mirror the watch page and the TV app dial first.
+          const streams = rankStreams(pickUsableStreams(streamMap.get(cId) || []));
           const directUrl = (c as any).streamUrl || (c as any).url;
-          const primaryStream = streams.length > 0 ? toPublicStream(streams[0]) : null;
+          const primaryStream = streams.length > 0 ? toPublicStream(streams[0], 1) : null;
 
           return {
             ...c,
@@ -188,11 +204,13 @@ export async function GET(req: NextRequest) {
       const result = channels
         .map((c) => {
           const candidates = streams.filter((s) => s.channelId === c._id && !s.adminDisabled);
-          const chActiveStreams = pickUsableStreams(candidates);
+          // Same ranking rule as the MongoDB branch: without it the first stored
+          // row, not the best server, would become this channel's `primaryStream`.
+          const chActiveStreams = rankStreams(pickUsableStreams(candidates));
           const directUrl = (c as any).streamUrl || (c as any).url;
           const primaryStream =
             chActiveStreams.length > 0
-              ? toPublicStream(chActiveStreams[0])
+              ? toPublicStream(chActiveStreams[0], 1)
               : directUrl
               ? { _id: `direct_${c._id}`, url: directUrl, priority: 1, status: "active", latency: 0, failedAttempts: 0 }
               : null;

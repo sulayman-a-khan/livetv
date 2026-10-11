@@ -111,7 +111,8 @@ async function applyPlanMongo(plan: MaintenancePlan) {
 
 /**
  * Full catalogue pass: normalize names, merge duplicates, purge test links and
- * renumber every channel's servers fastest-first. Safe to run repeatedly.
+ * renumber every channel's servers so the most reliable working link is Server 1.
+ * Safe to run repeatedly.
  */
 export async function runMaintenance(): Promise<MaintenanceReport> {
   const conn = await connectToDatabase();
@@ -168,8 +169,9 @@ export async function runMaintenance(): Promise<MaintenanceReport> {
 }
 
 /**
- * Cheap single-channel pass used after adding or deleting one server link:
- * purges now-redundant test links and re-sorts so Server 1 is still the fastest.
+ * Cheap single-channel pass used after adding or deleting one server link: purges
+ * now-redundant test links and re-sorts so Server 1 is still the link a viewer can
+ * actually play.
  */
 export async function refreshChannelLinks(channelId: string): Promise<void> {
   const conn = await connectToDatabase();

@@ -5,6 +5,7 @@ import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { rankStreams } from "@/lib/channelMaintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,12 @@ export async function GET(req: NextRequest) {
         else streamsByChannel.set(key, [s]);
       }
 
+      // Ranked by the same rule the public catalogue uses, because the gate numbers
+      // these rows `#1…#n` and `#1` has to mean the Server 1 a viewer is handed.
       const channelsWithLinks = allChannels.map((ch) => ({
         ...ch,
         logo: getChannelLogo(ch.name, ch.logo),
-        streams: streamsByChannel.get(String(ch._id)) || [],
+        streams: rankStreams(streamsByChannel.get(String(ch._id)) || []),
       }));
 
       return NextResponse.json({
@@ -78,7 +81,7 @@ export async function GET(req: NextRequest) {
       });
 
       const channelsWithLinks = sortedChannels.map((ch) => {
-        const chStreams = streams.filter((s) => s.channelId === ch._id);
+        const chStreams = rankStreams(streams.filter((s) => s.channelId === ch._id));
         return { ...ch, streams: chStreams };
       });
 

@@ -49,3 +49,6 @@ scratch_channels.json
 
 # Throwaway verification scripts
 /.tmp-verify
+
+# Compiled output of `npm run test:ranking` (see tsconfig.tests.json)
+/.tmp-tests

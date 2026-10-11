@@ -5,8 +5,9 @@
  *
  *   1. Auto-merge   — channels whose canonical name matches collapse into one
  *                     entry that owns every server link.
- *   2. Fastest-first— a channel's links are ordered by measured latency, so
- *                     priority 1 ("Server 1") is always the fastest working link.
+ *   2. Reliable first— a channel's links are ordered by what a viewer can actually
+ *                     play, so priority 1 ("Server 1") is always the mirror the
+ *                     viewer would be handed. See `compareStreamRank`.
  *   3. Test cleanup — placeholder/demo links are dropped as soon as the channel
  *                     owns at least one real, working link.
  *   4. Manual wins  — anything an admin edited by hand (`isManuallyEdited`) is
@@ -25,7 +26,11 @@
  */
 
 import { canonicalChannelKey, canonicalStreamUrl, isPlaceholderStream } from "./channelIdentity";
-import { DEAD_LINK_PURGE_DAYS, MAX_CONSECUTIVE_FAILURES } from "./streamHealth";
+import {
+  DEAD_LINK_PURGE_DAYS,
+  MAX_CONSECUTIVE_FAILURES,
+  isUsableViewerLink,
+} from "./streamHealth";
 
 export interface MaintChannel {
   _id: string;
@@ -40,7 +45,25 @@ export interface MaintChannel {
   createdAt?: Date | string;
 }
 
-export interface MaintStream {
+/**
+ * The fields the ranking rule reads. A stored `StreamLink` (Mongo lean row or
+ * in-memory record) and the public API's projected mirror both satisfy it, so the
+ * order the maintenance pass writes and the order a viewer is served come from the
+ * same comparator instead of two rules that can drift apart.
+ */
+export interface RankableStream {
+  _id?: unknown;
+  url?: string;
+  priority?: number;
+  status?: string;
+  latency?: number;
+  failedAttempts?: number;
+  deliveryHidden?: boolean;
+  deliveryMisses?: number | null;
+  adminDisabled?: boolean;
+}
+
+export interface MaintStream extends RankableStream {
   _id: string;
   channelId: string;
   url: string;
@@ -75,49 +98,110 @@ export interface MaintenancePlan {
   };
 }
 
-/** Links that have never been probed sort last among working links. */
-const UNMEASURED_LATENCY = Number.MAX_SAFE_INTEGER;
+/**
+ * RULE 2 — The most reliable working server becomes Server 1.
+ *
+ * The order is decided by three questions, asked in this order:
+ *
+ *   1. Can a viewer be handed this link at all? `isUsableViewerLink` is the very
+ *      gate the public catalogue uses, so a broken, retrying or "Not delivering"
+ *      link can never be ranked as though it played. "Server 1" therefore always
+ *      means the mirror a viewer would actually get, on web and on Android TV
+ *      alike, because both are served this order.
+ *   2. Has it been failing? A link whose last check delivered media outranks one
+ *      still carrying a failure streak, however quick the streaked link answers.
+ *   3. How quick was it, roughly? Latency only separates links already tied on
+ *      health, and only in bands — a mirror that happens to answer 40ms faster on
+ *      one pass does not take Server 1 away from the one before it.
+ *
+ * Still tied, a link keeps the number it already has; a channel whose ladder is
+ * unchanged is therefore reproduced unchanged, so re-ranking costs no writes and
+ * viewers see no shuffling. `_id` breaks anything left, which makes the whole
+ * pass deterministic.
+ */
+
+/** Response times this far apart rank as equally quick. */
+const LATENCY_BAND_MS = 500;
 
 /**
- * RULE 2 — Fastest server becomes Server 1.
- * Ordering: working links before failing ones, then real links before
- * placeholders, then a latency score that a reliability penalty inflates. The
- * penalty (RULE 5) is what keeps a mirror that failed on two of the recent
- * check days behind a slightly slower but consistently clean one, while still
- * leaving it in the ladder — slow-but-working links are backups, not garbage.
+ * Lower wins. Usable links first (clean record, then one still streaked), then the
+ * links a viewer is never offered — retrying before dead — and an admin-disabled
+ * link last of all, because only an admin puts it back in service.
  */
-function effectiveLatency(s: MaintStream): number {
-  if (!s.latency || s.latency <= 0) return UNMEASURED_LATENCY;
-  return s.latency;
+function reliabilityTier(s: RankableStream): number {
+  if (s.adminDisabled) return 4;
+  if (s.status === "active" && isUsableViewerLink(s)) {
+    return (s.failedAttempts || 0) > 0 ? 1 : 0;
+  }
+  // `degraded` is one failed check that is still being retried; `broken`, and an
+  // `active` link the catalogue refuses for delivery, are both further away from
+  // playing, so they share the tier below it.
+  if (s.status === "degraded") return 2;
+  return 3;
 }
 
-/** Per-day failure penalty added to a link's measured latency when ranking. */
-const FAILURE_PENALTY_MS = 800;
-
-function rankScore(s: MaintStream): number {
-  const latency = effectiveLatency(s);
-  if (latency === UNMEASURED_LATENCY) return latency;
-  return latency + (s.failedAttempts || 0) * FAILURE_PENALTY_MS;
+function latencyBand(s: RankableStream): number {
+  const ms = s.latency || 0;
+  // 0 means "no successful check has ever timed this link", which is the absence
+  // of evidence, not the fastest possible answer — so it ranks last in its tier.
+  if (ms <= 0) return Number.MAX_SAFE_INTEGER;
+  return Math.floor(ms / LATENCY_BAND_MS);
 }
 
-/** active → degraded → broken → admin-disabled. Lower rank wins. */
-function statusRank(status: MaintStream["status"], adminDisabled?: boolean): number {
-  if (adminDisabled) return 3;
-  if (status === "active") return 0;
-  if (status === "degraded") return 1;
-  return 2;
+export function compareStreamRank(a: RankableStream, b: RankableStream): number {
+  const tier = reliabilityTier(a) - reliabilityTier(b);
+  if (tier !== 0) return tier;
+
+  const placeholder =
+    Number(isPlaceholderStream(a.url || "")) - Number(isPlaceholderStream(b.url || ""));
+  if (placeholder !== 0) return placeholder;
+
+  const band = latencyBand(a) - latencyBand(b);
+  if (band !== 0) return band;
+
+  const priority = (a.priority || 99) - (b.priority || 99);
+  if (priority !== 0) return priority;
+
+  const aKey = String(a._id ?? a.url ?? "");
+  const bKey = String(b._id ?? b.url ?? "");
+  if (aKey === bKey) return 0;
+  return aKey < bKey ? -1 : 1;
 }
 
-export function sortStreamsBySpeed(streams: MaintStream[]): MaintStream[] {
-  return [...streams].sort((a, b) => {
-    const rank = statusRank(a.status, a.adminDisabled) - statusRank(b.status, b.adminDisabled);
-    if (rank !== 0) return rank;
+/** Ranked copy of a channel's ladder: Server 1 first, unusable links last. */
+export function rankStreams<T extends RankableStream>(streams: T[]): T[] {
+  return [...streams].sort(compareStreamRank);
+}
 
-    const placeholder = Number(isPlaceholderStream(a.url)) - Number(isPlaceholderStream(b.url));
-    if (placeholder !== 0) return placeholder;
+/**
+ * Did a fresh verdict move where this link belongs? Only its tier and its speed
+ * band are asked: a probe that leaves both alone cannot change the order, so a
+ * health pass re-ranks just the channels it really affected instead of writing
+ * priorities for every link it happened to look at.
+ */
+export function rankingShifted(before: RankableStream, after: RankableStream): boolean {
+  return (
+    reliabilityTier(before) !== reliabilityTier(after) ||
+    latencyBand(before) !== latencyBand(after)
+  );
+}
 
-    return rankScore(a) - rankScore(b);
+/**
+ * The priority numbers a ranked ladder implies, skipping every link that already
+ * holds the right one. A pass that changes nothing writes nothing.
+ */
+function priorityPatches(
+  ordered: MaintStream[],
+  ownerId: string
+): MaintenancePlan["streamPatches"] {
+  const patches: MaintenancePlan["streamPatches"] = [];
+  ordered.forEach((s, index) => {
+    const priority = index + 1;
+    if (s.channelId !== ownerId || s.priority !== priority) {
+      patches.push({ _id: s._id, channelId: ownerId, priority });
+    }
   });
+  return patches;
 }
 
 /**
@@ -292,7 +376,7 @@ export function planMaintenance(
     // Drop links that point at the same URL twice, keeping the healthiest copy
     const seenUrls = new Map<string, MaintStream>();
     const kept: MaintStream[] = [];
-    for (const s of sortStreamsBySpeed(owned)) {
+    for (const s of rankStreams(owned)) {
       const key = canonicalStreamUrl(s.url);
       if (!key) {
         plan.streamsToDelete.push(s._id);
@@ -323,17 +407,11 @@ export function planMaintenance(
     }
     const orderedLinks = survivingLinks.filter((s) => !deadIds.has(s._id));
 
-    // ---- RULE 2: renumber so the fastest working link is Server 1 ----
-    const ordered = sortStreamsBySpeed(orderedLinks);
-    let reordered = false;
-    ordered.forEach((s, index) => {
-      const priority = index + 1;
-      if (s.channelId !== survivor._id || s.priority !== priority) {
-        plan.streamPatches.push({ _id: s._id, channelId: survivor._id, priority });
-        reordered = true;
-      }
-    });
-    if (reordered) plan.stats.channelsReordered++;
+    // ---- RULE 2: renumber so the most reliable working link is Server 1 ----
+    const ordered = rankStreams(orderedLinks);
+    const patches = priorityPatches(ordered, survivor._id);
+    plan.streamPatches.push(...patches);
+    if (patches.length > 0) plan.stats.channelsReordered++;
 
     // ---- Metadata merge + duplicate removal ----
     const patch = mergeMetadata(survivor, duplicates);
@@ -367,11 +445,10 @@ export function planChannelLinkRefresh(
 ): { streamPatches: MaintenancePlan["streamPatches"]; streamsToDelete: string[] } {
   const owned = streams.filter((s) => s.channelId === channelId);
   const purge = new Set(selectPurgeableTestLinks(owned));
-  const ordered = sortStreamsBySpeed(owned.filter((s) => !purge.has(s._id)));
+  const ordered = rankStreams(owned.filter((s) => !purge.has(s._id)));
 
-  const streamPatches = ordered
-    .map((s, i) => ({ _id: s._id, channelId, priority: i + 1 }))
-    .filter((p, i) => ordered[i].priority !== p.priority);
-
-  return { streamPatches, streamsToDelete: Array.from(purge) };
+  return {
+    streamPatches: priorityPatches(ordered, channelId),
+    streamsToDelete: Array.from(purge),
+  };
 }

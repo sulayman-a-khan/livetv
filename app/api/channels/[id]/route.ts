@@ -9,6 +9,7 @@ import { getChannelLogo } from "@/lib/utils";
 import { resolveStreamUrl } from "@/lib/streamUrl";
 import { getDynamicStreamBaseUrl } from "@/lib/settings";
 import { isUsableViewerLink } from "@/lib/streamHealth";
+import { rankStreams } from "@/lib/channelMaintenance";
 
 export const dynamic = "force-dynamic";
 
@@ -38,19 +39,26 @@ const STREAM_FIELDS = "_id url priority status latency failedAttempts";
  */
 const STREAM_GATE_FIELDS = " deliveryHidden deliveryMisses";
 
-/** Same field whitelist, applied to the in-memory store's rows. */
-function projectStream(stream: {
-  _id: unknown;
-  url?: string;
-  priority?: number;
-  status?: string;
-  latency?: number;
-  failedAttempts?: number;
-}) {
+/**
+ * Same field whitelist, applied to the in-memory store's rows. `rank` is the place
+ * in the ladder this channel was just ranked into — players step through `streams`
+ * by `priority`, so the published number has to be the one the ranking rule gave.
+ */
+function projectStream(
+  stream: {
+    _id: unknown;
+    url?: string;
+    priority?: number;
+    status?: string;
+    latency?: number;
+    failedAttempts?: number;
+  },
+  rank: number
+) {
   return {
     _id: String(stream._id),
     url: stream.url,
-    priority: stream.priority ?? 99,
+    priority: rank,
     status: stream.status ?? "active",
     latency: stream.latency ?? 0,
     failedAttempts: stream.failedAttempts ?? 0,
@@ -70,8 +78,11 @@ export async function GET(
       if (mongoose.isValidObjectId(id)) {
         const [channel, streams] = await Promise.all([
           Channel.findOne({ _id: id, isPinned: true }).lean(),
+          // The stored rank is the ladder; `_id` only breaks a tie. Sorting by
+          // `latency` here would let an unprobed link (stored 0 ms) lead the very
+          // list the player walks on failover.
           StreamLink.find({ channelId: id, adminDisabled: { $ne: true } })
-            .sort({ priority: 1, latency: 1 })
+            .sort({ priority: 1, _id: 1 })
             .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
             .lean(),
         ]);
@@ -84,7 +95,7 @@ export async function GET(
           // the player a URL that is already known to stall. The same holds for a
           // link already marked "Not delivering": another usable mirror on this
           // channel still carries it, but that link alone no longer does.
-          let usableStreams = streams.filter(isUsableViewerLink);
+          let usableStreams = rankStreams(streams.filter(isUsableViewerLink));
 
           const directUrl = (channel as any).streamUrl || (channel as any).url;
           if (usableStreams.length === 0 && directUrl) {
@@ -107,7 +118,7 @@ export async function GET(
               channel: {
                 ...channel,
                 logo: getChannelLogo(channel.name, channel.logo),
-                streams: usableStreams.map(projectStream),
+                streams: usableStreams.map((stream, rank) => projectStream(stream, rank + 1)),
               },
             },
             { headers: { "Cache-Control": CHANNEL_CACHE } }
@@ -176,10 +187,8 @@ export async function GET(
       return NextResponse.json({ success: false, error: "Channel not found" }, { status: 404 });
     }
 
-    const candidates = streams
-      .filter((s) => s.channelId === id && !s.adminDisabled)
-      .sort((a, b) => (a.priority || 99) - (b.priority || 99) || (a.latency || 0) - (b.latency || 0));
-    let chStreams = candidates.filter(isUsableViewerLink);
+    const candidates = streams.filter((s) => s.channelId === id && !s.adminDisabled);
+    let chStreams = rankStreams(candidates.filter(isUsableViewerLink));
 
     const directUrl = (channel as any).streamUrl || (channel as any).url;
     if (chStreams.length === 0 && directUrl) {
@@ -207,7 +216,7 @@ export async function GET(
         channel: {
           ...channel,
           logo: getChannelLogo(channel.name, channel.logo),
-          streams: chStreams.map(projectStream),
+          streams: chStreams.map((stream, rank) => projectStream(stream, rank + 1)),
         },
       },
       { headers: { "Cache-Control": CHANNEL_CACHE } }

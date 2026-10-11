@@ -1,0 +1,21 @@
+{
+  "//": "Compiles the pure ranking rules plus tests/ into .tmp-tests so Node's own test runner can execute them. Type checking is the project's own `npx tsc --noEmit`.",
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["esnext"],
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "outDir": ".tmp-tests",
+    "types": ["node"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": false
+  },
+  "include": [
+    "tests/**/*.ts",
+    "lib/channelMaintenance.ts",
+    "lib/channelIdentity.ts",
+    "lib/streamHealth.ts"
+  ]
+}

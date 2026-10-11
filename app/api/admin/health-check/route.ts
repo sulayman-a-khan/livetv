@@ -10,6 +10,8 @@ import {
   type StoredStreamStatus,
 } from "@/lib/streamHealth";
 import { toLastCheckDetail } from "@/lib/autoHealthChecker";
+import { refreshChannelLinks } from "@/lib/maintenanceRunner";
+import { rankingShifted } from "@/lib/channelMaintenance";
 import { isAuthorizedAdmin, isAuthorizedByBearer } from "@/lib/adminAuth";
 import {
   applyBatchOutcome,
@@ -209,6 +211,13 @@ export async function POST(req: NextRequest) {
       else brokenCount++;
     };
 
+    /**
+     * Channels whose links this batch moved in the ladder. Their priorities are
+     * renumbered below, so a healthy backup becomes Server 1 for the next viewer
+     * instead of waiting for a maintenance sweep to notice.
+     */
+    const changedChannelIds = new Set<string>();
+
     if (mongo) {
       // Admin-disabled links are excluded: only an admin puts them back in
       // service, so a batch run has no business re-probing or re-enabling them.
@@ -225,6 +234,14 @@ export async function POST(req: NextRequest) {
               headers: stream.headers,
             });
             const previous = stream.status as StoredStreamStatus;
+            const before = {
+              status: previous,
+              latency: stream.latency,
+              failedAttempts: stream.failedAttempts,
+              deliveryHidden: stream.deliveryHidden,
+              deliveryMisses: stream.deliveryMisses,
+              adminDisabled: stream.adminDisabled,
+            };
             const decision = decideStreamHealth(
               previous,
               stream.failedAttempts || 0,
@@ -254,6 +271,9 @@ export async function POST(req: NextRequest) {
             // pass, so the admin cannot tell that this press is what decided it.
             stream.lastCheck = toLastCheckDetail(result);
             await stream.save();
+            if (rankingShifted(before, stream)) {
+              changedChannelIds.add(String(stream.channelId));
+            }
             tally(decision);
           })
         );
@@ -313,6 +333,14 @@ export async function POST(req: NextRequest) {
               deliveryMisses: result.deliveryMisses,
             };
             const previous = stream.status as StoredStreamStatus;
+            const before = {
+              status: previous,
+              latency: stream.latency,
+              failedAttempts: stream.failedAttempts,
+              deliveryHidden: stream.deliveryHidden,
+              deliveryMisses: stream.deliveryMisses,
+              adminDisabled: stream.adminDisabled,
+            };
             const decision = decideStreamHealth(
               previous,
               stream.failedAttempts || 0,
@@ -336,6 +364,9 @@ export async function POST(req: NextRequest) {
             stream.deliveryMisses = decision.deliveryMisses;
             stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
             stream.deliveryHidden = decision.deliveryHidden;
+            if (rankingShifted(before, stream)) {
+              changedChannelIds.add(String(stream.channelId));
+            }
             tally(decision);
           })
         );
@@ -343,6 +374,19 @@ export async function POST(req: NextRequest) {
       }
 
       inMemoryDb.saveState();
+    }
+
+    // A verdict that moved a link between tiers or speed bands changes which
+    // mirror the next viewer should be handed first, so exactly those channels
+    // have their ladder renumbered now — the same repair the scheduler pass does,
+    // bounded to this batch instead of a catalogue-wide rerun.
+    for (const channelId of changedChannelIds) {
+      try {
+        await refreshChannelLinks(channelId);
+      } catch {
+        // No error text is logged: a failed write can carry the stream URL.
+        console.error(`[HealthCheck] link re-rank failed for ${channelId}`);
+      }
     }
 
     const remaining = (await measurePending(mongo, cutoff, pinnedChannelIds)).pending;

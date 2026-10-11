@@ -1,0 +1,74 @@
+# SoluPlay — automatic health pass for pinned channel links.
+#
+# What this does: it calls the app's existing batch endpoint
+# (POST /api/admin/health-check) over and over until the server reports that no
+# pinned link is still due. The probing, the verdict rules and the writes all
+# stay in the app — this file only replaces "someone leaves a browser tab open".
+#
+# Why minute 37: the Vercel crons already in vercel.json fire at 03:00, 09:00,
+# 09:30, 15:00, 15:30, 21:00, 21:30 and at :15 every hour, plus the playlist sync
+# at 20:00. Those jobs are untouched here; this schedule is simply offset so the
+# two schedulers never land in the same minute.
+#
+# Scheduled runs are gated OFF by default. Until the repository variable
+# SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED is set to "true", each cron slot below
+# registers a run whose only job is skipped, so no probing happens. "Run
+# workflow" runs regardless of that variable — it is not gated by it.
+# scripts/verify-health-check-workflow.mjs asserts both of those cases.
+#
+# Authentication: a dedicated pass token that only this endpoint accepts — not
+# the admin secret. It is never echoed, and the runner logs no stream URLs.
+
+name: SoluPlay automatic health check
+
+on:
+  schedule:
+    # Every 4 hours at :37 UTC = 08:37, 12:37, 16:37, 20:37, 00:37, 04:37 Bangladesh.
+    - cron: "37 2,6,10,14,18,22 * * *"
+  workflow_dispatch:
+    inputs:
+      note:
+        description: Why this manual pass is running (optional, appears in the run list)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Two passes testing the same links at once would both write verdicts and both
+# count toward one progress record, so the second is queued behind the first
+# rather than cancelling or overlapping it.
+concurrency:
+  group: soluplay-automatic-health-check
+  cancel-in-progress: false
+
+jobs:
+  health-pass:
+    name: Probe every pinned link
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Manual dispatch never depends on the gate variable. A cron slot runs only
+    # when it is exactly "true"; absent, empty or "True" all skip.
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED == 'true' }}
+    steps:
+      - name: Check out the runner script
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run the health pass
+        env:
+          # A repository variable is the right home for an address; a secret is
+          # the right home for the token. Either name is accepted for the URL so
+          # a setup that filed it as a secret still works.
+          SOLUPLAY_BASE_URL: ${{ vars.SOLUPLAY_BASE_URL || secrets.SOLUPLAY_BASE_URL }}
+          HEALTH_CHECK_TOKEN: ${{ secrets.SOLUPLAY_HEALTH_CHECK_SECRET }}
+          # Only needed if the deployment is behind Vercel Deployment Protection,
+          # which answers an unknown request with a redirect the runner cannot
+          # follow. Leave unset when the site is public: no header is then sent.
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
+          HEALTH_RUN_TRIGGER: ${{ github.event_name }}
+        run: node scripts/health-check-runner.mjs

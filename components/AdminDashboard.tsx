@@ -37,6 +37,7 @@ import {
   Clock,
   ChevronsDownUp,
   ChevronsUpDown,
+  Github,
   Loader2,
   Ban,
   RotateCcw,
@@ -103,18 +104,94 @@ interface HealthSchedule {
   lastSchedulerWasVercel: boolean | null;
 }
 
+/** One batch's worth of counters, accumulated across a whole pass on the server. */
+interface HealthRunProgress {
+  runId: string;
+  trigger: "github" | "admin";
+  startedAt: string;
+  updatedAt: string;
+  eligible: number;
+  completed: number;
+  remaining: number;
+  failures: number;
+  inconclusive: number;
+  active: number;
+  degraded: number;
+  unplayable: number;
+  notDelivering: number;
+  batches: number;
+}
+
+interface HealthRunReport extends HealthRunProgress {
+  completedAt: string;
+  durationMs: number;
+}
+
+type HealthRunState = "idle" | "running" | "stalled" | "overdue" | "completed";
+
+/** The words the automation section shows, derived from the stored pass record. */
+interface AutoPassView {
+  label: string;
+  tone: "slate" | "amber";
+  headline: string;
+  live: boolean;
+}
+
+interface AutomatedHealth {
+  state: HealthRunState;
+  run: HealthRunProgress | null;
+  report: HealthRunReport | null;
+  nextScheduledAt: string;
+  lastScheduledSlotAt: string;
+  cronUtc: string;
+  cronLocal: string;
+  everSeen: boolean;
+}
+
+/** Short Bangladesh-local stamp for a stored time — the passes are scheduled in UTC. */
+function localTime(iso: string | null | undefined): string {
+  const at = Date.parse(iso || "");
+  if (Number.isNaN(at)) return "—";
+  return new Date(at).toLocaleString("en-GB", {
+    timeZone: "Asia/Dhaka",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** How fresh a stored record is. This, not a countdown, is what proves a pass is alive. */
+function recordAge(iso: string | null | undefined, now: number): string {
+  const at = Date.parse(iso || "");
+  if (Number.isNaN(at)) return "never";
+  const mins = Math.max(0, Math.round((now - at) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)} h ago`;
+  return `${Math.round(mins / 1440)} d ago`;
+}
+
+/** `16:37` in one time zone, for a line that has to name both of them. */
+function clockAt(iso: string | null | undefined, timeZone: string): string {
+  const at = Date.parse(iso || "");
+  if (Number.isNaN(at)) return "—";
+  return new Date(at).toLocaleTimeString("en-GB", { timeZone, hour: "2-digit", minute: "2-digit" });
+}
+
 /** Short labels for the five rails, keyed by slug so the tabs and the table agree. */
 const ADMIN_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.slug, c.name])
 );
 
 /** The dashboard's sections, each of which opens and closes on its own. */
-const SECTION_IDS = ["metrics", "ingest", "manual", "sources", "pinned", "channels"] as const;
+const SECTION_IDS = ["metrics", "autohealth", "ingest", "manual", "sources", "pinned", "channels"] as const;
 type SectionId = (typeof SECTION_IDS)[number];
 
 /** Only the counts are open by default — everything else waits until it is asked for. */
 const DEFAULT_OPEN_SECTIONS: Record<SectionId, boolean> = {
   metrics: true,
+  autohealth: false,
   ingest: false,
   manual: false,
   sources: false,
@@ -185,6 +262,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
   // Auto health-checker schedule (for the next-probe countdown timer)
   const [schedule, setSchedule] = useState<HealthSchedule | null>(null);
+  // The externally driven pass, read from the server's persisted run + report.
+  const [automated, setAutomated] = useState<AutomatedHealth | null>(null);
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
 
   // Pinning & Reordering states
@@ -265,6 +344,9 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       if (data.success && data.autoHealthChecker) {
         setSchedule(data.autoHealthChecker as HealthSchedule);
       }
+      if (data.success && data.automatedHealthCheck) {
+        setAutomated(data.automatedHealthCheck as AutomatedHealth);
+      }
     } catch (err) {
       console.error("Failed to load health schedule:", err);
     }
@@ -273,6 +355,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   useEffect(() => {
     fetchSchedule();
   }, [fetchSchedule]);
+
+  // The pass lives on the server between requests, so watching it means asking
+  // again. Poll only while this section is open, and not at all when it is shut.
+  useEffect(() => {
+    if (!openSections.autohealth) return;
+    fetchSchedule();
+    const id = setInterval(fetchSchedule, 20_000);
+    return () => clearInterval(id);
+  }, [openSections.autohealth, fetchSchedule]);
 
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), 1000);
@@ -333,6 +424,72 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
     return { ok: true, text: `Last scheduled check: ${label} (${via}), ${ago} ago.` };
   }, [schedule, nowTick]);
+
+  // Built from stored timestamps and stored counters, never from a countdown: a
+  // ticking timer says nothing about whether a pass is alive, but "the last batch
+  // landed 40 seconds ago, with 301 links still due" does.
+  const autoPass = useMemo<AutoPassView>(() => {
+    if (!automated) {
+      return { label: "Loading", tone: "slate", headline: "Reading the server's pass record…", live: false };
+    }
+    const run = automated.run;
+    const report = automated.report;
+
+    if (automated.state === "running" && run) {
+      return {
+        label: `Running ${run.completed}/${run.eligible}`,
+        tone: "amber",
+        live: true,
+        headline:
+          `A pass is running now (${run.trigger === "github" ? "GitHub Actions" : "this dashboard"}): ` +
+          `batch ${run.batches}, ${run.completed} of ${run.eligible} links recorded, ` +
+          `${run.remaining} still due — last batch ${recordAge(run.updatedAt, nowTick)}.`,
+      };
+    }
+    if (automated.state === "stalled" && run) {
+      return {
+        label: "Interrupted",
+        tone: "amber",
+        live: false,
+        headline:
+          `A pass stopped before finishing: ${run.completed} of ${run.eligible} tested, ` +
+          `${run.remaining} left untested since ${recordAge(run.updatedAt, nowTick)}. ` +
+          `Untested links stay untested — the next scheduled run resumes from the same cursor.`,
+      };
+    }
+    if (automated.state === "overdue") {
+      return {
+        label: "Overdue",
+        tone: "amber",
+        live: false,
+        headline:
+          `Nothing has completed since the ${localTime(automated.lastScheduledSlotAt)} slot ` +
+          `(Bangladesh). Last completed pass: ${report ? localTime(report.completedAt) : "none"}. ` +
+          `Check the GitHub run log — a schedule that is switched on but not arriving looks ` +
+          `identical from here.`,
+      };
+    }
+    if (automated.state === "completed" && report) {
+      return {
+        label: `Pass ${recordAge(report.completedAt, nowTick)}`,
+        tone: "slate",
+        live: false,
+        headline:
+          `Last pass finished ${recordAge(report.completedAt, nowTick)} (${localTime(report.completedAt)} ` +
+          `Bangladesh): ${report.completed} links tested in ${report.batches} batches — ` +
+          `${report.active} active, ${report.degraded} degraded, ${report.failures} broken` +
+          `${report.inconclusive ? `, ${report.inconclusive} inconclusive` : ""}.`,
+      };
+    }
+    return {
+      label: "Not started",
+      tone: "slate",
+      live: false,
+      headline:
+        "No automated pass has reached this app yet. Scheduled runs stay off until the GitHub " +
+        'repository variable SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED is set to "true"; "Run workflow" works either way.',
+    };
+  }, [automated, nowTick]);
 
   // The five and only five catalogue categories (Sports, Bangla, Indian,
   // Pakistani, Documentary). The admin filter offers exactly these and matches
@@ -1066,7 +1223,11 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           <button
             onClick={handleTriggerHealthCheck}
             disabled={healthCheckLoading}
-            title="Probes every link on every pinned channel, a batch at a time, until none are left due"
+            title={
+              autoPass.live
+                ? "A pass is already running on the server — it will refuse a second one until this finishes"
+                : "Probes every link on every pinned channel, a batch at a time, until none are left due"
+            }
             className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-brand-600/30 disabled:opacity-50"
           >
             <Activity className={`w-4 h-4 ${healthCheckLoading ? "animate-spin" : ""}`} />
@@ -1163,6 +1324,101 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           {healthCheckLog}
         </div>
       )}
+
+      {/* The externally driven pass. It calls this dashboard's own batch endpoint
+          from GitHub Actions, so a pass keeps going with no tab open and the
+          server — not the browser — decides when it is finished. */}
+      <AdminSection
+        title="Automatic Health Check — GitHub Actions"
+        icon={<Github className="w-5 h-5" />}
+        open={openSections.autohealth}
+        onToggle={() => toggleSection("autohealth")}
+        collapsedHint="Who probes the pinned links when this tab is closed, and what they found."
+        expandedHint="Every stored batch of the current pass, the last finished report, and when the next one is due."
+        badge={<SectionBadge text={autoPass.label} tone={autoPass.tone} />}
+      >
+        <p
+          className={`text-xs ${
+            autoPass.tone === "amber" ? "text-amber-300" : "text-slate-400"
+          }`}
+        >
+          {autoPass.headline}
+        </p>
+
+        {autoPass.live && (
+          <p className="text-[11px] text-amber-400/80">
+            While this pass is running, “Run Health Check (All Pinned)” is refused by the server — two
+            callers on one queue would test the same links twice and count them twice. Manual runs work
+            as soon as this pass ends or goes quiet for 12 minutes.
+          </p>
+        )}
+
+        {(() => {
+          // Show the pass in flight (or the interrupted one) while it is the
+          // live story; otherwise the last pass that actually finished.
+          const run = automated?.run ?? null;
+          const report = automated?.report ?? null;
+          const shown =
+            run && (autoPass.live || automated?.state === "stalled") ? run : report ?? run;
+          if (!shown) return null;
+          const percent = shown.eligible > 0 ? Math.round((shown.completed / shown.eligible) * 100) : 0;
+          const tiles: { label: string; value: number | string; colour: string }[] = [
+            { label: "Eligible", value: shown.eligible, colour: "text-white" },
+            { label: "Recorded", value: shown.completed, colour: "text-emerald-400" },
+            { label: "Untested", value: shown.remaining, colour: "text-slate-300" },
+            { label: "Broken", value: shown.failures, colour: "text-red-400" },
+            { label: "Inconclusive", value: shown.inconclusive, colour: "text-amber-400" },
+          ];
+          return (
+            <div className="space-y-3">
+              {autoPass.live && (
+                <div className="h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                  <div className="h-full bg-brand-500 transition-all" style={{ width: `${percent}%` }} />
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {tiles.map((t) => (
+                  <div key={t.label} className="glass-card rounded-xl px-4 py-3">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{t.label}</p>
+                    <p className={`text-lg font-black tabular-nums ${t.colour}`}>{t.value}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {shown.active} active · {shown.degraded} degraded
+                {shown.unplayable ? ` · ${shown.unplayable} blocked in browsers` : ""}
+                {shown.notDelivering ? ` · ${shown.notDelivering} not delivering` : ""}
+                {shown.batches ? ` · ${shown.batches} batches` : ""}
+                {shown.trigger ? ` · started by ${shown.trigger === "github" ? "GitHub Actions" : "this dashboard"}` : ""}
+              </p>
+            </div>
+          );
+        })()}
+
+        <div className="space-y-1.5 pt-1 border-t border-slate-800">
+          <p className="text-[11px] text-slate-400">
+            <span className="font-semibold text-slate-300">Last completed pass:</span>{" "}
+            {automated?.report
+              ? `${localTime(automated.report.completedAt)} Bangladesh (${recordAge(
+                  automated.report.completedAt,
+                  nowTick
+                )})`
+              : "none recorded"}
+          </p>
+          <p className="text-[11px] text-slate-400">
+            <span className="font-semibold text-slate-300">Next scheduled slot:</span>{" "}
+            {clockAt(automated?.nextScheduledAt, "Asia/Dhaka")} Bangladesh /{" "}
+            {clockAt(automated?.nextScheduledAt, "UTC")} UTC — expected from the schedule, not proof
+            that a runner is alive.
+          </p>
+          <p className="text-[11px] text-slate-500">
+            Schedule: <span className="font-mono">{automated?.cronUtc}</span> (UTC) ={" "}
+            {automated?.cronLocal}. Scheduled slots run only while the repository variable{" "}
+            <span className="font-mono">SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED</span> is “true”.
+            Vercel's own health crons are untouched and still run.
+          </p>
+        </div>
+      </AdminSection>
 
       {/* Metrics Cards */}
       {stats && (

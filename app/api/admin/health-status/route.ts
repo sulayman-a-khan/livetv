@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getLastHealthCheckTime, getLastFullHealthCheckTime, runAutoHealthCheck } from "@/lib/autoHealthChecker";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { getSchedulerHeartbeat } from "@/lib/settings";
+import { getAutomatedHealthStatus } from "@/lib/healthRunState";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,10 @@ export async function GET(req: NextRequest) {
   const lastFullCheck = getLastFullHealthCheckTime();
   const isRunning = !!global.__freetv_health_checker_started;
   const scheduler = await getSchedulerHeartbeat();
+  // The externally driven pass keeps its state in the database, not in this
+  // process: no serverless instance is alive between batches, so a timer here
+  // could only ever say something untrue about a run GitHub is driving.
+  const automated = await getAutomatedHealthStatus();
 
   return NextResponse.json(
     {
@@ -39,6 +44,7 @@ export async function GET(req: NextRequest) {
         lastSchedulerTask: scheduler?.task || null,
         lastSchedulerWasVercel: scheduler ? scheduler.scheduled : null,
       },
+      automatedHealthCheck: automated,
     },
     { headers: { "Cache-Control": "no-store" } }
   );

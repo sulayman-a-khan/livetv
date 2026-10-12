@@ -144,42 +144,69 @@
    HLS player and the watch page's tuning frame. The components reference these
    through Tailwind's `animate-[solu-*_...]` utilities; they live here rather
    than in a per-component <style> block because the graphic mounts in more than
-   one place. */
-@keyframes solu-dish-sweep {
+   one place.
+
+   The dish is authored upright (feed axis pointing at the sky) and everything
+   above the mount is one group, so `solu-sat-sweep` tilts the head about its
+   pivot at (96,150) in the graphic's own 200x200 viewBox. SVG elements have no
+   reliable `transform-origin` across engines, so the pivot is composed out of
+   translates instead. `solu-sat-emit` runs inside that tilted group, which is
+   why a plain translateY reads as travel along the dish axis. */
+@keyframes solu-sat-sweep {
   from {
-    transform: rotate(-10deg);
+    transform: translate(96px, 150px) rotate(30deg) translate(-96px, -150px);
   }
   to {
-    transform: rotate(4deg);
+    transform: translate(96px, 150px) rotate(46deg) translate(-96px, -150px);
   }
 }
 
-@keyframes solu-wave-pulse {
-  0%,
-  100% {
-    opacity: 0.12;
+/* One crest leaving the feed: it fades in, crosses exactly the gap to the next
+   arc (8 units), and fades out into the space that arc is vacating. */
+@keyframes solu-sat-emit {
+  0% {
+    opacity: 0;
+    transform: translateY(0);
   }
-  35% {
+  22% {
     opacity: 1;
   }
   70% {
     opacity: 0.35;
   }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
 }
 
-@keyframes solu-horn-ping {
+/* A ping thrown from the horn, expanding about the horn rather than its own
+   bounding box — same translate composition as the sweep, different pivot. */
+@keyframes solu-sat-ping {
   0% {
-    transform: scale(0.5);
+    transform: translate(96px, 100px) scale(0.5) translate(-96px, -100px);
     opacity: 0.75;
   }
   70%,
   100% {
-    transform: scale(2.6);
+    transform: translate(96px, 100px) scale(1.9) translate(-96px, -100px);
     opacity: 0;
   }
 }
 
-@keyframes solu-wave-flicker {
+/* The uplink cone breathing, so the beam is not a flat wedge. */
+@keyframes solu-sat-beam {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Weak: the crests never get thrown — they stutter in place and lose carrier. */
+@keyframes solu-sat-flicker {
   0%,
   100% {
     opacity: 0.1;

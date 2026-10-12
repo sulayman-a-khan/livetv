@@ -59,107 +59,191 @@ const WEAK_NOTICE_HOLD_MS = 5_000;
 type SignalPhase = "tuning" | "live" | "weak";
 
 /**
- * Wave crests radiating off the feed horn. Each path is an arc of a circle
- * centred on the horn (68,76 in the receiver's viewBox), spanning ±40° around
- * the dish's axis so they read as one-way transmission rather than a halo.
+ * Reflector geometry, authored upright in the receiver's own local space and
+ * then tilted about its vertex: mount/vertex at (96,150), mouth from (52,134) to
+ * (140,134), feed horn on the axis over the centre of the face at (96,100). CSS
+ * cannot read these constants, so the same two coordinates are repeated inside
+ * the `solu-sat-*` keyframes in app/globals.css — change one, change the other.
  */
-const SIGNAL_ARCS = [
-  "M 64.1 62.5 A 14 14 0 0 1 80.6 69.9",
-  "M 61.9 54.9 A 22 22 0 0 1 87.8 66.4",
-  "M 59.7 47.2 A 30 30 0 0 1 95 62.9",
+const DISH_PIVOT_X = 96;
+const DISH_PIVOT_Y = 150;
+const HORN_X = 96;
+const HORN_Y = 100;
+
+/** rotate(θ) about a point, composed from translates so no engine has to agree
+ *  on `transform-origin`/`transform-box` semantics for an SVG element. */
+const tiltHead = (deg: number) =>
+  `translate(${DISH_PIVOT_X}px, ${DISH_PIVOT_Y}px) rotate(${deg}deg) translate(-${DISH_PIVOT_X}px, -${DISH_PIVOT_Y}px)`;
+
+/** A dead carrier leaves the dish slumped at this elevation, and it stays there. */
+const WEAK_TILT_DEG = 48;
+
+/**
+ * Transmission crests: each is a ±30° arc of a circle centred on the feed horn,
+ * at radii 13/21/29/37. They sit 8 units apart and `solu-sat-emit` carries every
+ * crest exactly 8 units along the dish axis, so each one arrives at the position
+ * its successor is vacating — a continuous train rather than four blinking rings.
+ */
+const WAVE_ARCS = [
+  "M 89.5 88.74 A 13 13 0 0 1 102.5 88.74",
+  "M 85.5 81.81 A 21 21 0 0 1 106.5 81.81",
+  "M 81.5 74.89 A 29 29 0 0 1 110.5 74.89",
+  "M 77.5 67.96 A 37 37 0 0 1 114.5 67.96",
+];
+
+/**
+ * The reflector's mesh: six meridians running from the vertex's projection out
+ * to the rim, which is how the ribs of a paraboloid read from this angle.
+ */
+const DISH_RIBS = [
+  "M 96 134 L 55.5 134",
+  "M 96 134 L 136.5 134",
+  "M 96 134 L 65 141.7",
+  "M 96 134 L 127 141.7",
+  "M 96 134 L 65 126.3",
+  "M 96 134 L 127 126.3",
 ];
 
 type ReceiverTone = "locking" | "weak";
 
 /**
- * The receiver graphic: a parabolic dish on a mast that sweeps through its arc
- * while wave crests pulse off the feed horn and a ring expands from it.
+ * The receiver graphic: a front-fed parabolic reflector on a tripod, seen from
+ * just below its axis. The dish shell and mouth are shaded, six meridians carry
+ * the ribs, and a boom plus two struts hold the LNB cup at the focal point.
  *
- * `weak` is the same drawing with the sweep stopped, the dish dimmed and the
- * crests flickering in and out — a transponder that answers nothing.
+ * Three things move while locking: the whole head sweeps through its elevation
+ * arc about the mount, a cone of beam leaves the feed toward the sky, and crests
+ * are thrown off the LNB one after another — each sliding exactly into the gap
+ * its predecessor vacated, so the fan reads as a travelling transmission rather
+ * than four blinking arcs. A ring additionally expands out of the horn.
  *
- * Inline SVG, no Lottie runtime, no JSON asset, nothing fetched. The four
- * `solu-*` keyframes it animates with live in `app/globals.css` alongside the
- * other shared animations, so the graphic also paints correctly wherever a host
- * mounts it outside this player (the watch page shows it while a channel's
- * details are still being fetched).
+ * `weak` is the same drawing with the head slumped to a fixed off-target
+ * elevation, the beam gone, and the crests flickering in and out — a
+ * transponder that answers nothing.
+ *
+ * Inline SVG and CSS keyframes only: no Lottie runtime, no exported animation
+ * JSON, no third-party asset, nothing fetched at mount. The `solu-sat-*`
+ * keyframes live in `app/globals.css` with the other shared animations, so the
+ * graphic also paints correctly wherever a host mounts it outside this player
+ * (the watch page shows it while a channel's details are still being fetched).
  */
 export function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
   const locking = tone === "locking";
   return (
     <svg
-      viewBox="0 0 160 160"
+      viewBox="0 0 200 200"
       aria-hidden="true"
-      className={`solu-sat-receiver h-24 w-24 sm:h-28 sm:w-28 overflow-visible ${
+      className={`solu-sat-receiver h-32 w-32 shrink-0 sm:h-36 sm:w-36 overflow-visible ${
         locking
-          ? "drop-shadow-[0_0_10px_rgba(34,211,238,0.45)]"
-          : "drop-shadow-[0_0_8px_rgba(251,146,60,0.25)]"
+          ? "drop-shadow-[0_0_14px_rgba(34,211,238,0.42)]"
+          : "drop-shadow-[0_0_10px_rgba(251,146,60,0.22)]"
       }`}
       fill="none"
       strokeLinecap="round"
+      strokeLinejoin="round"
     >
-      {/* Mast and base */}
-      <g className="text-slate-500" stroke="currentColor" strokeOpacity="0.45" strokeWidth="3">
-        <path d="M56 104 L49 138" />
-        <path d="M39 140 H68" />
+      <defs>
+        {/* Back of the reflector: lit near the rim, falling off into the shell. */}
+        <linearGradient id="solu-sat-shell" x1="96" y1="134" x2="96" y2="168" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#18263f" />
+          <stop offset="100%" stopColor="#070d18" />
+        </linearGradient>
+        {/* The mouth: a faint cyan wash at the vertex, dark at the rim. */}
+        <radialGradient id="solu-sat-face" cx="96" cy="134" r="44" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="#060b14" />
+        </radialGradient>
+        {/* Beam: densest at the feed, gone by the time it reaches the sky. */}
+        <linearGradient id="solu-sat-beam" x1="96" y1="100" x2="96" y2="44" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#67e8f9" stopOpacity="0.32" />
+          <stop offset="100%" stopColor="#67e8f9" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Tripod: static, so the head visibly moves against its mount. */}
+      <g className="text-slate-500" stroke="currentColor" strokeOpacity="0.5" strokeWidth="3.5">
+        <path d="M70 186 L96 152 L122 186" />
+        <path d="M60 187 H132" strokeOpacity="0.35" strokeWidth="3" />
       </g>
 
-      {/* Dish + feed horn. The sweep rotates the whole assembly about the mast
-          pivot, which is what makes it look like it is hunting for a carrier. */}
+      {/* The head: dish, feed and everything thrown from it, swept as one. */}
       <g
         className={`transition-colors duration-500 ${
           locking
-            ? "text-cyan-300 animate-[solu-dish-sweep_3.4s_ease-in-out_infinite_alternate]"
-            : "text-amber-400/55"
+            ? "text-cyan-300 animate-[solu-sat-sweep_4.4s_ease-in-out_infinite_alternate]"
+            : "text-amber-400/60"
         }`}
         stroke="currentColor"
         strokeWidth="2.5"
-        style={{ transformBox: "view-box", transformOrigin: "56px 104px" }}
+        // Weak takes the slump as a plain static transform; locking must not
+        // carry one, or the two fight and the sweep loses its pivot.
+        style={locking ? undefined : { transform: tiltHead(WEAK_TILT_DEG) }}
       >
-        <g transform="rotate(24 56 104)">
-          {/* Opaque reflector face: the mast is drawn before this, so a tinted
-              fill would let its line read straight through the dish. */}
-          <ellipse cx="56" cy="104" rx="34" ry="19" strokeOpacity="0.9" fill="#080e1b" />
-          <ellipse cx="56" cy="104" rx="22" ry="12" strokeOpacity="0.4" />
-          <ellipse cx="56" cy="104" rx="11" ry="6" strokeOpacity="0.28" />
+        {/* Reflector: shell behind, face over it, so nothing behind reads through. */}
+        <path d="M52 134 Q96 168 140 134" fill="url(#solu-sat-shell)" strokeOpacity="0.85" />
+        <ellipse cx="96" cy="134" rx="44" ry="13" fill="url(#solu-sat-face)" strokeOpacity="0.9" />
+
+        {/* Ribs converging on the vertex, and one shallow ring of the mesh. */}
+        <g strokeOpacity="0.32" strokeWidth="1.5" className="text-cyan-100">
+          {DISH_RIBS.map((rib) => (
+            <path key={rib} d={rib} />
+          ))}
+          <ellipse cx="96" cy="134" rx="26" ry="7.7" strokeOpacity="0.25" />
         </g>
-        <path d="M56 104 L68 76" strokeOpacity="0.75" />
-        <circle cx="68" cy="76" r="3.5" fill="currentColor" stroke="none" />
-      </g>
 
-      {/* Concentric crests, staggered so they travel outward */}
-      <g className={`transition-colors duration-500 ${locking ? "text-cyan-200" : "text-red-400/80"}`} stroke="currentColor" strokeWidth="2.5">
-        {SIGNAL_ARCS.map((arc, i) => (
+        {/* Feed assembly: boom up the axis, two struts to the rim, LNB at focus. */}
+        <path d="M96 150 L96 104" strokeOpacity="0.75" />
+        <g strokeOpacity="0.45" strokeWidth="2">
+          <path d="M62 143 L96 104" />
+          <path d="M130 143 L96 104" />
+        </g>
+        <path d="M89 107 A 7.5 7.5 0 0 1 103 107" strokeOpacity="0.8" />
+        <circle cx="96" cy="101.5" r="4.6" fill="currentColor" stroke="none" />
+
+        {/* Locking only: the uplink cone the crests travel through. */}
+        {locking && (
           <path
-            key={arc}
-            d={arc}
-            className={
-              locking
-                ? "animate-[solu-wave-pulse_2.1s_ease-out_infinite]"
-                : "animate-[solu-wave-flicker_1.3s_ease-in-out_infinite]"
-            }
-            style={{
-              animationDelay: `${(locking ? 0.42 : 0.17) * i}s`,
-              // Hold each crest at its dim 0% state through its own stagger
-              // delay, so the very first cycle already reads as outward travel.
-              animationFillMode: "backwards",
-            }}
+            d="M96 100 L68 46 L124 46 Z"
+            fill="url(#solu-sat-beam)"
+            stroke="none"
+            className="animate-[solu-sat-beam_2.6s_ease-in-out_infinite]"
           />
-        ))}
-      </g>
+        )}
 
-      {/* Locking only: a ring thrown from the horn and dissolving mid-flight */}
-      {locking && (
-        <circle
-          cx="68"
-          cy="76"
-          r="11"
-          className="text-cyan-300/70 animate-[solu-horn-ping_2.6s_ease-out_infinite]"
-          stroke="currentColor"
-          strokeWidth="2"
-          style={{ transformBox: "fill-box", transformOrigin: "center" }}
-        />
-      )}
+        {/* Transmission crests, staggered a quarter-cycle apart so each one
+            arrives where the previous crest is disappearing. */}
+        <g className={`transition-colors duration-500 ${locking ? "text-cyan-200" : "text-red-400/80"}`} stroke="currentColor" strokeWidth="2.5">
+          {WAVE_ARCS.map((arc, i) => (
+            <path
+              key={arc}
+              d={arc}
+              className={
+                locking
+                  ? "animate-[solu-sat-emit_1.8s_linear_infinite]"
+                  : "animate-[solu-sat-flicker_1.4s_ease-in-out_infinite]"
+              }
+              style={{
+                animationDelay: `${(locking ? 0.45 : 0.18) * i}s`,
+                // Hold each crest at its dim 0% state through its own stagger
+                // delay, so the very first cycle already reads as outward travel.
+                animationFillMode: "backwards",
+              }}
+            />
+          ))}
+        </g>
+
+        {/* Locking only: a ping thrown from the horn and dissolving mid-flight. */}
+        {locking && (
+          <circle
+            cx={HORN_X}
+            cy={HORN_Y}
+            r="12"
+            className="text-cyan-300/70 animate-[solu-sat-ping_2.4s_ease-out_infinite]"
+            stroke="currentColor"
+            strokeWidth="2"
+          />
+        )}
+      </g>
     </svg>
   );
 }

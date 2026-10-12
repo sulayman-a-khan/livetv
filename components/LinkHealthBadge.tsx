@@ -86,7 +86,7 @@ export default function LinkHealthBadge({ link }: { link: LinkHealthInput }) {
     view.label,
     browserBlockerLabel(link.browserBlocker as BrowserBlocker | null),
     link.deliveryHidden
-      ? "No media inside 10 seconds, twice — hidden; the hourly re-check brings it back when it delivers"
+      ? "No media inside 10 seconds, twice — hidden; the next pass brings it back when it delivers"
       : "",
     checkedAgo(link.lastCheckedAt ?? link.lastCheck?.checkedAt),
     probe,

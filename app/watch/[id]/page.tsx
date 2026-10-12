@@ -11,7 +11,7 @@ import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { getChannelLogo, getSatelliteUplink } from "@/lib/utils";
+import { getChannelLogo } from "@/lib/utils";
 import {
   getCategoryBySlug,
   isChannelInCategory,
@@ -25,9 +25,6 @@ import {
   RefreshCw,
   Tv,
   Play,
-  Radio,
-  CheckCircle2,
-  SatelliteDish,
 } from "lucide-react";
 
 interface ChannelDetails {
@@ -249,8 +246,8 @@ export default function WatchPage() {
 
       if (data.success && data.channel) {
         const rawCh = data.channel;
-        // Keep the API's own mirror docs (and their real StreamLink ids) so a
-        // dead server can be reported back by id instead of by synthetic label.
+        // Keep the API's own mirror docs (and their real StreamLink ids) so the
+        // ladder the viewer is handed is exactly the one the catalogue ranked.
         const ladder = buildLadderFromMirrors(rawCh.streams, rawCh.streamUrl, channelId);
         setChannel({
           ...rawCh,
@@ -473,9 +470,6 @@ export default function WatchPage() {
   // (and IP-locks the media segments), so the custom player can't play them
   // on Vercel. YouTube's own controls stay hidden until hover.
   const activeStreamUrl = channel?.streams?.[currentStreamIndex]?.url || "";
-  // The top bar names the uplink the current server is fed from, so moving from
-  // Server 1 to Server 2 reads as the feed handing over to another satellite.
-  const activeUplinkName = getSatelliteUplink(currentStreamIndex);
   const isActiveStreamYouTube = useMemo(() => isYouTubeUrl(activeStreamUrl), [activeStreamUrl]);
   // A raw MPEG-TS `.ts` feed (or one already routed through /api/stream)
   // can't be played by hls.js — it goes to the mpegts.js-based player instead.
@@ -591,46 +585,10 @@ export default function WatchPage() {
   }, [revertFailedSwitch]);
 
   /**
-   * The player gave up on one mirror. Report it to the backend by StreamLink id
-   * so the link is demoted for every viewer, not just this session. Only real
-   * Mongo ids are reportable — the synthetic ids built for query-param and
-   * sports-event ladders have no document behind them.
-   *
-   * One report per link per viewing session: hls.js can fire several fatal
-   * errors during a single stall, and three reports is exactly what the backend
-   * needs to call a healthy-but-glitchy link broken for everyone.
-   */
-  const reportedStreamIdsRef = useRef<Set<string>>(new Set());
-
-  const handleStreamFailed = useCallback((streamId: string) => {
-    if (!/^[0-9a-f]{24}$/i.test(streamId)) return;
-    if (reportedStreamIdsRef.current.has(streamId)) return;
-    reportedStreamIdsRef.current.add(streamId);
-
-    fetch("/api/streams/report-broken", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ streamId }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((report) => {
-        // Nothing usable left for this channel → hide it now instead of
-        // waiting for the next playlist poll.
-        const channelId = report?.channelId;
-        if (report?.channelHidden && channelId) {
-          setHiddenChannelIds((prev) => (prev.includes(channelId) ? prev : [...prev, channelId]));
-        }
-      })
-      .catch(() => {
-        /* best-effort — the player has already moved to the next server */
-      });
-  }, []);
-
-  /**
    * Every server for this channel is dead. The player has already shown the
    * Bangla notice for 5 seconds, so now:
    *   1. hide the channel from the playlist immediately,
-   *   2. re-sync with the backend (which has already marked the links broken),
+   *   2. re-sync with the backend so the rails show what the last pass saw,
    *   3. hop to the next channel in the visible list.
    */
   const handleAllServersFailed = useCallback(() => {
@@ -647,7 +605,7 @@ export default function WatchPage() {
       prev.includes(activeChannelId) ? prev : [...prev, activeChannelId]
     );
 
-    // Pull the authoritative list (the failed links were reported already).
+    // Pull the authoritative list (a scheduled pass decides what stays listed).
     fetchSidebarChannels(true);
 
     if (next) {
@@ -709,7 +667,7 @@ export default function WatchPage() {
                   never scrolls, so the player stays fixed in place and only the
                   channel list below it scrolls. */}
               <div className="z-20 bg-[#060b13] space-y-2.5 lg:bg-transparent lg:space-y-4">
-                {/* Back Navigation + live uplink badge (same line, space-between) */}
+                {/* Back Navigation (with the YouTube-source note on the right) */}
                 <div className="flex items-center justify-between gap-2">
                   <Link
                     href={`/`}
@@ -722,23 +680,14 @@ export default function WatchPage() {
                     <span className="sm:hidden">Home</span>
                   </Link>
 
-                  {/* Live uplink badge. A YouTube feed isn't a satellite pull, so
-                      it gets its own half-size pill: no icon, no "Live" word. */}
-                  {isActiveStreamYouTube ? (
+                  {/* A YouTube feed is routed to YouTube's own player, so it gets
+                      a half-size pill naming that. Direct feeds get no badge here:
+                      the player itself reports what it actually observes. */}
+                  {isActiveStreamYouTube && (
                     <div className="flex items-center gap-1 rounded-md border border-red-500/30 bg-[#1a0e12] px-1.5 py-[1px]">
                       <span className="w-[5px] h-[5px] rounded-full bg-red-500 animate-pulse shrink-0" />
                       <span className="text-[8px] font-extrabold tracking-wide text-red-400 whitespace-nowrap">
                         YouTube
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 min-w-0 rounded-md border border-emerald-500/25 bg-[#0d1628] px-1.5 py-[1px]">
-                      <span className="relative grid place-items-center w-3.5 h-3.5 shrink-0">
-                        <span className="absolute w-2.5 h-2.5 rounded-full border border-emerald-400/30 animate-ping" />
-                        <SatelliteDish className="relative w-[11px] h-[11px] text-emerald-400 -rotate-12" />
-                      </span>
-                      <span className="text-[8px] font-extrabold tracking-wide text-emerald-300 whitespace-nowrap">
-                        {activeUplinkName}
                       </span>
                     </div>
                   )}
@@ -777,7 +726,6 @@ export default function WatchPage() {
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
-                      onStreamFailed={handleStreamFailed}
                       onAllServersFailed={handleAllServersFailed}
                       onSwitchingChange={handleSwitchingChange}
                       onSwitchFailed={handleSwitchFailed}
@@ -790,7 +738,6 @@ export default function WatchPage() {
                       streams={channel.streams}
                       currentStreamIndex={currentStreamIndex}
                       onStreamIndexChange={setCurrentStreamIndex}
-                      onStreamFailed={handleStreamFailed}
                       onAllServersFailed={handleAllServersFailed}
                     />
                   )}

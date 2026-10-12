@@ -175,6 +175,16 @@ function writeSummary(result) {
     if (r.unplayable) lines.push(`- Hidden for browser blocking: ${r.unplayable}`);
     if (r.notDelivering) lines.push(`- Hidden for not delivering: ${r.notDelivering}`);
     if (r.inconclusive) lines.push(`- Inconclusive (probed but not saved): ${r.inconclusive}`);
+    // The sweep runs in the batch that empties the queue, so this is where a
+    // deletion shows up — without it, a link that left the catalogue looks like
+    // a probe verdict the log never mentions.
+    if (r.sweep) {
+      lines.push(
+        `- Sweep: ${r.sweep.channelsMerged} merged, ${r.sweep.duplicateLinksRemoved} duplicate, ` +
+          `${r.sweep.placeholderLinksPurged} test, ${r.sweep.deadLinksPurged} dead link(s) removed, ` +
+          `${r.sweep.channelsReordered} channels re-ranked`
+      );
+    }
   } else if (result.progress) {
     const p = result.progress;
     lines.push(`- Tested so far: ${p.completed} of ${p.eligible}, ${p.remaining} still due`);
@@ -234,6 +244,7 @@ async function main() {
     log(
       `batch ${batches}: ${data.batchSize} link(s) probed, ${s.checkedCount} recorded ` +
         `(${s.activeCount} active, ${s.degradedCount} degraded, ${s.brokenCount} broken` +
+        `${s.secondLookCount ? `, ${s.secondLookCount} re-probed before hiding` : ""}` +
         `${s.inconclusiveCount ? `, ${s.inconclusiveCount} not saved` : ""}) — ` +
         `${lastProgress?.completed ?? tested}/${lastProgress?.eligible ?? "?"} tested, ` +
         `${data.remaining} still due`
@@ -260,7 +271,8 @@ async function main() {
       `pass complete: ${finalReport.completed} of ${finalReport.eligible} eligible link(s) tested ` +
         `in ${finalReport.batches} batches (${finalReport.active} active, ${finalReport.degraded} degraded, ` +
         `${finalReport.failures} broken)` +
-        `${finalReport.inconclusive ? `, ${finalReport.inconclusive} inconclusive` : ""}`
+        `${finalReport.inconclusive ? `, ${finalReport.inconclusive} inconclusive` : ""}` +
+        `${finalReport.sweep ? ` — sweep removed ${finalReport.sweep.streamsRemoved} link(s)` : ""}`
     );
     writeSummary({ ok: true, report: finalReport });
     return;

@@ -9,13 +9,9 @@ import {
   VolumeX,
   Maximize,
   Minimize,
-  AlertTriangle,
-  RefreshCw,
-  Zap,
   Gauge,
   Check,
   RotateCcw,
-  Radio,
 } from "lucide-react";
 import { FreeStreamMirror, isYouTubeStream } from "@/lib/freeChannelService";
 
@@ -26,7 +22,6 @@ interface DirectHlsPlayerProps {
   currentStreamIndex?: number;
   onStreamIndexChange?: (index: number) => void;
   onAllServersFailed?: () => void;
-  onStreamFailed?: (streamId: string) => void;
 }
 
 interface LevelInfo {
@@ -37,11 +32,115 @@ interface LevelInfo {
 
 /**
  * The viewer's own copy of the health checker's delivery budget: this many
- * milliseconds to put a real frame on screen before the mirror is reported and
- * the ladder moves on. A miss is only one of two reports the backend needs, so a
- * bad second on a working link cannot hide a channel by itself.
+ * milliseconds to put a real frame on screen before the ladder moves on to the
+ * next mirror. The player only steps — it tells the backend nothing; a scheduled
+ * pass is what decides whether a link stays listed.
  */
 const FIRST_FRAME_DEADLINE_MS = 10_000;
+
+/**
+ * Wave crests radiating off the feed horn. Each path is an arc of a circle
+ * centred on the horn (68,76 in the receiver's viewBox), spanning ±40° around
+ * the dish's axis so they read as one-way transmission rather than a halo.
+ */
+const SIGNAL_ARCS = [
+  "M 64.1 62.5 A 14 14 0 0 1 80.6 69.9",
+  "M 61.9 54.9 A 22 22 0 0 1 87.8 66.4",
+  "M 59.7 47.2 A 30 30 0 0 1 95 62.9",
+];
+
+type ReceiverTone = "locking" | "weak";
+
+/**
+ * The receiver graphic: a parabolic dish on a mast that sweeps through its arc
+ * while wave crests pulse off the feed horn and a ring expands from it.
+ *
+ * `weak` is the same drawing with the sweep stopped, the dish dimmed and the
+ * crests flickering in and out — a transponder that answers nothing.
+ *
+ * Inline SVG plus the keyframes in this component's `<style>` block: no Lottie
+ * runtime, no JSON asset, nothing fetched. The locking and weak overlays are
+ * mutually exclusive, so at most one of these is ever mounted.
+ */
+function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
+  const locking = tone === "locking";
+  return (
+    <svg
+      viewBox="0 0 160 160"
+      aria-hidden="true"
+      className={`solu-sat-receiver h-24 w-24 sm:h-28 sm:w-28 overflow-visible ${
+        locking
+          ? "drop-shadow-[0_0_10px_rgba(34,211,238,0.45)]"
+          : "drop-shadow-[0_0_8px_rgba(251,146,60,0.25)]"
+      }`}
+      fill="none"
+      strokeLinecap="round"
+    >
+      {/* Mast and base */}
+      <g className="text-slate-500" stroke="currentColor" strokeOpacity="0.45" strokeWidth="3">
+        <path d="M56 104 L49 138" />
+        <path d="M39 140 H68" />
+      </g>
+
+      {/* Dish + feed horn. The sweep rotates the whole assembly about the mast
+          pivot, which is what makes it look like it is hunting for a carrier. */}
+      <g
+        className={
+          locking
+            ? "text-cyan-300 animate-[solu-dish-sweep_3.4s_ease-in-out_infinite_alternate]"
+            : "text-amber-400/55"
+        }
+        stroke="currentColor"
+        strokeWidth="2.5"
+        style={{ transformBox: "view-box", transformOrigin: "56px 104px" }}
+      >
+        <g transform="rotate(24 56 104)">
+          {/* Opaque reflector face: the mast is drawn before this, so a tinted
+              fill would let its line read straight through the dish. */}
+          <ellipse cx="56" cy="104" rx="34" ry="19" strokeOpacity="0.9" fill="#080e1b" />
+          <ellipse cx="56" cy="104" rx="22" ry="12" strokeOpacity="0.4" />
+          <ellipse cx="56" cy="104" rx="11" ry="6" strokeOpacity="0.28" />
+        </g>
+        <path d="M56 104 L68 76" strokeOpacity="0.75" />
+        <circle cx="68" cy="76" r="3.5" fill="currentColor" stroke="none" />
+      </g>
+
+      {/* Concentric crests, staggered so they travel outward */}
+      <g className={locking ? "text-cyan-200" : "text-red-400/80"} stroke="currentColor" strokeWidth="2.5">
+        {SIGNAL_ARCS.map((arc, i) => (
+          <path
+            key={arc}
+            d={arc}
+            className={
+              locking
+                ? "animate-[solu-wave-pulse_2.1s_ease-out_infinite]"
+                : "animate-[solu-wave-flicker_1.3s_ease-in-out_infinite]"
+            }
+            style={{
+              animationDelay: `${(locking ? 0.42 : 0.17) * i}s`,
+              // Hold each crest at its dim 0% state through its own stagger
+              // delay, so the very first cycle already reads as outward travel.
+              animationFillMode: "backwards",
+            }}
+          />
+        ))}
+      </g>
+
+      {/* Locking only: a ring thrown from the horn and dissolving mid-flight */}
+      {locking && (
+        <circle
+          cx="68"
+          cy="76"
+          r="11"
+          className="text-cyan-300/70 animate-[solu-horn-ping_2.6s_ease-out_infinite]"
+          stroke="currentColor"
+          strokeWidth="2"
+          style={{ transformBox: "fill-box", transformOrigin: "center" }}
+        />
+      )}
+    </svg>
+  );
+}
 
 export default function DirectHlsPlayer({
   channelName,
@@ -50,7 +149,6 @@ export default function DirectHlsPlayer({
   currentStreamIndex: controlledIndex,
   onStreamIndexChange,
   onAllServersFailed,
-  onStreamFailed,
 }: DirectHlsPlayerProps) {
   const [internalIndex, setInternalIndex] = useState(0);
   const activeIndex = controlledIndex !== undefined ? controlledIndex : internalIndex;
@@ -66,8 +164,8 @@ export default function DirectHlsPlayer({
   // through a ref keeps the stream-loader effect's deps stable — an identity
   // change in a parent callback must never tear down the running player and
   // reload the stream (that showed up as a flicker + restart on filter clicks).
-  const callbacksRef = useRef({ onStreamIndexChange, onAllServersFailed, onStreamFailed });
-  callbacksRef.current = { onStreamIndexChange, onAllServersFailed, onStreamFailed };
+  const callbacksRef = useRef({ onStreamIndexChange, onAllServersFailed });
+  callbacksRef.current = { onStreamIndexChange, onAllServersFailed };
 
   // Playback & UI states
   const [isPlaying, setIsPlaying] = useState(false);
@@ -93,6 +191,27 @@ export default function DirectHlsPlayer({
   const isYouTube = useMemo(() => {
     return activeStream ? isYouTubeStream(activeStream.url) : false;
   }, [activeStream]);
+
+  /**
+   * The header pill states only what this player actually observes: whether the
+   * loader is still waiting for a frame, whether frames are arriving, and the
+   * level hls.js really switched to. Nothing here is decorative or assumed.
+   */
+  const headerStatus = useMemo(() => {
+    if (isYouTube) {
+      return { label: "YOUTUBE", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
+    }
+    if (errorMsg) {
+      return { label: "NO SIGNAL", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
+    }
+    if (isLoadingStream) {
+      return { label: "TUNING", dot: "bg-cyan-300 animate-pulse", chip: "text-cyan-300 bg-cyan-500/10 border-cyan-500/30" };
+    }
+    if (isPlaying) {
+      return { label: "LIVE", dot: "bg-emerald-400 animate-pulse", chip: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" };
+    }
+    return { label: "PAUSED", dot: "bg-slate-400", chip: "text-slate-300 bg-slate-500/10 border-slate-500/30" };
+  }, [isYouTube, errorMsg, isLoadingStream, isPlaying]);
 
   // Resolution cap calculation: Mobile -> 480p max, Desktop -> 720p max
   const getDeviceMaxHeight = useCallback(() => {
@@ -188,7 +307,6 @@ export default function DirectHlsPlayer({
     // as delivered too, so the timer blames the link only for a picture that
     // genuinely never arrived.
     frameDeliveredRef.current = false;
-    const missedStreamId = activeStream._id;
     const deadline = setTimeout(() => {
       if (frameDeliveredRef.current) return;
       const v = videoRef.current;
@@ -201,7 +319,6 @@ export default function DirectHlsPlayer({
           FIRST_FRAME_DEADLINE_MS / 1000
         }s`
       );
-      callbacksRef.current.onStreamFailed?.(missedStreamId);
       handleNextServer();
     }, FIRST_FRAME_DEADLINE_MS);
 
@@ -307,8 +424,6 @@ export default function DirectHlsPlayer({
           return;
         }
 
-        callbacksRef.current.onStreamFailed?.(activeStream._id);
-
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
             // Try recovery once, then move to next server
@@ -337,7 +452,6 @@ export default function DirectHlsPlayer({
         video.play().then(() => setIsPlaying(true)).catch(() => {});
       });
       video.addEventListener("error", () => {
-        callbacksRef.current.onStreamFailed?.(activeStream._id);
         handleNextServer();
       });
     } else {
@@ -351,7 +465,7 @@ export default function DirectHlsPlayer({
       clearTimeout(deadline);
       purgeAndDestroyPlayer();
     };
-    // onStreamIndexChange/onAllServersFailed/onStreamFailed intentionally read
+    // onStreamIndexChange/onAllServersFailed intentionally read
     // via callbacksRef — see comment above the ref declaration.
   }, [channelId, activeIndex, activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, purgeAndDestroyPlayer]);
 
@@ -455,19 +569,24 @@ export default function DirectHlsPlayer({
         />
       )}
 
-      {/* Loading Spinner */}
-      {isLoadingStream && !isYouTube && (
+      {/* Locking overlay — the receiver hunting for the carrier. It stands down
+          the moment the signal is declared weak, so the two never stack. */}
+      {isLoadingStream && !isYouTube && !errorMsg && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
-          <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
-          <p className="text-xs font-bold text-white tracking-wide">Direct High-Speed Stream Tuning...</p>
+          <SatelliteReceiver tone="locking" />
+          <p className="mt-2 text-xs font-bold text-cyan-200 tracking-wide">
+            Locking onto satellite signal...
+          </p>
         </div>
       )}
 
-      {/* Error Overlay */}
+      {/* Weak-signal overlay — same dish, stopped, dimmed and flickering */}
       {errorMsg && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
-          <AlertTriangle className="w-10 h-10 text-amber-400 mb-2" />
-          <p className="text-sm font-bold text-white mb-1">Direct Stream Unavailable</p>
+          <SatelliteReceiver tone="weak" />
+          <p className="mt-2 text-sm font-black text-white mb-1">
+            Satellite Signal Weak <span className="text-amber-400">— Unable to lock onto stream.</span>
+          </p>
           <p className="text-xs text-slate-400 mb-4">{errorMsg}</p>
           <button
             onClick={() => handleNextServer()}
@@ -479,6 +598,37 @@ export default function DirectHlsPlayer({
         </div>
       )}
 
+      <style>{`
+        @keyframes solu-dish-sweep {
+          from { transform: rotate(-10deg); }
+          to { transform: rotate(4deg); }
+        }
+        @keyframes solu-wave-pulse {
+          0%, 100% { opacity: 0.12; }
+          35% { opacity: 1; }
+          70% { opacity: 0.35; }
+        }
+        @keyframes solu-horn-ping {
+          0% { transform: scale(0.5); opacity: 0.75; }
+          70%, 100% { transform: scale(2.6); opacity: 0; }
+        }
+        @keyframes solu-wave-flicker {
+          0%, 100% { opacity: 0.1; }
+          12% { opacity: 0.7; }
+          24% { opacity: 0.05; }
+          41% { opacity: 0.6; }
+          55% { opacity: 0.08; }
+          73% { opacity: 0.75; }
+          86% { opacity: 0.12; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .solu-sat-receiver,
+          .solu-sat-receiver * {
+            animation: none !important;
+          }
+        }
+      `}</style>
+
       {/* Top Channel Badge Overlay */}
       <div
         className={`absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none transition-opacity duration-300 ${
@@ -486,17 +636,17 @@ export default function DirectHlsPlayer({
         }`}
       >
         <div className="flex items-center gap-2 bg-[#080e1b]/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className={`w-2 h-2 rounded-full ${headerStatus.dot}`} />
           <span className="text-xs font-bold text-white">{channelName}</span>
-          <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">
-            DIRECT {currentHeight ? `${currentHeight}p` : "HD"}
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${headerStatus.chip}`}>
+            {headerStatus.label}
+            {currentHeight ? ` • ${currentHeight}p` : ""}
           </span>
         </div>
 
         {/* Multi-server ladder switcher */}
         {streams.length > 1 && (
           <div className="flex items-center gap-1 bg-[#080e1b]/85 backdrop-blur-md p-1 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">
-            <Radio className="w-3.5 h-3.5 text-slate-400 ml-1.5 mr-0.5" />
             {streams.map((st, idx) => {
               const active = idx === activeIndex;
               return (
@@ -602,12 +752,6 @@ export default function DirectHlsPlayer({
                 )}
               </div>
             )}
-
-            {/* Direct Zero-Buffer Badge */}
-            <div className="hidden sm:flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-1 rounded-lg">
-              <Zap className="w-3 h-3 text-emerald-400" />
-              <span>DIRECT ACCEL</span>
-            </div>
 
             {/* Fullscreen Button */}
             <button

@@ -177,7 +177,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             : data.stream?.health === "unplayable"
             ? `The origin serves it, but a viewer's browser cannot: ${data.probe?.reason || "blocked"}. Link is hidden from the UI now — no daily-failure streak needed.`
             : data.stream?.health === "delivery-failed"
-            ? `It would not hand over media inside 10 seconds, twice: ${data.probe?.reason || "too slow"}. Hidden from viewers; the hourly re-check puts it back the moment it delivers.`
+            ? `It would not hand over media inside 10 seconds, twice: ${data.probe?.reason || "too slow"}. Hidden from viewers; the next scheduled pass puts it back the moment it delivers.`
             : `Probe failed: ${data.probe?.reason || "unreachable"}. Link is now ${label.toLowerCase()} — a single failure never removes it.`,
         });
       } else if (action === "disable") {

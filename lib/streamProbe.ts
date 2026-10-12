@@ -52,7 +52,7 @@
  *
  * Backward compatibility: `probeStreamUrl(url, timeoutMs)` keeps its old
  * signature and `{ ok, latency, reason }` shape so every existing caller
- * (`lib/autoHealthChecker.ts`, `app/api/admin/health-check`) keeps working
+ * (`app/api/admin/channels`, the per-channel streams route) keeps working
  * unchanged. The richer result (`checkHlsStream`) is additive.
  */
 
@@ -1728,7 +1728,7 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
       deliveryMisses++;
       attemptsWithoutMedia++;
       // Two misses, ~15s apart, is what hides a link. A caller that asked for a
-      // single attempt (the hourly re-check) gets exactly that.
+      // single attempt gets exactly that one verdict.
       if (deliveryMisses >= DELIVERY_MISSES_TO_CONFIRM || attempt >= maxAttempts) break;
       console.log(
         `[StreamProbe] ${redactUrl(url)} handed over no media inside ${Math.round(

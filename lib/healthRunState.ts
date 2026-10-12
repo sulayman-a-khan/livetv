@@ -59,9 +59,28 @@ export interface HealthRunProgress {
   batches: number;
 }
 
+/**
+ * The maintenance sweep that closes a pass: duplicates merged, test links and
+ * links that stayed down for the full 72-hour window removed. Kept with the
+ * report because a pass that only probes leaves the catalogue tidy *and* shorter,
+ * and an admin reading "7 dead links purged" needs to know which run did it.
+ */
+export interface HealthRunSweep {
+  mode: "mongodb" | "in-memory";
+  channelsMerged: number;
+  duplicateLinksRemoved: number;
+  placeholderLinksPurged: number;
+  deadLinksPurged: number;
+  channelsReordered: number;
+  /** Every link the sweep deleted, whatever the reason. */
+  streamsRemoved: number;
+}
+
 export interface HealthRunReport extends HealthRunProgress {
   completedAt: string;
   durationMs: number;
+  /** Null when the sweep did not run, or failed and the pass report still stands. */
+  sweep: HealthRunSweep | null;
 }
 
 /** One batch's verdicts, as the batch endpoint measured them. */
@@ -76,11 +95,10 @@ export interface HealthBatchOutcome {
 }
 
 /**
- * The GitHub schedule. Every slot sits at minute 37, four hours apart, which is
- * the only cadence that clears all six existing Vercel health lines (03:00,
- * 09:00/09:30, 15:00/15:30, 21:00/21:30), the 20:00 playlist sync and the
- * hourly :15 delivery re-checks. Nothing here changes those jobs — this is the
- * offset chosen so the two schedulers never land in the same minute.
+ * The GitHub schedule — the only thing that probes the catalogue on a timer now
+ * that the Vercel health crons and the in-process engine are gone. Every slot
+ * sits at minute 37, four hours apart, which keeps it clear of the 20:00
+ * playlist sync cron. That job is untouched by this file.
  */
 export const HEALTH_RUN_CRON_UTC = "37 2,6,10,14,18,22 * * *";
 export const HEALTH_RUN_CRON_LOCAL =
@@ -313,12 +331,14 @@ export async function saveHealthRun(progress: HealthRunProgress): Promise<void> 
  */
 export async function completeHealthRun(
   progress: HealthRunProgress,
-  now: Date
+  now: Date,
+  sweep: HealthRunSweep | null = null
 ): Promise<HealthRunReport> {
   const startedAt = Date.parse(progress.startedAt);
   const report: HealthRunReport = {
     ...progress,
     remaining: 0,
+    sweep,
     completedAt: now.toISOString(),
     durationMs: Number.isFinite(startedAt) ? Math.max(0, now.getTime() - startedAt) : 0,
   };
@@ -327,6 +347,25 @@ export async function completeHealthRun(
   await writeStored(REPORT_KEY, report);
   await removeStored(RUN_KEY);
   return report;
+}
+
+/**
+ * Attach the closing sweep to a report that is already stored.
+ *
+ * The pass report is written the moment the queue empties, because a sweep over
+ * the whole catalogue is the long part of that final request and losing the
+ * proof the pass finished is the worse failure. This is the second write that
+ * says what the sweep did — and if it never lands, the report still reads
+ * "finished, sweep unknown" rather than "never ran".
+ */
+export async function recordHealthRunSweep(
+  report: HealthRunReport,
+  sweep: HealthRunSweep
+): Promise<HealthRunReport> {
+  const updated: HealthRunReport = { ...report, sweep };
+  localReport = updated;
+  await writeStored(REPORT_KEY, updated);
+  return updated;
 }
 
 export interface AutomatedHealthStatus {

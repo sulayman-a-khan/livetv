@@ -20,9 +20,9 @@
  * no latency chasing) so minor chunk delays don't reset the connection.
  *
  * Two things watch the clock. The first is a per-connection delivery deadline:
- * 10 seconds from connection to first frame, after which the link is reported to
- * `/api/streams/report-broken` and the ladder steps to the next server — the same
- * budget the health checker gives a link, measured where it matters, in a browser.
+ * 10 seconds from connection to first frame, after which the ladder steps to the
+ * next server — the same budget the health checker gives a link, measured where
+ * it matters, in a browser.
  *
  * The second is the frozen-progress watchdog: only when the video clock has been
  * continuously stuck for 8s (after having played) does it rebuild the player
@@ -65,7 +65,6 @@ interface MpegTsPlayerProps {
   currentStreamIndex?: number;
   onStreamIndexChange?: (index: number) => void;
   onAllServersFailed?: () => void;
-  onStreamFailed?: (streamId: string) => void;
   onSwitchFailed?: (attemptedLabel: string) => void;
   onSwitchingChange?: (switching: boolean, label: string | null) => void;
 }
@@ -87,7 +86,6 @@ export default function MpegTsPlayer({
   streams,
   currentStreamIndex: controlledStreamIndex,
   onStreamIndexChange,
-  onStreamFailed,
   onAllServersFailed,
   onSwitchingChange,
 }: MpegTsPlayerProps) {
@@ -135,8 +133,8 @@ export default function MpegTsPlayer({
   const hasLoadedOnceRef = useRef(false);
   const mountedRef = useRef(true);
   /** Host callbacks read through a ref: prop identity churn must not reload a feed. */
-  const hostCallbacksRef = useRef({ onStreamFailed, onAllServersFailed });
-  hostCallbacksRef.current = { onStreamFailed, onAllServersFailed };
+  const hostCallbacksRef = useRef({ onAllServersFailed });
+  hostCallbacksRef.current = { onAllServersFailed };
 
   // ---- Fullscreen state (parity with HlsPlayer) ----
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -248,7 +246,6 @@ export default function MpegTsPlayer({
       // Arm this connection's delivery deadline. A reload of a feed that already
       // played is not a fresh trial, so the timer exempts `hasPlayedRef` — the
       // frozen watchdog owns that case.
-      const feedId = streamsRef.current.find((s) => s.url === rawUrl)?._id;
       frameDeliveredRef.current = false;
       if (firstFrameTimerRef.current) clearTimeout(firstFrameTimerRef.current);
       firstFrameTimerRef.current = setTimeout(() => {
@@ -262,9 +259,8 @@ export default function MpegTsPlayer({
           return;
         }
         console.warn(
-          `[MpegTsPlayer] feed delivered no frame in ${FIRST_FRAME_DEADLINE_MS / 1000}s — reporting and stepping on`
+          `[MpegTsPlayer] feed delivered no frame in ${FIRST_FRAME_DEADLINE_MS / 1000}s — stepping on`
         );
-        if (feedId) hostCallbacksRef.current.onStreamFailed?.(feedId);
         nextServerRef.current?.();
       }, FIRST_FRAME_DEADLINE_MS);
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { RefreshCw, AlertCircle, Play, Pause, Volume2, VolumeX, Maximize, SatelliteDish, Signal } from "lucide-react";
+import { RefreshCw, AlertCircle, Play, Pause, Volume2, VolumeX, Maximize } from "lucide-react";
 import { extractYouTubeVideoId } from "@/lib/youtube";
 
 /**
@@ -480,31 +480,6 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
               LIVE
             </span>
           </div>
-          <div className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold text-slate-300 shrink-0 min-w-0">
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              <SatelliteDish className="w-3 h-3 text-slate-400" />
-              PAKSAT 1R • 38.8°E
-            </span>
-            <span className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              TP 3880
-            </span>
-            <span className="hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              FREQ 4052 MHz
-            </span>
-            <span className="hidden lg:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              POL H
-            </span>
-            <span className="hidden lg:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              SR 5600
-            </span>
-            <span className="hidden xl:flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 whitespace-nowrap">
-              FEC 3/4
-            </span>
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 whitespace-nowrap">
-              <Signal className="w-3 h-3" />
-              98%
-            </span>
-          </div>
         </div>
 
         <div
@@ -523,12 +498,6 @@ export default function YouTubeLivePlayer({ channelName, youtubeUrl, onUnavailab
             <button onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"} className="text-slate-300 hover:text-white transition-colors">
               {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
-          </div>
-          <div className="hidden md:flex items-center gap-3 text-[9px] font-bold text-slate-400">
-            <span>FREQ 4052 MHz</span>
-            <span>SR 5600</span>
-            <span>FEC 3/4</span>
-            <span className="text-emerald-400">1080i50</span>
           </div>
           <button onClick={toggleFullscreen} aria-label="Fullscreen" className="text-slate-300 hover:text-white transition-colors">
             <Maximize className="w-4 h-4" />

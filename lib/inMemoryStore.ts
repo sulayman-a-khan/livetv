@@ -49,7 +49,7 @@ export interface InMemoryStreamLink {
   /** Probe runs / report pairs that got no media inside the 10s delivery budget. */
   deliveryMisses?: number;
   lastDeliveryMissAt?: Date | null;
-  /** Hidden for not delivering; the hourly re-check shows it again once it serves. */
+  /** Hidden for not delivering; the next pass shows it again once it serves. */
   deliveryHidden?: boolean;
   /** Hand-added link: automation may probe and rank it, never delete it. */
   manual?: boolean;

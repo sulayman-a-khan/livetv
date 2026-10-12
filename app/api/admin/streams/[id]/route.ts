@@ -6,8 +6,12 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { refreshChannelLinks } from "@/lib/maintenanceRunner";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { checkHlsStream } from "@/lib/streamProbe";
-import { classifyLinkHealth, decideStreamHealth, type StoredStreamStatus } from "@/lib/streamHealth";
-import { toLastCheckDetail } from "@/lib/autoHealthChecker";
+import {
+  classifyLinkHealth,
+  decideStreamHealth,
+  toLastCheckDetail,
+  type StoredStreamStatus,
+} from "@/lib/streamHealth";
 import type { BrowserBlocker } from "@/lib/streamProbe";
 
 export const dynamic = "force-dynamic";

@@ -244,14 +244,3 @@ export function getChannelLogo(name: string, existingLogo?: string): string {
     cleanName
   )}&background=0284c7&color=ffffff&size=256&bold=true&font-size=0.3&rounded=true`;
 }
-
-/**
- * Uplink names for the watch page's LIVE badge, listed in failover order so
- * moving to Server 2 reads as the feed handing over to the next bird in the sky.
- */
-const SATELLITE_UPLINKS = ["Intelsat-20", "Eutelsat 9B", "Astra 19.2°E"];
-
-/** Which satellite this viewer is nominally pulling the feed from. */
-export function getSatelliteUplink(serverIndex = 0): string {
-  return SATELLITE_UPLINKS[Math.abs(serverIndex) % SATELLITE_UPLINKS.length];
-}

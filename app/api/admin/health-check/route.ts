@@ -3,20 +3,21 @@ import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
-import { checkHlsStream } from "@/lib/streamProbe";
+import { checkHlsStream, type HlsCheckResult } from "@/lib/streamProbe";
 import {
   decideStreamHealth,
+  toLastCheckDetail,
   type StreamHealthDecision,
   type StoredStreamStatus,
 } from "@/lib/streamHealth";
-import { toLastCheckDetail } from "@/lib/autoHealthChecker";
-import { refreshChannelLinks } from "@/lib/maintenanceRunner";
+import { refreshChannelLinks, runMaintenance } from "@/lib/maintenanceRunner";
 import { rankingShifted } from "@/lib/channelMaintenance";
 import { isAuthorizedAdmin, isAuthorizedByBearer } from "@/lib/adminAuth";
 import {
   applyBatchOutcome,
   beginHealthRun,
   completeHealthRun,
+  recordHealthRunSweep,
   saveHealthRun,
 } from "@/lib/healthRunState";
 
@@ -30,9 +31,11 @@ export const maxDuration = 60;
 
 // Keep each serverless request short; the admin UI repeats batches until done.
 // The batch is a single parallel wave (concurrency === limit), so the worst-case
-// wall clock is one probe budget (8s x 2 attempts) plus save time — no chance of
-// a second wave being cut off mid-flight. A link that misses the 10s delivery
-// budget adds the 15s confirmation wait, which still lands well inside 60s.
+// wall clock is one probe budget (8s x 2 attempts) plus the second look below,
+// plus save time — no chance of a second wave being cut off mid-flight. A link
+// that misses the 10s delivery budget adds the 15s confirmation wait, and a link
+// that still misses it is asked once more before anything is written; both fit
+// inside 60s because the second look is deliberately a single cheap attempt.
 const BATCH_LIMIT = 12;
 const BATCH_CONCURRENCY = BATCH_LIMIT;
 const PROBE_OPTS = {
@@ -42,6 +45,104 @@ const PROBE_OPTS = {
   maxAttempts: 2,
   segmentSampleSize: 1,
 } as const;
+
+/**
+ * Pass 2's probe. Pass 1 already spent two attempts on the link, so the second
+ * look exists for one reason: to ask "still nothing?" a few seconds later. One
+ * attempt, no confirming wait — that is what keeps the pair inside the request
+ * budget instead of doubling it.
+ */
+const SECOND_LOOK_PROBE_OPTS = {
+  timeoutMs: 8000,
+  checkLiveRefresh: false,
+  useFfprobe: false,
+  maxAttempts: 1,
+  segmentSampleSize: 1,
+  deliveryConfirmDelayMs: 0,
+} as const;
+
+/** The stored delivery verdict, in the shape `decideStreamHealth` asks for. */
+function storedDelivery(stream: {
+  deliveryHidden?: boolean | null;
+  deliveryMisses?: number | null;
+  lastDeliveryMissAt?: Date | string | null;
+}) {
+  return {
+    deliveryHidden: Boolean(stream.deliveryHidden),
+    deliveryMisses: stream.deliveryMisses || 0,
+    lastDeliveryMissAt: stream.lastDeliveryMissAt ?? null,
+  };
+}
+
+/**
+ * Probe a link, and if the first look came back with no media — the only thing
+ * that can hide a link outright — probe it again before writing anything.
+ *
+ * A hide is the loudest thing this pass does: the channel leaves the catalogue
+ * viewers see. One lookup through a congested runner used to be enough to cause
+ * that, which is the false failure this rule exists to prevent. So the first
+ * look never decides alone:
+ *
+ *   - first look delivers (or fails for a non-delivery reason) → one probe, as
+ *     before, nothing held;
+ *   - second look delivers → judged from the state the run arrived to, so the
+ *     flap clears the streak and the misses exactly as a healthy pass would;
+ *   - second look also gets no media → hidden, with the first look's evidence
+ *     carried in as the prior verdict.
+ *
+ * A `browserBlocker` is never held: mixed content and a withheld CORS grant are
+ * facts about the origin, not about this minute, and the second look would
+ * report the same thing a few seconds later.
+ */
+async function probeWithSecondLook(
+  stream: {
+    url: string;
+    status: StoredStreamStatus;
+    failedAttempts?: number | null;
+    firstFailedAt?: Date | string | null;
+    lastCountedFailureDay?: string | null;
+    deliveryHidden?: boolean | null;
+    deliveryMisses?: number | null;
+    lastDeliveryMissAt?: Date | string | null;
+    headers?: Record<string, string>;
+  },
+  now: Date
+): Promise<{ result: HlsCheckResult; decision: StreamHealthDecision; retried: boolean }> {
+  const first = await checkHlsStream(stream.url, {
+    ...PROBE_OPTS,
+    headers: stream.headers,
+  });
+  const firstDecision = decideStreamHealth(
+    stream.status,
+    stream.failedAttempts || 0,
+    stream.firstFailedAt ? new Date(stream.firstFailedAt) : null,
+    first,
+    now,
+    stream.lastCountedFailureDay,
+    storedDelivery(stream)
+  );
+
+  if (!firstDecision.deliveryHidden) {
+    return { result: first, decision: firstDecision, retried: false };
+  }
+
+  const second = await checkHlsStream(stream.url, {
+    ...SECOND_LOOK_PROBE_OPTS,
+    headers: stream.headers,
+  });
+  const secondDecision = decideStreamHealth(
+    stream.status,
+    stream.failedAttempts || 0,
+    stream.firstFailedAt ? new Date(stream.firstFailedAt) : null,
+    second,
+    now,
+    stream.lastCountedFailureDay,
+    // Both looks got no media: the first one's misses are evidence the second
+    // stands on, not history to forget.
+    firstDecision
+  );
+  return { result: second, decision: secondDecision, retried: true };
+}
 
 /**
  * Links due for a pass: on a pinned channel, not switched off by the admin, and
@@ -117,9 +218,10 @@ export async function POST(req: NextRequest) {
         : null;
 
     // Only curated (pinned) channels are batch health-checked, here exactly as in
-    // the cron passes. An unpinned channel's links are still testable one by one
-    // from its edit card; a batch run simply never touches them, and zero pinned
-    // channels means zero targets rather than a fallback to the whole store.
+    // the scheduled GitHub passes — which call this same endpoint. An unpinned
+    // channel's links are still testable one by one from its edit card; a batch
+    // run simply never touches them, and zero pinned channels means zero targets
+    // rather than a fallback to the whole store.
     const pinnedChannelIds = conn
       ? (await Channel.find({ isPinned: true }).select("_id").lean()).map((c) => String(c._id))
       : inMemoryDb
@@ -143,6 +245,7 @@ export async function POST(req: NextRequest) {
           brokenCount: 0,
           unplayableCount: 0,
           notDeliveringCount: 0,
+          secondLookCount: 0,
           deletedCount: 0,
         },
       });
@@ -192,7 +295,13 @@ export async function POST(req: NextRequest) {
     let unplayableCount = 0;
     /** Links that would not hand over media inside the 10-second budget. */
     let notDeliveringCount = 0;
-    const deletedCount = 0;
+    /**
+     * Links whose first look got no media and were therefore asked again before
+     * anything was written. Reported because the hide count is the number an
+     * admin reads as "these channels just disappeared", and a hide that took two
+     * looks is a different claim from one that took a single lookup.
+     */
+    let secondLookCount = 0;
     /**
      * Probed but not written: the verdict never landed, so the link is still due
      * and the pass cannot honestly claim it. Before this existed a rejected
@@ -229,10 +338,6 @@ export async function POST(req: NextRequest) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
         const settled = await Promise.allSettled(
           batch.map(async (stream) => {
-            const result = await checkHlsStream(stream.url, {
-              ...PROBE_OPTS,
-              headers: stream.headers,
-            });
             const previous = stream.status as StoredStreamStatus;
             const before = {
               status: previous,
@@ -242,19 +347,10 @@ export async function POST(req: NextRequest) {
               deliveryMisses: stream.deliveryMisses,
               adminDisabled: stream.adminDisabled,
             };
-            const decision = decideStreamHealth(
-              previous,
-              stream.failedAttempts || 0,
-              stream.firstFailedAt,
-              result,
-              now,
-              stream.lastCountedFailureDay,
-              {
-                deliveryHidden: stream.deliveryHidden,
-                deliveryMisses: stream.deliveryMisses,
-                lastDeliveryMissAt: stream.lastDeliveryMissAt,
-              }
-            );
+            // The first look never hides a link on its own — see
+            // `probeWithSecondLook`.
+            const { result, decision, retried } = await probeWithSecondLook(stream, now);
+            if (retried) secondLookCount++;
 
             stream.status = decision.status;
             stream.latency = decision.latency;
@@ -267,7 +363,7 @@ export async function POST(req: NextRequest) {
             stream.lastDeliveryMissAt = decision.lastDeliveryMissAt;
             stream.deliveryHidden = decision.deliveryHidden;
             // What the probe actually saw, kept with the link. Without this a batch
-            // run changes the verdict but leaves the row describing the last cron
+            // run changes the verdict but leaves the row describing the previous
             // pass, so the admin cannot tell that this press is what decided it.
             stream.lastCheck = toLastCheckDetail(result);
             await stream.save();
@@ -307,31 +403,6 @@ export async function POST(req: NextRequest) {
         const batch = streamsToTest.slice(i, i + BATCH_CONCURRENCY);
         const settled = await Promise.allSettled(
           batch.map(async (stream) => {
-            const result = await checkHlsStream(stream.url, {
-              ...PROBE_OPTS,
-              headers: stream.headers,
-            });
-            stream.lastCheck = {
-              healthStatus: result.status,
-              errorCode: result.errorCode,
-              httpStatus: result.httpStatus,
-              responseTime: result.responseTime,
-              playlistType: result.playlistType,
-              isLive: result.isLive,
-              segmentCount: result.segmentCount,
-              newSegmentDetected: result.newSegmentDetected,
-              video: result.video,
-              audio: result.audio,
-              resolution: result.resolution,
-              codec: result.codec,
-              fps: result.fps,
-              attempts: result.attempts,
-              error: result.error,
-              checkedAt: result.checkedAt,
-              browserCors: result.browserCors,
-              browserBlocker: result.browserBlocker,
-              deliveryMisses: result.deliveryMisses,
-            };
             const previous = stream.status as StoredStreamStatus;
             const before = {
               status: previous,
@@ -341,19 +412,9 @@ export async function POST(req: NextRequest) {
               deliveryMisses: stream.deliveryMisses,
               adminDisabled: stream.adminDisabled,
             };
-            const decision = decideStreamHealth(
-              previous,
-              stream.failedAttempts || 0,
-              stream.firstFailedAt,
-              result,
-              now,
-              stream.lastCountedFailureDay,
-              {
-                deliveryHidden: stream.deliveryHidden,
-                deliveryMisses: stream.deliveryMisses,
-                lastDeliveryMissAt: stream.lastDeliveryMissAt,
-              }
-            );
+            const { result, decision, retried } = await probeWithSecondLook(stream, now);
+            if (retried) secondLookCount++;
+            stream.lastCheck = toLastCheckDetail(result);
             stream.status = decision.status;
             stream.latency = decision.latency;
             stream.failedAttempts = decision.failedAttempts;
@@ -378,8 +439,8 @@ export async function POST(req: NextRequest) {
 
     // A verdict that moved a link between tiers or speed bands changes which
     // mirror the next viewer should be handed first, so exactly those channels
-    // have their ladder renumbered now — the same repair the scheduler pass does,
-    // bounded to this batch instead of a catalogue-wide rerun.
+    // have their ladder renumbered now, bounded to this batch instead of a
+    // catalogue-wide rerun.
     for (const channelId of changedChannelIds) {
       try {
         await refreshChannelLinks(channelId);
@@ -409,10 +470,51 @@ export async function POST(req: NextRequest) {
     // Nothing was due when the pass opened, so the pass is complete on arrival.
     // That is recorded rather than answered silently: a run that reaches this
     // app and finds every link already fresher than its cursor is still proof
-    // the scheduler arrived.
+    // the scheduled pass arrived.
     let finalReport = null;
+    /** Links this request deleted — set by the closing sweep, always 0 before it. */
+    let deletedCount = 0;
     if (remaining === 0) {
       finalReport = await completeHealthRun(progress, finishedAt);
+
+      // The batch that empties the queue also runs the catalogue sweep: merges,
+      // dedupe, re-ranking and the dead-link purge. This was the auto health
+      // checker's job until the Vercel crons went, and nothing has scheduled it
+      // since — so the pass that has just measured every link is the one that
+      // decides what those measurements mean for the catalogue.
+      //
+      // The report is written first on purpose. A sweep over the whole catalogue
+      // is the long part of this request, and a request that ran out of time in
+      // it would otherwise lose the proof the pass finished at all. The verdicts
+      // are already saved link by link, so the sweep's only cost is its own
+      // summary, which is attached after it lands.
+      //
+      // Skipped when this request tested nothing: a runner arriving to find every
+      // link already fresh is proof of arrival, not a reason to rewrite the
+      // catalogue a second time in the same slot.
+      if (checkedCount > 0) {
+        try {
+          const sweep = await runMaintenance();
+          deletedCount = Math.max(0, sweep.streamsBefore - sweep.streamsAfter);
+          finalReport = await recordHealthRunSweep(finalReport, {
+            mode: sweep.mode,
+            channelsMerged: sweep.channelsMerged,
+            duplicateLinksRemoved: sweep.duplicateLinksRemoved,
+            placeholderLinksPurged: sweep.placeholderLinksPurged,
+            deadLinksPurged: sweep.deadLinksPurged,
+            channelsReordered: sweep.channelsReordered,
+            streamsRemoved: deletedCount,
+          });
+          console.log(
+            `[HealthCheck] sweep: ${sweep.channelsMerged} merged, ` +
+              `${sweep.duplicateLinksRemoved} duplicate, ${sweep.placeholderLinksPurged} test, ` +
+              `${sweep.deadLinksPurged} dead link(s) removed`
+          );
+        } catch {
+          // No error text is logged: a failed write can carry a stream URL.
+          console.error("[HealthCheck] maintenance sweep failed — pass report still stands");
+        }
+      }
     } else {
       await saveHealthRun(progress);
     }
@@ -439,6 +541,7 @@ export async function POST(req: NextRequest) {
         brokenCount,
         unplayableCount,
         notDeliveringCount,
+        secondLookCount,
         deletedCount,
         inconclusiveCount,
       },

@@ -6,14 +6,20 @@ export interface IStreamLink extends Document {
   priority: number;
   status: "active" | "degraded" | "broken";
   failedAttempts: number;
+  /**
+   * Start of the current continuous outage. Set by the first probe that finds the
+   * link down and cleared by any probe that delivers media, so the maintenance
+   * sweep can ask one question of it: has this link been down, without recovery,
+   * for `DEAD_LINK_PURGE_HOURS`? (see `lib/streamHealth.ts`).
+   */
   firstFailedAt: Date | null;
   lastCheckedAt: Date | null;
   latency: number;
   /**
    * UTC day (`YYYY-MM-DD`) the failure streak last advanced. `failedAttempts`
    * counts consecutive failed check DAYS, so repeated probes inside one day
-   * (the 6-hour cycle, player reports, admin runs) move this marker at most
-   * once. Reset to null when a probe succeeds.
+   * (the scheduled GitHub pass, player reports, admin runs) move this marker at
+   * most once. Reset to null when a probe succeeds.
    */
   lastCountedFailureDay: string | null;
   /**
@@ -30,9 +36,9 @@ export interface IStreamLink extends Document {
   deliveryMisses: number;
   lastDeliveryMissAt: Date | null;
   /**
-   * Hidden because it would not deliver in time — not because it is dead. The
-   * hourly re-check watches only these, and shows the link again the moment it
-   * serves media inside the budget.
+   * Hidden because it would not deliver in time — not because it is dead. Every
+   * pass works the oldest verdict first, so these come up again quickly and the
+   * link shows itself the moment it serves media inside the budget.
    */
   deliveryHidden: boolean;
   /** Hand-added by an admin: automation may test and rank it, never delete it. */

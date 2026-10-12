@@ -6,7 +6,9 @@
  *
  * Called from:
  *   - M3U ingest              (after a playlist import)
- *   - Auto health checker     (after fresh latencies are measured)
+ *   - The health pass         (the batch that empties the queue — see
+ *                             `app/api/admin/health-check`; this is what replaced
+ *                             the in-process auto health checker's sweep)
  *   - Admin maintenance route (manual "Run cleanup" button)
  *   - Manual link add/delete  (single-channel refresh)
  */

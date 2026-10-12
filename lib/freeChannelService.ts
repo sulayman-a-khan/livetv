@@ -139,10 +139,9 @@ export interface RawStreamMirror {
 /**
  * Builds the playback ladder from the mirrors the API already ranked.
  *
- * The real StreamLink id MUST survive this step: players report a dead link to
- * /api/streams/report-broken by id, and a synthetic id matches no document —
- * the failure would never reach the backend, so the link would keep being
- * served to every other viewer.
+ * The real StreamLink id MUST survive this step: it is how the ladder the player
+ * is handed lines up with the rows the health pass wrote verdicts against, and a
+ * synthetic id matches no document.
  */
 export function buildLadderFromMirrors(
   mirrors: RawStreamMirror[] | null | undefined,

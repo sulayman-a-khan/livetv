@@ -9,16 +9,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { canonicalStreamUrl } from "../lib/channelIdentity";
 import {
   compareStreamRank,
   planChannelLinkRefresh,
   planMaintenance,
   rankStreams,
   rankingShifted,
+  selectPurgeableDeadLinks,
   type MaintChannel,
   type MaintStream,
 } from "../lib/channelMaintenance";
 import {
+  DEAD_LINK_PURGE_HOURS,
+  MAX_CONSECUTIVE_FAILURES,
   decideStreamHealth,
   isUsableViewerLink,
   type StreamHealthDecision,
@@ -278,4 +282,230 @@ test("a health verdict, the refresh it triggers, and the published ladder agree"
     assert.equal(refreshed.find((s) => s._id === _id)?.priority, priority);
   }
   assert.deepEqual(planChannelLinkRefresh("c1", refreshed).streamPatches, []);
+});
+
+/* ------------------------------------------------------------------ *
+ * The pass's two looks (C2)
+ * ------------------------------------------------------------------ */
+
+/** A check that got nothing on a single attempt — Pass 2's cheaper probe. */
+const starvedOnce = (): ProbeResult =>
+  ({ ok: false, status: "NO_MEDIA", latency: 0, deliveryMisses: 1 }) as unknown as ProbeResult;
+
+/**
+ * The chain `app/api/admin/health-check` runs per link, minus the network: Pass 1,
+ * and only if that look would hide the link, Pass 2 judged on Pass 1's evidence.
+ */
+function twoLooks(
+  s: MaintStream,
+  firstLook: ProbeResult,
+  secondLook: ProbeResult,
+  now: Date
+): { decision: StreamHealthDecision; retried: boolean } {
+  const previousDelivery = {
+    deliveryHidden: Boolean(s.deliveryHidden),
+    deliveryMisses: s.deliveryMisses || 0,
+    // The row under test has no earlier miss to carry forward; `MaintStream` does
+    // not even store one.
+    lastDeliveryMissAt: null,
+  };
+  const first = decideStreamHealth(
+    s.status,
+    s.failedAttempts || 0,
+    s.firstFailedAt ? new Date(s.firstFailedAt) : null,
+    firstLook,
+    now,
+    s.lastCountedFailureDay,
+    previousDelivery
+  );
+  if (!first.deliveryHidden) return { decision: first, retried: false };
+
+  return {
+    decision: decideStreamHealth(
+      s.status,
+      s.failedAttempts || 0,
+      s.firstFailedAt ? new Date(s.firstFailedAt) : null,
+      secondLook,
+      now,
+      s.lastCountedFailureDay,
+      first
+    ),
+    retried: true,
+  };
+}
+
+test("a link that starves on the first look but delivers on the second is not hidden", () => {
+  const now = new Date("2026-10-12T06:00:00Z");
+  const healthy = link({ _id: "flaky", latency: 400 });
+
+  const { decision, retried } = twoLooks(healthy, starved(), delivered(420), now);
+
+  assert.equal(retried, true);
+  assert.equal(decision.deliveryHidden, false);
+  assert.equal(decision.deliveryMisses, 0);
+  assert.equal(decision.status, "active");
+  // The flap leaves no mark at all: a second look that delivered is judged from
+  // the state the pass arrived to, so the streak it never earned stays unearned.
+  assert.equal(decision.failedAttempts, 0);
+  assert.equal(decision.firstFailedAt, null);
+  assert.equal(decision.lastCountedFailureDay, null);
+});
+
+test("a link that starves on both looks is hidden, with the first look's evidence kept", () => {
+  const now = new Date("2026-10-12T06:00:00Z");
+  const dying = link({ _id: "dying", latency: 900 });
+
+  const { decision, retried } = twoLooks(dying, starved(), starvedOnce(), now);
+
+  assert.equal(retried, true);
+  assert.equal(decision.deliveryHidden, true);
+  assert.equal(decision.status, "broken");
+  // 2 misses from Pass 1's pair plus the confirming one — the hide stands on
+  // three lookbacks, not on the one that triggered it.
+  assert.equal(decision.deliveryMisses, 3);
+  assert.equal(decision.lastCountedFailureDay, "2026-10-12");
+});
+
+test("the second look is spent only on a link a hide would land on", () => {
+  const now = new Date("2026-10-12T06:00:00Z");
+
+  // A working link: nothing to confirm.
+  const fine = twoLooks(link({ _id: "fine", latency: 300 }), delivered(310), delivered(310), now);
+  assert.equal(fine.retried, false);
+
+  // Origin refuses in a browser: structural, so a repeat would say the same.
+  const blocked = twoLooks(
+    link({ _id: "blocked", latency: 300 }),
+    {
+      ok: false,
+      status: "UNPLAYABLE",
+      latency: 0,
+      deliveryMisses: 0,
+      browserBlocker: "CORS_BLOCKED",
+    } as unknown as ProbeResult,
+    starvedOnce(),
+    now
+  );
+  assert.equal(blocked.retried, false);
+  assert.equal(blocked.decision.browserBlocker, "CORS_BLOCKED");
+
+  // A first failure on the daily streak hides nothing, so it asks nothing twice.
+  const retrying = twoLooks(
+    link({ _id: "retrying", status: "degraded", failedAttempts: 0, latency: 300 }),
+    { ok: false, status: "OFFLINE", latency: 0, deliveryMisses: 0 } as unknown as ProbeResult,
+    starvedOnce(),
+    now
+  );
+  assert.equal(retrying.retried, false);
+  assert.equal(retrying.decision.deliveryHidden, false);
+});
+
+/* ------------------------------------------------------------------ *
+ * The 72-hour deletion window (C4)
+ * ------------------------------------------------------------------ */
+
+const HOUR = 3_600_000;
+const SWEEP_AT = new Date("2026-10-12T06:00:00Z");
+/** The source still lists this one link; every other test URL counts as unlisted. */
+const LISTED_URL = "https://some-source.tv/live.m3u8";
+const unlisted = new Set([canonicalStreamUrl(LISTED_URL)]);
+
+/** A link stored as broken, down for `downForHours` and last probed `seenHoursAgo`. */
+function downLink(over: {
+  _id?: string;
+  downForHours: number;
+  seenHoursAgo?: number;
+  failedAttempts?: number;
+  countedDay?: string | null;
+  manual?: boolean;
+  adminDisabled?: boolean;
+}): MaintStream {
+  return link({
+    _id: over._id || "down",
+    status: "broken",
+    failedAttempts: over.failedAttempts ?? MAX_CONSECUTIVE_FAILURES,
+    lastCountedFailureDay: over.countedDay === undefined ? "2026-10-11" : over.countedDay,
+    firstFailedAt: new Date(SWEEP_AT.getTime() - over.downForHours * HOUR),
+    lastCheckedAt: new Date(SWEEP_AT.getTime() - (over.seenHoursAgo ?? 0) * HOUR),
+    manual: over.manual,
+    adminDisabled: over.adminDisabled,
+  });
+}
+
+test(`a link down for ${DEAD_LINK_PURGE_HOURS} hours, still being probed, is purged`, () => {
+  const justOver = downLink({ downForHours: DEAD_LINK_PURGE_HOURS + 1 });
+  assert.deepEqual(selectPurgeableDeadLinks([justOver], unlisted, SWEEP_AT), [justOver._id]);
+
+  // One hour short of the window is a hidden link, not a deleted one.
+  const stillInside = downLink({ _id: "young", downForHours: DEAD_LINK_PURGE_HOURS - 1 });
+  assert.deepEqual(selectPurgeableDeadLinks([stillInside], unlisted, SWEEP_AT), []);
+});
+
+test("recovery anywhere in the window takes the outage clock back to zero", () => {
+  const now = new Date("2026-10-12T06:00:00Z");
+  const wasDown = downLink({ _id: "recovered", downForHours: DEAD_LINK_PURGE_HOURS + 24 });
+
+  // A probe that delivered media — the only thing that writes these fields back.
+  const verdict = decideStreamHealth(
+    wasDown.status,
+    wasDown.failedAttempts || 0,
+    wasDown.firstFailedAt ? new Date(wasDown.firstFailedAt) : null,
+    delivered(500),
+    now,
+    wasDown.lastCountedFailureDay,
+    { deliveryHidden: false, deliveryMisses: 0 }
+  );
+  assert.equal(verdict.firstFailedAt, null);
+  assert.equal(verdict.failedAttempts, 0);
+  assert.equal(verdict.lastCountedFailureDay, null);
+
+  const backUp = { ...withDecision(wasDown, verdict), firstFailedAt: verdict.firstFailedAt };
+  assert.equal(backUp.status, "active");
+  assert.deepEqual(selectPurgeableDeadLinks([backUp], unlisted, SWEEP_AT), []);
+});
+
+test("an outage nobody has looked at for three days is not evidence for a deletion", () => {
+  // `firstFailedAt` is ancient, but the link has not been probed since: an
+  // unpinned channel's row, or a link the pass never reached. Deleting on the
+  // age alone would evict everything the schedule does not cover.
+  const stale = downLink({ _id: "stale", downForHours: 24 * 10, seenHoursAgo: 24 * 8 });
+  assert.deepEqual(selectPurgeableDeadLinks([stale], unlisted, SWEEP_AT), []);
+
+  // Same outage, probed inside the window: now it is a watched, continuous one.
+  const watched = downLink({ _id: "watched", downForHours: 24 * 10, seenHoursAgo: 4 });
+  assert.deepEqual(selectPurgeableDeadLinks([watched], unlisted, SWEEP_AT), [watched._id]);
+});
+
+test("everything the sweep protects survives even a full window down", () => {
+  const handAdded = downLink({ _id: "mine", downForHours: 24 * 5 });
+  const takenOut = downLink({ _id: "disabled", downForHours: 24 * 5, adminDisabled: true });
+  const noDayMark = downLink({ _id: "legacy", downForHours: 24 * 5, countedDay: null });
+  const notHidingYet = downLink({ _id: "young-streak", downForHours: 24 * 5, failedAttempts: 2 });
+  const listed = {
+    ...downLink({ _id: "listed", downForHours: 24 * 5 }),
+    url: LISTED_URL,
+  };
+  const all = [handAdded, takenOut, noDayMark, notHidingYet, listed];
+
+  assert.deepEqual(selectPurgeableDeadLinks(all, unlisted, SWEEP_AT), [handAdded._id]);
+  // `manual` is the admin's own switch: automation may hide it, never delete it.
+  const manual = downLink({ _id: "manual", downForHours: 24 * 5, manual: true });
+  assert.deepEqual(selectPurgeableDeadLinks([manual], unlisted, SWEEP_AT), []);
+});
+
+test("the catalogue pass counts what its own purge window removed", () => {
+  const channel: MaintChannel = { _id: "c1", name: "Sports One", isPinned: true };
+  const gone = downLink({ _id: "gone", downForHours: DEAD_LINK_PURGE_HOURS + 6 });
+  const kept = downLink({ _id: "kept", downForHours: 12 });
+  const working = link({ _id: "alive", priority: 3, latency: 280 });
+
+  const plan = planMaintenance([channel], [gone, kept, working], unlisted, SWEEP_AT);
+  assert.equal(plan.stats.deadLinksPurged, 1);
+  assert.deepEqual(plan.streamsToDelete, [gone._id]);
+  // The links still in service keep being ranked, so the sweep that deletes also
+  // leaves the ladder in the order the next viewer is handed.
+  assert.deepEqual(
+    plan.streamPatches.map((p) => `${p._id}:${p.priority}`).sort(),
+    ["alive:1", "kept:2"]
+  );
 });

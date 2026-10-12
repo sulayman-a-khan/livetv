@@ -15,10 +15,10 @@
  *                     link is never deleted by automation. In a merge the
  *                     curated (pinned) record is always the survivor, so a
  *                     duplicate can never delete a channel the admin pinned.
- *   5. Dead purge   — a link that fails the daily health check for
- *                     `DEAD_LINK_PURGE_DAYS` straight days, is not hand-added and
- *                     is no longer listed by any source is deleted; until then it
- *                     is only hidden, so it can recover on its own.
+ *   5. Dead purge   — a link that stays down for `DEAD_LINK_PURGE_HOURS`
+ *                     consecutive hours, is not hand-added and is no longer
+ *                     listed by any source is deleted; until then it is only
+ *                     hidden, so it can recover on its own.
  *
  * The planner returns a `MaintenancePlan` describing the mutations. Storage
  * adapters (in-memory / MongoDB) apply the plan. Keeping the rules pure means
@@ -27,7 +27,7 @@
 
 import { canonicalChannelKey, canonicalStreamUrl, isPlaceholderStream } from "./channelIdentity";
 import {
-  DEAD_LINK_PURGE_DAYS,
+  DEAD_LINK_PURGE_MS,
   MAX_CONSECUTIVE_FAILURES,
   isUsableViewerLink,
 } from "./streamHealth";
@@ -71,6 +71,12 @@ export interface MaintStream extends RankableStream {
   status: "active" | "degraded" | "broken";
   latency: number;
   failedAttempts?: number;
+  /**
+   * When the current outage started, and therefore how long the link has been
+   * continuously down. Cleared by any probe that delivers media, so its age — not
+   * a count of checks — is what `DEAD_LINK_PURGE_HOURS` measures.
+   */
+  firstFailedAt?: Date | string | null;
   lastCheckedAt?: Date | string | null;
   /** Day the streak last moved — see `streamHealth.ts`. Gates the dead purge. */
   lastCountedFailureDay?: string | null;
@@ -206,8 +212,8 @@ function priorityPatches(
 
 /**
  * RULE 5 — Dead-link removal.
- * A link is deleted only after `DEAD_LINK_PURGE_DAYS` consecutive failed daily
- * checks, and only when nothing protects it:
+ * A link is deleted only after it has been down, without one recovery, for
+ * `DEAD_LINK_PURGE_HOURS` consecutive hours — and only when nothing protects it:
  *   - `manual` links are the admin's, automation never deletes them;
  *   - `adminDisabled` links are deliberately out of service;
  *   - a URL a playlist source still lists is left alone, because the row is the
@@ -216,28 +222,48 @@ function priorityPatches(
  *   - a streak built without a `lastCountedFailureDay` marker came from the old
  *     probe-level counter, which could mature 3 "days" in an afternoon, so it is
  *     not trusted as evidence for a deletion. Such a link has to fail under the
- *     daily rules afresh before it can go.
+ *     daily rules afresh before it can go;
+ *   - `firstFailedAt` must be at least that old. It is set the first time a probe
+ *     finds the link down and cleared the moment one delivers media, so its age
+ *     is the outage's real duration — a link that came back for an hour anywhere
+ *     in the window is not a candidate;
+ *   - `lastCheckedAt` must fall inside the window too. This is the proof that the
+ *     outage is still being *observed*: a link nobody has probed for a week has an
+ *     ancient `firstFailedAt` for reasons that have nothing to do with its health
+ *     (it was never on a pinned channel, or the pass never reached it), and an
+ *     untested link is not evidence of a dead one.
  * Until all of that holds, a dead link is simply hidden and keeps being probed,
  * so it can come back on its own.
  */
 export function selectPurgeableDeadLinks(
   streams: MaintStream[],
-  listedCanonicalUrls: Set<string> | null
+  listedCanonicalUrls: Set<string> | null,
+  now: Date = new Date()
 ): string[] {
   // An empty set means no playlist source is configured at all, not that every
   // URL is unlisted. Without that evidence nothing may be deleted.
   if (!listedCanonicalUrls || listedCanonicalUrls.size === 0) return [];
-  return streams
-    .filter(
-      (s) =>
-        s.status === "broken" &&
-        !s.manual &&
-        !s.adminDisabled &&
-        Boolean(s.lastCountedFailureDay) &&
-        (s.failedAttempts || 0) >= Math.max(MAX_CONSECUTIVE_FAILURES, DEAD_LINK_PURGE_DAYS) &&
-        !listedCanonicalUrls.has(canonicalStreamUrl(s.url))
-    )
-    .map((s) => s._id);
+  const nowMs = now.getTime();
+  return streams.filter((s) => {
+    if (
+      s.status !== "broken" ||
+      s.manual ||
+      s.adminDisabled ||
+      !s.lastCountedFailureDay ||
+      (s.failedAttempts || 0) < MAX_CONSECUTIVE_FAILURES ||
+      listedCanonicalUrls.has(canonicalStreamUrl(s.url))
+    ) {
+      return false;
+    }
+    const sinceMs = s.firstFailedAt ? Date.parse(String(s.firstFailedAt)) : NaN;
+    const seenMs = s.lastCheckedAt ? Date.parse(String(s.lastCheckedAt)) : NaN;
+    // Continuous outage for the whole window...
+    if (!Number.isFinite(sinceMs) || nowMs - sinceMs < DEAD_LINK_PURGE_MS) return false;
+    // ...and still being checked, so the outage is current fact rather than an
+    // old verdict nobody has revisited.
+    if (!Number.isFinite(seenMs) || nowMs - seenMs > DEAD_LINK_PURGE_MS) return false;
+    return true;
+  }).map((s) => s._id);
 }
 
 /**
@@ -322,11 +348,16 @@ function mergeMetadata(survivor: MaintChannel, others: MaintChannel[]): Partial<
 /**
  * Builds the full maintenance plan. Idempotent: running it on an already-clean
  * dataset produces an empty plan.
+ *
+ * `now` is the instant the dead-link window is measured against — the clock only
+ * the purge rule reads, so a test can hold a link at 71 hours or 73 hours and see
+ * which side of the line it falls on.
  */
 export function planMaintenance(
   channels: MaintChannel[],
   streams: MaintStream[],
-  listedCanonicalUrls: Set<string> | null = null
+  listedCanonicalUrls: Set<string> | null = null,
+  now: Date = new Date()
 ): MaintenancePlan {
   const plan: MaintenancePlan = {
     channelsToDelete: [],
@@ -400,7 +431,7 @@ export function planMaintenance(
     const survivingLinks = kept.filter((s) => !purgeIds.has(s._id));
 
     // ---- RULE 5: delete links that stayed dead across the daily window ----
-    const deadIds = new Set(selectPurgeableDeadLinks(survivingLinks, listedCanonicalUrls));
+    const deadIds = new Set(selectPurgeableDeadLinks(survivingLinks, listedCanonicalUrls, now));
     if (deadIds.size > 0) {
       plan.streamsToDelete.push(...Array.from(deadIds));
       plan.stats.deadLinksPurged += deadIds.size;

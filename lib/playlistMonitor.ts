@@ -2,8 +2,7 @@
  * SoluPlay Automatic Playlist Monitor
  * ===================================
  * The scheduling half of Direct HLS playlist syncing; `playlistSync.ts` is the
- * work itself. Mirrors `autoHealthChecker.ts` deliberately, because that is this
- * project's background-job pattern:
+ * work itself. It keeps this project's background-job pattern:
  *
  *   - started once from `instrumentation.ts` on server boot;
  *   - a *due* tick every 15 minutes rather than a per-source timer, so a restart

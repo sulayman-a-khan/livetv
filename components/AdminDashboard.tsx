@@ -34,7 +34,6 @@ import {
   Check,
   Edit2,
   Wrench,
-  Clock,
   ChevronsDownUp,
   ChevronsUpDown,
   Github,
@@ -94,16 +93,6 @@ interface IngestProgress {
   done: boolean;
 }
 
-interface HealthSchedule {
-  running: boolean;
-  intervalMinutes: number;
-  lastCheckAt: string;
-  lastFullCheckAt: string;
-  lastSchedulerAt: string | null;
-  lastSchedulerTask: string | null;
-  lastSchedulerWasVercel: boolean | null;
-}
-
 /** One batch's worth of counters, accumulated across a whole pass on the server. */
 interface HealthRunProgress {
   runId: string;
@@ -122,9 +111,21 @@ interface HealthRunProgress {
   batches: number;
 }
 
+interface HealthRunSweep {
+  mode: "mongodb" | "in-memory";
+  channelsMerged: number;
+  duplicateLinksRemoved: number;
+  placeholderLinksPurged: number;
+  deadLinksPurged: number;
+  channelsReordered: number;
+  streamsRemoved: number;
+}
+
 interface HealthRunReport extends HealthRunProgress {
   completedAt: string;
   durationMs: number;
+  /** The sweep that closed the pass; null on a report written before this ran. */
+  sweep: HealthRunSweep | null;
 }
 
 type HealthRunState = "idle" | "running" | "stalled" | "overdue" | "completed";
@@ -260,8 +261,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [manualSaving, setManualSaving] = useState(false);
   const [manualLog, setManualLog] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  // Auto health-checker schedule (for the next-probe countdown timer)
-  const [schedule, setSchedule] = useState<HealthSchedule | null>(null);
   // The externally driven pass, read from the server's persisted run + report.
   const [automated, setAutomated] = useState<AutomatedHealth | null>(null);
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
@@ -332,8 +331,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     fetchStats();
   }, [fetchStats]);
 
-  // Fetch the auto health-checker schedule, then keep a local 1s clock ticking
-  // so the "next probe" countdown updates every second without re-fetching.
+  // Read the server's pass record: the counters of the pass in flight, the last
+  // one that genuinely finished, and when the schedule next fires. The pass
+  // lives in the database between requests, so it is the only authority here —
+  // there is no in-process timer and no Vercel cron to report a countdown for.
   const fetchSchedule = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/health-status", {
@@ -341,14 +342,11 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         cache: "no-store",
       });
       const data = await res.json();
-      if (data.success && data.autoHealthChecker) {
-        setSchedule(data.autoHealthChecker as HealthSchedule);
-      }
       if (data.success && data.automatedHealthCheck) {
         setAutomated(data.automatedHealthCheck as AutomatedHealth);
       }
     } catch (err) {
-      console.error("Failed to load health schedule:", err);
+      console.error("Failed to load the health pass record:", err);
     }
   }, [secretKey]);
 
@@ -369,61 +367,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     const id = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  // Countdown to the next catalogue pass (every 6 hours), derived from the
-  // server's last full-pass timestamp.
-  const nextProbe = useMemo(() => {
-    const fmt = (ms: number) => {
-      const clamped = Math.max(0, ms);
-      const totalSec = Math.floor(clamped / 1000);
-      const h = Math.floor(totalSec / 3600);
-      const m = Math.floor((totalSec % 3600) / 60);
-      const s = totalSec % 60;
-      const mm = String(m).padStart(2, "0");
-      const ss = String(s).padStart(2, "0");
-      return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-    };
-    if (!schedule) {
-      return { health: null as string | null, running: false };
-    }
-    const last = Date.parse(schedule.lastFullCheckAt);
-    if (Number.isNaN(last)) {
-      // No pass has run on this instance yet — one is due immediately.
-      return { health: "due now", running: schedule.running };
-    }
-    return {
-      health: fmt(last + schedule.intervalMinutes * 60 * 1000 - nowTick),
-      running: schedule.running,
-    };
-  }, [schedule, nowTick]);
-
-  // Vercel counts a blocked cron as a finished job: a 3xx from Deployment
-  // Protection or a 401 from a missing CRON_SECRET leaves no cron log and no
-  // request in the app. So the dashboard states whether the scheduler arrives,
-  // rather than letting a dead automation layer look like a bad health rule.
-  const schedulerStatus = useMemo(() => {
-    if (!schedule) return null;
-    const at = schedule.lastSchedulerAt ? Date.parse(schedule.lastSchedulerAt) : NaN;
-    const via =
-      schedule.lastSchedulerWasVercel === false ? "admin trigger" : "cron";
-    const label = schedule.lastSchedulerTask || "check";
-    if (Number.isNaN(at)) {
-      return {
-        ok: false,
-        text: "No scheduled check has ever reached this app — Vercel cron is blocked by Deployment Protection, or CRON_SECRET is not set.",
-      };
-    }
-    const mins = Math.max(0, Math.round((nowTick - at) / 60000));
-    const ago = mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)}d`;
-    // Every job expression runs once a day, so a day without one is a stoppage.
-    if (mins > 26 * 60) {
-      return {
-        ok: false,
-        text: `Last scheduled check: ${label} (${via}), ${ago} ago — nothing since, so the cron is not running.`,
-      };
-    }
-    return { ok: true, text: `Last scheduled check: ${label} (${via}), ${ago} ago.` };
-  }, [schedule, nowTick]);
 
   // Built from stored timestamps and stored counters, never from a countdown: a
   // ticking timer says nothing about whether a pass is alive, but "the last batch
@@ -470,6 +413,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       };
     }
     if (automated.state === "completed" && report) {
+      const sweep = report.sweep;
       return {
         label: `Pass ${recordAge(report.completedAt, nowTick)}`,
         tone: "slate",
@@ -478,7 +422,12 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           `Last pass finished ${recordAge(report.completedAt, nowTick)} (${localTime(report.completedAt)} ` +
           `Bangladesh): ${report.completed} links tested in ${report.batches} batches — ` +
           `${report.active} active, ${report.degraded} degraded, ${report.failures} broken` +
-          `${report.inconclusive ? `, ${report.inconclusive} inconclusive` : ""}.`,
+          `${report.inconclusive ? `, ${report.inconclusive} inconclusive` : ""}.` +
+          (sweep
+            ? ` Sweep: ${sweep.channelsMerged} merged, ${sweep.duplicateLinksRemoved} duplicate, ` +
+              `${sweep.placeholderLinksPurged} test, ${sweep.deadLinksPurged} dead link(s) removed, ` +
+              `${sweep.channelsReordered} channels re-ranked.`
+            : ""),
       };
     }
     return {
@@ -818,6 +767,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
       let broken = 0;
       let unplayable = 0;
       let notDelivering = 0;
+      let secondLook = 0;
+      let deleted = 0;
       let remaining = 0;
       let skippedDisabled = 0;
       let hasMore = true;
@@ -849,6 +800,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         broken += data.summary.brokenCount;
         unplayable += Number(data.summary.unplayableCount ?? 0);
         notDelivering += Number(data.summary.notDeliveringCount ?? 0);
+        secondLook += Number(data.summary.secondLookCount ?? 0);
+        deleted += Number(data.summary.deletedCount ?? 0);
         remaining = Number(data.remaining ?? 0);
         skippedDisabled = Number(data.skippedDisabled ?? 0);
         hasMore = data.hasMore === true;
@@ -871,10 +824,11 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           unplayable > 0 ? `, ${unplayable} of them not playable in a browser — hidden from the UI` : ""
         }${
           notDelivering > 0
-            ? `, ${notDelivering} gave no media inside 10 seconds — hidden until an hourly re-check gets one`
+            ? `, ${notDelivering} gave no media on two looks — hidden until the next scheduled pass gets one`
             : ""
-        }).` +
-          (skippedDisabled > 0 ? ` ${skippedDisabled} admin-disabled link(s) were left as you set them.` : "")
+        }${secondLook > 0 ? `, ${secondLook} re-probed before hiding` : ""}).` +
+          (skippedDisabled > 0 ? ` ${skippedDisabled} admin-disabled link(s) were left as you set them.` : "") +
+          (deleted > 0 ? ` Sweep removed ${deleted} link(s).` : "")
       );
       fetchStats();
       fetchSchedule();
@@ -1270,49 +1224,6 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         </div>
       </div>
 
-      {/* Next auto-probe countdown timer */}
-      <div className="glass-panel px-5 py-3.5 rounded-2xl border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
-              healthCheckLoading
-                ? "bg-brand-500/15 border-brand-500/40 text-brand-400"
-                : "bg-slate-900 border-slate-800 text-emerald-400"
-            }`}
-          >
-            {healthCheckLoading ? (
-              <Activity className="w-5 h-5 animate-spin" />
-            ) : (
-              <Clock className="w-5 h-5" />
-            )}
-          </div>
-          <div>
-            <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              {healthCheckLoading ? "Health Check Running" : "Next Auto-Probe"}
-            </p>
-            <p
-              className={`text-xs ${
-                schedulerStatus && !schedulerStatus.ok ? "text-amber-400" : "text-slate-500"
-              }`}
-            >
-              {schedulerStatus?.text ??
-                (nextProbe.running
-                  ? "Auto health checker is active on the server."
-                  : "No server timers here — the scheduled job runs the passes.")}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
-          <div className="flex-1 sm:flex-none text-center px-4 py-2 rounded-xl bg-slate-900/70 border border-slate-800 min-w-[92px]">
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Health Pass (6h)</p>
-            <p className="text-lg font-black tabular-nums text-brand-400 leading-tight">
-              {healthCheckLoading ? "--:--" : nextProbe.health ?? "--:--"}
-            </p>
-          </div>
-        </div>
-      </div>
-
       {maintenanceLog && (
         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
           {maintenanceLog}
@@ -1415,7 +1326,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
             Schedule: <span className="font-mono">{automated?.cronUtc}</span> (UTC) ={" "}
             {automated?.cronLocal}. Scheduled slots run only while the repository variable{" "}
             <span className="font-mono">SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED</span> is “true”.
-            Vercel's own health crons are untouched and still run.
+            This is the only health automation: no Vercel cron and no server-side timer probes
+            the catalogue, so a pass either shows up here or it did not run.
           </p>
         </div>
       </AdminSection>

@@ -8,7 +8,9 @@
  *   1. a manual "Run workflow" executes even when the schedule gate is absent
  *      or "false", and a cron slot executes only when it is exactly "true";
  *   2. the pass still fires every four hours and still never shares a minute
- *      with any Vercel cron in vercel.json.
+ *      with any Vercel cron in vercel.json;
+ *   3. vercel.json drives the playlist sync but no longer drives any health
+ *      pass — this workflow is the only scheduled health driver.
  *
  * The job-level `if:` is evaluated as written in the file, so editing that
  * line cannot pass these cases by accident. A failing line is reported by
@@ -330,11 +332,18 @@ check(
     : `minute(s) ${colliding.join(", ")} collide`
 );
 check(
-  "the existing Vercel crons are still listed",
-  vercelCrons.some((entry) => entry.path === "/api/admin/scheduler/sync") &&
-    vercelCrons.some((entry) => entry.path === "/api/admin/scheduler/health-all") &&
-    vercelCrons.some((entry) => entry.path === "/api/admin/scheduler/health-recheck"),
-  `sync, health-all and health-recheck remain in vercel.json`
+  "the playlist sync cron is still listed",
+  vercelCrons.some((entry) => entry.path === "/api/admin/scheduler/sync"),
+  `sync remains in vercel.json — the other system is untouched`
+);
+
+const healthCrons = vercelCrons.filter((entry) => /health/i.test(String(entry.path ?? "")));
+check(
+  "no Vercel cron drives the health check",
+  healthCrons.length === 0,
+  healthCrons.length === 0
+    ? "this GitHub pass is the only scheduled health driver"
+    : `still scheduled: ${healthCrons.map((entry) => entry.path).join(", ")}`
 );
 
 /* ---------------------------------------------------------------------------

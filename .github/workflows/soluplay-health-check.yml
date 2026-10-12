@@ -5,10 +5,13 @@
 # pinned link is still due. The probing, the verdict rules and the writes all
 # stay in the app — this file only replaces "someone leaves a browser tab open".
 #
-# Why minute 37: the Vercel crons already in vercel.json fire at 03:00, 09:00,
-# 09:30, 15:00, 15:30, 21:00, 21:30 and at :15 every hour, plus the playlist sync
-# at 20:00. Those jobs are untouched here; this schedule is simply offset so the
-# two schedulers never land in the same minute.
+# Why minute 37: the only Vercel cron left in vercel.json is the playlist sync,
+# which fires at 20:00 on minute 0. That job is untouched here; this schedule is
+# simply offset so the two schedulers never land in the same minute.
+#
+# This pass is now the ONLY health automation. The Vercel health crons and the
+# in-process 6-hour timer were removed, so if a link's verdict changes, it
+# changed here, from the admin's manual button, or from a player's report.
 #
 # Scheduled runs are gated OFF by default. Until the repository variable
 # SOLUPLAY_HEALTH_CHECK_SCHEDULE_ENABLED is set to "true", each cron slot below

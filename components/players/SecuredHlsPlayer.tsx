@@ -12,7 +12,6 @@ import {
   RefreshCw,
   ShieldCheck,
   ShieldAlert,
-  Activity,
   Server,
   Lock,
   Gauge,
@@ -137,7 +136,6 @@ export default function SecuredHlsPlayer({
     online: false,
     activeEventsCount: 0,
   });
-  const [streamLatency, setStreamLatency] = useState<number>(25);
 
   // Adaptive quality signals (display + policy inputs)
   const [deviceClass, setDeviceClass] = useState<DeviceClass | null>(null);
@@ -293,7 +291,6 @@ export default function SecuredHlsPlayer({
           setIsLoading(false);
           setIsReconnecting(false);
           inPlaceRetries = 0;
-          setStreamLatency(attempt === 0 ? 25 : 55);
           // Enforce the device resolution ceiling; ABR keeps auto-scaling
           // down within it (e.g. 360p/240p) when bandwidth dips.
           const capIndex = pickCapLevel(hls.levels ?? [], maxHeight);
@@ -350,7 +347,6 @@ export default function SecuredHlsPlayer({
           if (disposed) return;
           setIsLoading(false);
           setIsReconnecting(false);
-          setStreamLatency(attempt === 0 ? 25 : 55);
           video
             .play()
             .then(() => setIsPlaying(true))
@@ -500,10 +496,11 @@ export default function SecuredHlsPlayer({
 
         {/* Security & PC Bridge Signal Status */}
         <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Encrypted Feed Pill */}
+          {/* Feed pill. The forwarder mints a short-lived signed token per play;
+              the media itself is not re-encrypted here, so no cipher is claimed. */}
           <div className="hidden sm:flex items-center gap-1.5 bg-[#0a1222]/90 backdrop-blur-md px-2.5 py-1.5 rounded-xl border border-emerald-500/40 text-emerald-400 shadow-xl text-[11px] font-bold">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>AES-256 SECURED</span>
+            <span>SIGNED TOKEN STREAM</span>
           </div>
 
           {/* PC Bridge Server Port 5000 Status */}
@@ -566,7 +563,7 @@ export default function SecuredHlsPlayer({
           <span>Live Feed • Auto-Recovery Enabled</span>
         </div>
 
-        {/* Right: Quality, Latency & Fullscreen */}
+        {/* Right: Quality & Fullscreen */}
         <div className="flex items-center gap-3">
           <div
             className="flex items-center gap-1 text-[11px] font-mono font-bold text-sky-300 bg-sky-950/60 border border-sky-500/30 px-2.5 py-1 rounded-xl"
@@ -578,11 +575,6 @@ export default function SecuredHlsPlayer({
           >
             <Gauge className="w-3.5 h-3.5" />
             <span>Auto{liveHeight > 0 ? ` • ${liveHeight}p` : ""}</span>
-          </div>
-
-          <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-xl">
-            <Activity className="w-3.5 h-3.5" />
-            <span>{streamLatency}ms</span>
           </div>
 
           <button

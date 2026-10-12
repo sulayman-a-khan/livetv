@@ -131,8 +131,6 @@ interface HlsPlayerProps {
    * the next one in the playlist.
    */
   onAllServersFailed?: () => void;
-  /** Fired the moment a link fails, so the host can report/refresh state early. */
-  onStreamFailed?: (streamId: string) => void;
   /**
    * Fired when a requested channel switch could not be completed — every
    * stream link for the target channel failed to preload, so the player is
@@ -178,7 +176,6 @@ export default function HlsPlayer({
   currentStreamIndex: controlledStreamIndex,
   onStreamIndexChange,
   onAllServersFailed,
-  onStreamFailed,
   onSwitchingChange,
   onSwitchFailed,
 }: HlsPlayerProps) {
@@ -371,20 +368,6 @@ export default function HlsPlayer({
     [getHlsRefObj, getVideoEl]
   );
 
-  /** Tells the backend a link is down so it can be hidden from the catalogue. */
-  const reportBrokenStream = useCallback(
-    (streamId?: string) => {
-      if (!streamId) return;
-      onStreamFailed?.(streamId);
-      fetch("/api/streams/report-broken", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ streamId }),
-      }).catch(console.error);
-    },
-    [onStreamFailed]
-  );
-
   /** Reloads the CURRENT front link in place — step 1 of the ladder. */
   const reloadCurrentStream = useCallback(() => {
     const url = displayedMirrorsRef.current[displayedIndexRef.current]?.url;
@@ -460,7 +443,6 @@ export default function HlsPlayer({
 
       // ---- The retry failed too: this server is dead ----
       deadServersRef.current.add(index);
-      reportBrokenStream(mirrors[index]?._id);
 
       const hasUntriedServer = mirrors.some((_, i) => !deadServersRef.current.has(i));
 
@@ -483,7 +465,7 @@ export default function HlsPlayer({
       setFailoverToast(null);
       setIsLoading(false);
     },
-    [reloadCurrentStream, advanceToNextServer, reportBrokenStream]
+    [reloadCurrentStream, advanceToNextServer]
   );
 
   /**
@@ -1512,7 +1494,8 @@ export default function HlsPlayer({
             </span>
             <span className="hidden sm:inline px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-900/80 text-emerald-400 border border-emerald-500/30">
               <Zap className="w-2.5 h-2.5 inline mr-1" />
-              Server {displayedIndex + 1} ({activeDisplayedStream?.latency || 120}ms)
+              Server {displayedIndex + 1}
+              {activeDisplayedStream?.latency ? ` (${activeDisplayedStream.latency}ms)` : ""}
             </span>
           </div>
         </div>

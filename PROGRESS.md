@@ -4,7 +4,7 @@
 - [x] Project Structure & Planning (`PROGRESS.md`, `implementation_plan.md`)
 - [x] Database Layer & Schemas (`lib/db.ts`, `models/Channel.ts`, `models/StreamLink.ts`)
 - [x] Utilities & Helpers (`lib/m3uParser.ts`, `lib/utils.ts`, `lib/streamProbe.ts`)
-- [x] API Routes (`/api/channels`, `/api/channels/[id]`, `/api/admin/ingest-m3u`, `/api/admin/health-check`, `/api/admin/stats`, `/api/streams/report-broken`)
+- [x] API Routes (`/api/channels`, `/api/channels/[id]`, `/api/admin/ingest-m3u`, `/api/admin/health-check`, `/api/admin/stats`)
 - [x] Admin Delete APIs (`/api/admin/channels/[id]`, `/api/admin/channels/bulk-delete`, `/api/admin/streams/[id]`)
 - [x] Strict Active Link Channel Filtering (`StreamLink.status === 'active'`)
 - [x] Background Worker (`scripts/health-checker.js`, `scripts/seed.js`)
@@ -33,7 +33,7 @@
 - [x] **Local Disk JSON Store Persistence (`data/store.json`)**: Implemented local file storage persistence in `lib/inMemoryStore.ts`. Ingested M3U playlists, custom channels, and stream links are automatically saved to `data/store.json` on disk. When code changes or dev server reloads/restarts, data is automatically restored so custom M3U links **NEVER get wiped out or reset**.
 - [x] **CSS Utilities**: Added `scrollbar-thin`, `scrollbar-none`, and `animate-fade-in` utilities for sidebar scrollbar and admin bulk delete bar animation.
 - [x] **Deep Stream Inspection Probe (`lib/streamProbe.ts`)**: Upgraded stream checking to fetch response body snippets and inspect content. Explicitly rejects 200 OK responses that return HTML error pages (`<!DOCTYPE html>`, `404 Not Found`, `Access Denied`, `Cloudflare`). Requires valid HLS playlist tags (`#EXTM3U`, `#EXT-X-`, `#EXTINF`) or media headers.
-- [x] **Real-Time Client-Side Failover Reporting (`/api/streams/report-broken`)**: Wired `HlsPlayer.tsx` to automatically report failing/stalled stream links to the backend, marking them as `degraded` / `broken` in real-time so non-working links immediately disappear from the UI for all users.
+- [x] **Real-Time Client-Side Failover Reporting (`/api/streams/report-broken`)**: Wired `HlsPlayer.tsx` to automatically report failing/stalled stream links to the backend, marking them as `degraded` / `broken` in real-time so non-working links immediately disappear from the UI for all users. *(Removed 2026-10-12: a viewer's bad minute no longer edits the catalogue — the scheduled pass's two looks decide hides.)*
 - [x] **Worker & API Health-Check Hardening**: Updated `ingest-m3u`, `health-check` API, and `scripts/health-checker.js` with strict probe validation and reduced failure threshold.
 - [x] **Mongoose ObjectId Cast Error Fix**: Added `mongoose.isValidObjectId(id)` checks across all dynamic API routes (`/api/channels/[id]`, `/api/admin/channels/[id]`, `/api/admin/streams/[id]`, `/api/streams/report-broken`, `/api/admin/channels/bulk-delete`) so string IDs (such as in-memory ingested channels `ch_...`) seamlessly fall back to `inMemoryDb` without throwing `Cast to ObjectId failed` 500 errors.
 
@@ -83,7 +83,7 @@
 - **[Task 13]**: Redesigned Watch Page with responsive split-view layout: Player (left) + Channel Sidebar (right).
 - **[Task 14]**: Enhanced CSS with scrollbar-thin, scrollbar-none, fade-in animation utilities.
 - **[Task 15]**: Implemented `lib/streamProbe.ts` deep body inspection logic to eliminate false 200 OK non-working links.
-- **[Task 16]**: Added `/api/streams/report-broken` API route & connected `HlsPlayer` real-time failure reporting.
+- **[Task 16]**: Added `/api/streams/report-broken` API route & connected `HlsPlayer` real-time failure reporting. *(Route and player reporting removed 2026-10-12.)*
 - **[Task 17]**: Fixed `Cast to ObjectId failed` error for non-ObjectId string IDs (`ch_...`) by validating `mongoose.isValidObjectId(id)` across all dynamic endpoints.
 - **[Task 18]**: Implemented seamless TV area refreshing on Watch Page sidebar channel selection (`window.history.pushState` + component state tuning).
 - **[Task 19]**: Implemented local file storage persistence (`data/store.json`) in `lib/inMemoryStore.ts` so custom ingested M3U channels and links persist permanently across code edits and dev server reloads.

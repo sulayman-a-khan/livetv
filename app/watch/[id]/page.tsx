@@ -669,7 +669,7 @@ export default function WatchPage() {
                   never scrolls, so the player stays fixed in place and only the
                   channel list below it scrolls. */}
               <div className="z-20 bg-[#060b13] space-y-2.5 lg:bg-transparent lg:space-y-4">
-                {/* Back Navigation (with the YouTube-source note on the right) */}
+                {/* Back Navigation */}
                 <div className="flex items-center justify-between gap-2">
                   <Link
                     href={`/`}
@@ -681,18 +681,6 @@ export default function WatchPage() {
                     <span className="hidden sm:inline">Back to Home</span>
                     <span className="sm:hidden">Home</span>
                   </Link>
-
-                  {/* A YouTube feed is routed to YouTube's own player, so it gets
-                      a half-size pill naming that. Direct feeds get no badge here:
-                      the player itself reports what it actually observes. */}
-                  {isActiveStreamYouTube && (
-                    <div className="flex items-center gap-1 rounded-md border border-red-500/30 bg-[#1a0e12] px-1.5 py-[1px]">
-                      <span className="w-[5px] h-[5px] rounded-full bg-red-500 animate-pulse shrink-0" />
-                      <span className="text-[8px] font-extrabold tracking-wide text-red-400 whitespace-nowrap">
-                        YouTube
-                      </span>
-                    </div>
-                  )}
                 </div>
 
                 {/* TV Player Box */}

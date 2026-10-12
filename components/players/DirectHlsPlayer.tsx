@@ -325,10 +325,14 @@ export default function DirectHlsPlayer({
    * The header pill states only what this player actually observes: whether the
    * loader is still waiting for a frame, whether frames are arriving, and the
    * level hls.js really switched to. Nothing here is decorative or assumed.
+   *
+   * A YouTube mirror plays inside YouTube's own iframe, from which this component
+   * gets no frame, no level and no pause event — so it has nothing true to report
+   * and the pill is dropped rather than guessed at.
    */
   const headerStatus = useMemo(() => {
     if (isYouTube) {
-      return { label: "YOUTUBE", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
+      return null;
     }
     if (phase === "weak") {
       return { label: "NO SIGNAL", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
@@ -877,12 +881,14 @@ export default function DirectHlsPlayer({
         }`}
       >
         <div className="flex items-center gap-2 bg-[#080e1b]/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">
-          <span className={`w-2 h-2 rounded-full ${headerStatus.dot}`} />
+          {headerStatus && <span className={`w-2 h-2 rounded-full ${headerStatus.dot}`} />}
           <span className="text-xs font-bold text-white">{channelName}</span>
-          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${headerStatus.chip}`}>
-            {headerStatus.label}
-            {currentHeight ? ` • ${currentHeight}p` : ""}
-          </span>
+          {headerStatus && (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${headerStatus.chip}`}>
+              {headerStatus.label}
+              {currentHeight ? ` • ${currentHeight}p` : ""}
+            </span>
+          )}
         </div>
 
         {/* Multi-server ladder switcher */}

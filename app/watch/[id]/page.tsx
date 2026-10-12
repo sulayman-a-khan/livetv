@@ -168,10 +168,10 @@ export default function WatchPage() {
 
   /**
    * Same idea for searchParams: `handleSelectChannel` uses a raw
-   * `history.pushState`, which expires `useSearchParams()`'s identity even
+   * `history.replaceState`, which expires `useSearchParams()`'s identity even
    * though the values this page reads from it (`stream`, `title`) never
    * change mid-session. Reading through a ref keeps `loadChannelData` and
-   * the initial-load effect stable, so a pushState can't re-trigger them
+   * the initial-load effect stable, so a replaceState can't re-trigger them
    * with the stale route param and yank the page off the channel the
    * viewer just picked.
    */
@@ -361,8 +361,8 @@ export default function WatchPage() {
 
   // Initial load — runs on mount and whenever the route param changes via a
   // real Next navigation. Deliberately NOT keyed on searchParams: the switch
-  // pushState expires its identity, and re-running this effect with the stale
-  // mount-time param would yank the page back to the original channel.
+  // replaceState expires its identity, and re-running this effect with the
+  // stale mount-time param would yank the page back to the original channel.
   useEffect(() => {
     const streamParam = searchParamsRef.current.get("stream");
     const titleParam = searchParamsRef.current.get("title");
@@ -390,14 +390,17 @@ export default function WatchPage() {
   }, [channelIdParam, loadChannelData, fetchSidebarChannels]);
 
   /**
-   * Channel switches update the URL with a raw `window.history.pushState`
+   * Channel switches rewrite the URL with a raw `window.history.replaceState`
    * (see `handleSelectChannel`) so the player never remounts and the switch
-   * never goes through the Next.js router — a manual history call is
-   * invisible to App Router, so no route re-render or refetch is triggered
-   * and only the player frame changes. Each tuned channel becomes its own
-   * history entry, so back/forward steps through the channels the viewer
-   * tuned past; this listener re-syncs the page state to whatever
-   * `/watch/:id` URL the browser actually lands on.
+   * never goes through the Next.js router — a manual history call is invisible
+   * to App Router, so no route re-render or refetch is triggered and only the
+   * player frame changes. Replacing rather than pushing also keeps the tuned
+   * channels out of the history stack: the watch page holds exactly one entry,
+   * so the browser's back button leaves the page for wherever the viewer came
+   * from (home, or the category rail they opened the channel from) instead of
+   * stepping backward through every channel they played. This listener stays as
+   * the sync guard for the cases that can still land here on a different
+   * `/watch/:id` — back/forward through an entry the page didn't write itself.
    */
   useEffect(() => {
     const onPopState = () => {
@@ -513,12 +516,14 @@ export default function WatchPage() {
 
   /**
    * Instant channel switch: the picked sidebar entry goes into local state
-   * right away, so the player frame swaps to a spinner and the previous
+   * right away, so the frame holds the satellite receiver and the previous
    * player — HLS instance and buffered video included — is unmounted on the
    * spot. The channel's stream config is then fetched and swapped in without
    * a full page reload, and the URL is synced with a raw
-   * `window.history.pushState` that the Next.js router never sees (no route
-   * re-render).
+   * `window.history.replaceState` that the Next.js router never sees (no route
+   * re-render). Replacing the entry instead of pushing one is what stops a
+   * viewing session from stacking a history entry per channel, so back from
+   * the watch page returns to the page the viewer arrived from.
    */
   const handleSelectChannel = useCallback(
     (nextChannel: SidebarChannel) => {
@@ -539,7 +544,7 @@ export default function WatchPage() {
       setTuningLabel(nextChannel.name);
       setActiveChannelId(nextChannel._id);
       const catQuery = activeCategorySlug ? `?category=${activeCategorySlug}` : "";
-      window.history.pushState(null, "", `/watch/${nextChannel._id}${catQuery}`);
+      window.history.replaceState(null, "", `/watch/${nextChannel._id}${catQuery}`);
 
       loadChannelData(nextChannel._id, false);
     },

@@ -39,6 +39,26 @@ interface LevelInfo {
 const FIRST_FRAME_DEADLINE_MS = 10_000;
 
 /**
+ * Live feeds jitter for a few hundred ms constantly; a stall has to outlast this
+ * before the receiver comes back up over the frozen last frame.
+ */
+const STALL_GRACE_MS = 1_200;
+
+/**
+ * How long the weak-signal notice stays up before the host is told the ladder is
+ * dead. The watch page hops to another channel from that callback, so handing
+ * off in the same tick would unmount the notice before it could be read.
+ */
+const WEAK_NOTICE_HOLD_MS = 5_000;
+
+/**
+ * The overlay's three positions. `live` is the only one with a picture on
+ * screen: `tuning` covers connecting and buffering, `weak` a link that answered
+ * nothing.
+ */
+type SignalPhase = "tuning" | "live" | "weak";
+
+/**
  * Wave crests radiating off the feed horn. Each path is an arc of a circle
  * centred on the horn (68,76 in the receiver's viewBox), spanning ±40° around
  * the dish's axis so they read as one-way transmission rather than a halo.
@@ -58,11 +78,13 @@ type ReceiverTone = "locking" | "weak";
  * `weak` is the same drawing with the sweep stopped, the dish dimmed and the
  * crests flickering in and out — a transponder that answers nothing.
  *
- * Inline SVG plus the keyframes in this component's `<style>` block: no Lottie
- * runtime, no JSON asset, nothing fetched. The locking and weak overlays are
- * mutually exclusive, so at most one of these is ever mounted.
+ * Inline SVG, no Lottie runtime, no JSON asset, nothing fetched. The four
+ * `solu-*` keyframes it animates with live in `app/globals.css` alongside the
+ * other shared animations, so the graphic also paints correctly wherever a host
+ * mounts it outside this player (the watch page shows it while a channel's
+ * details are still being fetched).
  */
-function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
+export function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
   const locking = tone === "locking";
   return (
     <svg
@@ -85,11 +107,11 @@ function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
       {/* Dish + feed horn. The sweep rotates the whole assembly about the mast
           pivot, which is what makes it look like it is hunting for a carrier. */}
       <g
-        className={
+        className={`transition-colors duration-500 ${
           locking
             ? "text-cyan-300 animate-[solu-dish-sweep_3.4s_ease-in-out_infinite_alternate]"
             : "text-amber-400/55"
-        }
+        }`}
         stroke="currentColor"
         strokeWidth="2.5"
         style={{ transformBox: "view-box", transformOrigin: "56px 104px" }}
@@ -106,7 +128,7 @@ function SatelliteReceiver({ tone }: { tone: ReceiverTone }) {
       </g>
 
       {/* Concentric crests, staggered so they travel outward */}
-      <g className={locking ? "text-cyan-200" : "text-red-400/80"} stroke="currentColor" strokeWidth="2.5">
+      <g className={`transition-colors duration-500 ${locking ? "text-cyan-200" : "text-red-400/80"}`} stroke="currentColor" strokeWidth="2.5">
         {SIGNAL_ARCS.map((arc, i) => (
           <path
             key={arc}
@@ -158,6 +180,14 @@ export default function DirectHlsPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   /** Set by the first real frame; the loader effect's deadline reads it. */
   const frameDeliveredRef = useRef(false);
+  /** Bumped by every loader effect run so a superseded timer can't act twice. */
+  const runIdRef = useRef(0);
+  /** The overlay's current position, readable from timers without a re-render. */
+  const phaseRef = useRef<SignalPhase>("tuning");
+  const deadlineRef = useRef<NodeJS.Timeout | null>(null);
+  const recoverTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const stallTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const escalateRef = useRef<NodeJS.Timeout | null>(null);
 
   // Parent pages re-render often (sidebar health polls, category filter
   // clicks) and hand us freshly-created callback props each time. Reading them
@@ -171,11 +201,12 @@ export default function DirectHlsPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1.0);
-  const [isLoadingStream, setIsLoadingStream] = useState(true);
+  const [phase, setPhase] = useState<SignalPhase>("tuning");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(false);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  phaseRef.current = phase;
 
   // Quality / ABR state
   const [levels, setLevels] = useState<LevelInfo[]>([]);
@@ -193,6 +224,20 @@ export default function DirectHlsPlayer({
   }, [activeStream]);
 
   /**
+   * The attempt now on trial. A channel or mirror change is detected during
+   * render rather than in the loader effect, because effects run after paint:
+   * resetting there left one bare black frame between the old player's teardown
+   * and the receiver coming up.
+   */
+  const attemptKey = `${channelId ?? ""}|${activeIndex}|${activeStream?.url ?? ""}`;
+  const [renderedAttemptKey, setRenderedAttemptKey] = useState(attemptKey);
+  if (renderedAttemptKey !== attemptKey) {
+    setRenderedAttemptKey(attemptKey);
+    setPhase("tuning");
+    setErrorMsg(null);
+  }
+
+  /**
    * The header pill states only what this player actually observes: whether the
    * loader is still waiting for a frame, whether frames are arriving, and the
    * level hls.js really switched to. Nothing here is decorative or assumed.
@@ -201,17 +246,17 @@ export default function DirectHlsPlayer({
     if (isYouTube) {
       return { label: "YOUTUBE", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
     }
-    if (errorMsg) {
+    if (phase === "weak") {
       return { label: "NO SIGNAL", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
     }
-    if (isLoadingStream) {
+    if (phase === "tuning") {
       return { label: "TUNING", dot: "bg-cyan-300 animate-pulse", chip: "text-cyan-300 bg-cyan-500/10 border-cyan-500/30" };
     }
     if (isPlaying) {
       return { label: "LIVE", dot: "bg-emerald-400 animate-pulse", chip: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" };
     }
     return { label: "PAUSED", dot: "bg-slate-400", chip: "text-slate-300 bg-slate-500/10 border-slate-500/30" };
-  }, [isYouTube, errorMsg, isLoadingStream, isPlaying]);
+  }, [isYouTube, phase, isPlaying]);
 
   // Resolution cap calculation: Mobile -> 480p max, Desktop -> 720p max
   const getDeviceMaxHeight = useCallback(() => {
@@ -246,29 +291,130 @@ export default function DirectHlsPlayer({
     }
   }, []);
 
-  const handleNextServer = useCallback(() => {
+  /**
+   * Drop every timer that could still move the overlay: the first-frame
+   * deadline, the post-error recovery probe, the stall watch, the host hand-off.
+   */
+  const disarmTimers = useCallback(() => {
+    for (const timer of [deadlineRef, recoverTimerRef, stallTimerRef, escalateRef]) {
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+    }
+  }, []);
+
+  /**
+   * Step to the next mirror, and when the ladder has nothing left to give, hand
+   * the overlay over to the weak-signal state instead of spinning on a link that
+   * will never answer. `exhaustedReason` is the one line the viewer reads under
+   * that headline; it is only shown once the mirrors are used up, so stepping
+   * between mirrors never flashes a warning the next attempt has already fixed.
+   */
+  const handleNextServer = useCallback(
+    (exhaustedReason: string) => {
+      const { onAllServersFailed, onStreamIndexChange } = callbacksRef.current;
+
+      const giveUp = () => {
+        if (phaseRef.current === "weak") return;
+        disarmTimers();
+        phaseRef.current = "weak";
+        setErrorMsg(exhaustedReason);
+        setPhase("weak");
+        escalateRef.current = setTimeout(() => {
+          escalateRef.current = null;
+          onAllServersFailed?.();
+        }, WEAK_NOTICE_HOLD_MS);
+      };
+
+      if (streams.length <= 1) {
+        giveUp();
+        return;
+      }
+
+      const nextIdx = (activeIndex + 1) % streams.length;
+      if (nextIdx === 0) {
+        // Cycled through all servers
+        giveUp();
+      } else {
+        if (controlledIndex === undefined) {
+          setInternalIndex(nextIdx);
+        }
+        onStreamIndexChange?.(nextIdx);
+      }
+    },
+    [streams, activeIndex, controlledIndex, disarmTimers]
+  );
+
+  /**
+   * Take the overlay down, but only once output is proven: frames decoded and
+   * ready (`videoWidth` on screen), or — for a feed with no video track at all —
+   * a media clock that has started moving. A parsed manifest or loaded metadata
+   * is not proof; standing the receiver down on those is what produced the black
+   * gap between tuning and picture.
+   */
+  const markLocked = useCallback(() => {
+    if (frameDeliveredRef.current && phaseRef.current === "live") return;
+    const video = videoRef.current;
+    if (!video || video.readyState < 2 || (video.videoWidth === 0 && video.currentTime === 0)) return;
+    frameDeliveredRef.current = true;
+    disarmTimers();
+    phaseRef.current = "live";
+    setErrorMsg(null);
+    setPhase("live");
+  }, [disarmTimers]);
+
+  /**
+   * A stall after the picture was already rolling. The frozen last frame holds
+   * the screen through the grace window; only a stall that outlasts it brings the
+   * receiver back as the buffering indicator, and from there it gets the same
+   * budget a first frame gets — recover, or hand off to the weak state rather
+   * than tune forever over a dead carrier.
+   */
+  const handleWaiting = useCallback(() => {
+    if (phaseRef.current !== "live" || stallTimerRef.current) return;
+    stallTimerRef.current = setTimeout(() => {
+      stallTimerRef.current = null;
+      const video = videoRef.current;
+      if (!video || video.paused || phaseRef.current !== "live") return;
+      frameDeliveredRef.current = false;
+      phaseRef.current = "tuning";
+      setPhase("tuning");
+      stallTimerRef.current = setTimeout(() => {
+        stallTimerRef.current = null;
+        if (frameDeliveredRef.current) return;
+        console.warn(`[DirectHlsPlayer] Server ${activeIndex + 1} of ${channelName} stalled and did not resume`);
+        handleNextServer("The picture stopped arriving on this mirror");
+      }, FIRST_FRAME_DEADLINE_MS);
+    }, STALL_GRACE_MS);
+  }, [activeIndex, channelName, handleNextServer]);
+
+  /**
+   * The weak overlay's button. The ladder is wound back to the mirror after the
+   * one that ran out — Server 1 when every mirror has had its turn — and the
+   * pending host hand-off is cancelled so the retry isn't interrupted mid-flight.
+   * With a single mirror there is nowhere else to go, so the host moves on now.
+   */
+  const handleRetryMirror = useCallback(() => {
     const { onAllServersFailed, onStreamIndexChange } = callbacksRef.current;
+    disarmTimers();
     if (streams.length <= 1) {
       onAllServersFailed?.();
       return;
     }
-
     const nextIdx = (activeIndex + 1) % streams.length;
-    if (nextIdx === 0) {
-      // Cycled through all servers
-      onAllServersFailed?.();
-    } else {
-      if (controlledIndex === undefined) {
-        setInternalIndex(nextIdx);
-      }
-      onStreamIndexChange?.(nextIdx);
+    if (controlledIndex === undefined) {
+      setInternalIndex(nextIdx);
     }
-  }, [streams, activeIndex, controlledIndex]);
+    onStreamIndexChange?.(nextIdx);
+  }, [streams, activeIndex, controlledIndex, disarmTimers]);
 
   // Main stream loader effect — re-runs on every channel or server-mirror
   // switch and synchronously tears the previous instance down first, so no
   // old HLS session or buffered video survives the change.
   useEffect(() => {
+    const runId = ++runIdRef.current;
+
     // Synchronous hard buffer purge & previous HLS teardown
     if (videoRef.current) {
       try {
@@ -285,13 +431,16 @@ export default function DirectHlsPlayer({
       } catch {}
       hlsRef.current = null;
     }
+    disarmTimers();
 
     if (!activeStream || isYouTube) {
-      setIsLoadingStream(false);
+      // Nothing for the receiver to tune: an empty mirror list gets the host's
+      // off-air card, and a YouTube feed paints its own iframe player.
+      setPhase("live");
       return;
     }
 
-    setIsLoadingStream(true);
+    setPhase("tuning");
     setErrorMsg(null);
     setLevels([]);
     setSelectedLevel(-1);
@@ -302,25 +451,38 @@ export default function DirectHlsPlayer({
     const streamUrl = activeStream.url;
     const maxHeightCap = getDeviceMaxHeight();
 
-    // Arm the delivery deadline for this connection. `playing` below disarms it;
-    // a video that is buffered but paused (autoplay blocked until a tap) counts
-    // as delivered too, so the timer blames the link only for a picture that
-    // genuinely never arrived.
+    // Arm the delivery deadline for this connection. `markLocked` disarms it once
+    // a frame is proven on screen, and a video that is buffered but paused
+    // (autoplay blocked until a tap) counts as delivered too, so the timer
+    // blames the link only for a picture that genuinely never arrived.
     frameDeliveredRef.current = false;
-    const deadline = setTimeout(() => {
-      if (frameDeliveredRef.current) return;
+    deadlineRef.current = setTimeout(() => {
+      deadlineRef.current = null;
+      if (runIdRef.current !== runId || frameDeliveredRef.current) return;
       const v = videoRef.current;
       if (v && (v.readyState >= 2 || v.currentTime > 0)) {
-        frameDeliveredRef.current = true;
-        return;
+        markLocked();
+        if (frameDeliveredRef.current) return;
       }
       console.warn(
         `[DirectHlsPlayer] Server ${activeIndex + 1} of ${channelName} delivered no frame in ${
           FIRST_FRAME_DEADLINE_MS / 1000
         }s`
       );
-      handleNextServer();
+      handleNextServer(`Server ${activeIndex + 1} sent no picture in ${FIRST_FRAME_DEADLINE_MS / 1000}s`);
     }, FIRST_FRAME_DEADLINE_MS);
+
+    // Native-Safari-only element handlers. Both are named and removed in this
+    // effect's cleanup: anonymous listeners added per run used to stack up, so a
+    // single element error could advance the ladder several mirrors at once.
+    const onNativeMetadata = () => {
+      if (runIdRef.current !== runId) return;
+      video.play().then(() => setIsPlaying(true)).catch(() => {});
+    };
+    const onNativeError = () => {
+      if (runIdRef.current !== runId) return;
+      handleNextServer("This browser could not play the feed from this mirror");
+    };
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -363,7 +525,9 @@ export default function DirectHlsPlayer({
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        setIsLoadingStream(false);
+        // Deliberately not the end of tuning: a parsed playlist is a link that
+        // answered, not a picture. The receiver comes down on the video
+        // element's own output events (see markLocked).
         masterReresolves = 0;
 
         // Filter and cap levels
@@ -428,9 +592,11 @@ export default function DirectHlsPlayer({
           case Hls.ErrorTypes.NETWORK_ERROR:
             // Try recovery once, then move to next server
             hls.startLoad();
-            setTimeout(() => {
+            recoverTimerRef.current = setTimeout(() => {
+              recoverTimerRef.current = null;
+              if (runIdRef.current !== runId) return;
               if (hlsRef.current) {
-                handleNextServer();
+                handleNextServer("This mirror stopped responding");
               }
             }, 3000);
             break;
@@ -439,35 +605,51 @@ export default function DirectHlsPlayer({
             break;
           default:
             purgeAndDestroyPlayer();
-            setErrorMsg("Direct stream signal interrupted");
-            handleNextServer();
+            handleNextServer("Direct stream signal interrupted");
             break;
         }
       });
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Native Safari iOS/macOS HLS
+      // Native Safari iOS/macOS HLS. Metadata only kicks the element into
+      // playing; the overlay still comes down on proven output, same as the
+      // hls.js path.
       video.src = streamUrl;
-      video.addEventListener("loadedmetadata", () => {
-        setIsLoadingStream(false);
-        video.play().then(() => setIsPlaying(true)).catch(() => {});
-      });
-      video.addEventListener("error", () => {
-        handleNextServer();
-      });
+      video.addEventListener("loadedmetadata", onNativeMetadata);
+      video.addEventListener("error", onNativeError);
     } else {
-      // Nothing on this device can play HLS — the link is not on trial here.
-      clearTimeout(deadline);
+      // Nothing on this device can play HLS — the link is not on trial here, so
+      // no host hand-off is scheduled. This notice is the destination.
+      if (deadlineRef.current) {
+        clearTimeout(deadlineRef.current);
+        deadlineRef.current = null;
+      }
       setErrorMsg("HLS streaming is not supported on this device");
-      setIsLoadingStream(false);
+      phaseRef.current = "weak";
+      setPhase("weak");
     }
 
     return () => {
-      clearTimeout(deadline);
+      disarmTimers();
+      // Removing handlers that were never added is a no-op, so this runs for
+      // every transport rather than only the native one.
+      video.removeEventListener("loadedmetadata", onNativeMetadata);
+      video.removeEventListener("error", onNativeError);
       purgeAndDestroyPlayer();
     };
     // onStreamIndexChange/onAllServersFailed intentionally read
     // via callbacksRef — see comment above the ref declaration.
-  }, [channelId, activeIndex, activeStream, isYouTube, getDeviceMaxHeight, handleNextServer, purgeAndDestroyPlayer]);
+  }, [
+    channelId,
+    activeIndex,
+    activeStream,
+    isYouTube,
+    getDeviceMaxHeight,
+    channelName,
+    disarmTimers,
+    handleNextServer,
+    markLocked,
+    purgeAndDestroyPlayer,
+  ]);
 
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {
@@ -559,80 +741,55 @@ export default function DirectHlsPlayer({
           onClick={togglePlay}
           onPlay={() => setIsPlaying(true)}
           onPlaying={() => {
-            // Frames are actually rendering — the switch is truly done, and this
-            // link has met its delivery deadline.
-            frameDeliveredRef.current = true;
             setIsPlaying(true);
-            setIsLoadingStream(false);
+            markLocked();
           }}
+          onCanPlay={markLocked}
+          onTimeUpdate={markLocked}
+          onWaiting={handleWaiting}
           onPause={() => setIsPlaying(false)}
         />
       )}
 
-      {/* Locking overlay — the receiver hunting for the carrier. It stands down
-          the moment the signal is declared weak, so the two never stack. */}
-      {isLoadingStream && !isYouTube && !errorMsg && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm pointer-events-none">
-          <SatelliteReceiver tone="locking" />
-          <p className="mt-2 text-xs font-bold text-cyan-200 tracking-wide">
-            Locking onto satellite signal...
-          </p>
+      {/* One overlay, two faces: the receiver hunting for a carrier, then the
+          same receiver stopped with a weak signal. Keeping both in a single
+          mounted block is what makes the hand-off seamless — the dish element
+          survives the change instead of being torn down and remounted, which
+          restarted every keyframe and read as a pop. It also never coexists with
+          the other face, so no spinner or interim screen is drawn alongside it. */}
+      {!isYouTube && phase !== "live" && (
+        <div
+          className={`absolute inset-0 flex flex-col items-center justify-center p-6 text-center backdrop-blur-sm transition-colors duration-500 ${
+            phase === "weak" ? "z-30 bg-black/90" : "z-20 bg-black/70 pointer-events-none"
+          }`}
+        >
+          <SatelliteReceiver tone={phase === "weak" ? "weak" : "locking"} />
+          {phase === "weak" ? (
+            <>
+              <p className="mt-2 text-sm font-black text-white mb-1">
+                Satellite Signal Weak <span className="text-amber-400">— Unable to lock onto stream.</span>
+              </p>
+              {errorMsg && <p className="text-xs text-slate-400 mb-4">{errorMsg}</p>}
+              <button
+                onClick={handleRetryMirror}
+                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-colors shadow-lg"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Switch to Next Direct Mirror</span>
+              </button>
+            </>
+          ) : (
+            <p className="mt-2 text-xs font-bold text-cyan-200 tracking-wide">
+              Locking onto satellite signal...
+            </p>
+          )}
         </div>
       )}
-
-      {/* Weak-signal overlay — same dish, stopped, dimmed and flickering */}
-      {errorMsg && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 p-6 text-center">
-          <SatelliteReceiver tone="weak" />
-          <p className="mt-2 text-sm font-black text-white mb-1">
-            Satellite Signal Weak <span className="text-amber-400">— Unable to lock onto stream.</span>
-          </p>
-          <p className="text-xs text-slate-400 mb-4">{errorMsg}</p>
-          <button
-            onClick={() => handleNextServer()}
-            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer transition-colors shadow-lg"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Switch to Next Direct Mirror</span>
-          </button>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes solu-dish-sweep {
-          from { transform: rotate(-10deg); }
-          to { transform: rotate(4deg); }
-        }
-        @keyframes solu-wave-pulse {
-          0%, 100% { opacity: 0.12; }
-          35% { opacity: 1; }
-          70% { opacity: 0.35; }
-        }
-        @keyframes solu-horn-ping {
-          0% { transform: scale(0.5); opacity: 0.75; }
-          70%, 100% { transform: scale(2.6); opacity: 0; }
-        }
-        @keyframes solu-wave-flicker {
-          0%, 100% { opacity: 0.1; }
-          12% { opacity: 0.7; }
-          24% { opacity: 0.05; }
-          41% { opacity: 0.6; }
-          55% { opacity: 0.08; }
-          73% { opacity: 0.75; }
-          86% { opacity: 0.12; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .solu-sat-receiver,
-          .solu-sat-receiver * {
-            animation: none !important;
-          }
-        }
-      `}</style>
 
       {/* Top Channel Badge Overlay */}
       <div
         className={`absolute top-3 left-3 right-3 z-20 flex items-center justify-between pointer-events-none transition-opacity duration-300 ${
-          controlsVisible || isLoadingStream ? "opacity-100" : "opacity-0"
+          controlsVisible || phase === "tuning" ? "opacity-100" : "opacity-0"
         }`}
       >
         <div className="flex items-center gap-2 bg-[#080e1b]/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">

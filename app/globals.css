@@ -140,6 +140,77 @@
   }
 }
 
+/* Satellite receiver — the loading and no-signal graphic shared by the direct
+   HLS player and the watch page's tuning frame. The components reference these
+   through Tailwind's `animate-[solu-*_...]` utilities; they live here rather
+   than in a per-component <style> block because the graphic mounts in more than
+   one place. */
+@keyframes solu-dish-sweep {
+  from {
+    transform: rotate(-10deg);
+  }
+  to {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes solu-wave-pulse {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  35% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes solu-horn-ping {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.75;
+  }
+  70%,
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@keyframes solu-wave-flicker {
+  0%,
+  100% {
+    opacity: 0.1;
+  }
+  12% {
+    opacity: 0.7;
+  }
+  24% {
+    opacity: 0.05;
+  }
+  41% {
+    opacity: 0.6;
+  }
+  55% {
+    opacity: 0.08;
+  }
+  73% {
+    opacity: 0.75;
+  }
+  86% {
+    opacity: 0.12;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .solu-sat-receiver,
+  .solu-sat-receiver * {
+    animation: none !important;
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Old smart-TV compatibility (Tizen / webOS ≈ Chrome 38–63, Safari 9)
  * ------------------------------------------------------------------ */

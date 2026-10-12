@@ -3,7 +3,7 @@
 import "@/lib/tvPolyfills";
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import Header from "@/components/Header";
-import { DirectHlsPlayer } from "@/components/players";
+import { DirectHlsPlayer, SatelliteReceiver } from "@/components/players";
 import { FreeStreamMirror, buildFreeStreamLadder, buildLadderFromMirrors } from "@/lib/freeChannelService";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
 import NewsTicker from "@/components/NewsTicker";
@@ -479,8 +479,8 @@ export default function WatchPage() {
   );
 
   // A switch is pending while the picked sidebar channel's stream config is
-  // still loading: the frame shows a spinner and the previous player stays
-  // unmounted, so its buffers are already purged.
+  // still loading: the frame holds the satellite receiver and the previous
+  // player stays unmounted, so its buffers are already purged.
   const isFrameSwitching =
     selectedChannel !== null && channel?._id !== selectedChannel._id;
 
@@ -639,9 +639,11 @@ export default function WatchPage() {
         )}
 
         {initialLoading && (
-          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-12 shadow-2xl">
-            <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mx-auto mb-3" />
-            <p className="text-sm font-bold text-white">Connecting to Live HD Stream Feed...</p>
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-10 text-center max-w-md mx-auto my-12 shadow-2xl">
+            <SatelliteReceiver tone="locking" />
+            <p className="mt-3 text-xs font-bold text-cyan-200 tracking-wide">
+              Locking onto satellite signal...
+            </p>
           </div>
         )}
 
@@ -712,13 +714,15 @@ export default function WatchPage() {
                       </div>
                     </div>
                   ) : isFrameSwitching ? (
-                    <div className="relative w-full aspect-video bg-black flex items-center justify-center">
-                      <div className="flex flex-col items-center">
-                        <RefreshCw className="w-10 h-10 text-emerald-400 animate-spin mb-3" />
-                        <p className="text-xs font-bold text-white tracking-wide">
-                          Switching to {selectedChannel?.name}...
-                        </p>
-                      </div>
+                    // The same receiver the player itself shows: this window is
+                    // the channel-details fetch, and the picture that follows it
+                    // is tuned by the player's own tuning phase — one continuous
+                    // indicator across the handover, with no spinner in between.
+                    <div className="relative w-full aspect-video bg-black flex flex-col items-center justify-center">
+                      <SatelliteReceiver tone="locking" />
+                      <p className="mt-2 text-xs font-bold text-cyan-200 tracking-wide">
+                        Locking onto satellite signal...
+                      </p>
                     </div>
                   ) : isActiveStreamMpegTs ? (
                     <MpegTsPlayer

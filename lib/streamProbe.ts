@@ -461,6 +461,13 @@ interface BrowserTrustVerdict {
   httpStatus: number | null;
   browserCors: boolean | null;
   ms: number;
+  /**
+   * The first request alone — the playlist, or the feed itself when there is no
+   * playlist. Every other probe path reports `responseTime` this way, and
+   * `SLOW_LATENCY_MS` is a threshold on one request, so the recovery walk reports
+   * the same quantity rather than the sum of its playlist, variant and segment legs.
+   */
+  playlistMs: number;
   detail: string;
 }
 
@@ -473,6 +480,8 @@ interface BrowserTrustVerdict {
  */
 async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise<BrowserTrustVerdict> {
   const started = Date.now();
+  /** Elapsed time of the first request; 1 rather than 0 — a falsy latency reads as "never timed". */
+  let playlistMs = 0;
   const left = () => Math.max(1, budgetMs - (Date.now() - started));
   const originKnown = Boolean(siteOrigin());
   let acaoSeen: boolean | null = originKnown ? true : null;
@@ -488,13 +497,16 @@ async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise
     httpStatus,
     browserCors: acaoSeen,
     ms: Date.now() - started,
+    playlistMs,
     detail,
   });
 
   // A raw MPEG-TS feed has no playlist to parse; for it the player's whole
   // question is whether bytes flow.
   if (isMpegTsUrl(url)) {
+    const firstRequestAt = Date.now();
     const ts = await browserTrustGet(url, 8192, left());
+    playlistMs = Math.max(1, Date.now() - firstRequestAt);
     noteCors(ts.acao);
     if (ts.status === null) return fail(ts.error || "origin did not answer", null);
     if ((ts.status === 200 || ts.status === 206) && ts.bytes > 0 && !looksLikeHtmlErrorPage(ts.text, ts.contentType)) {
@@ -506,13 +518,16 @@ async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise
         httpStatus: ts.status,
         browserCors: acaoSeen,
         ms: Date.now() - started,
+        playlistMs,
         detail: `${ts.bytes} bytes of MPEG-TS transferred`,
       };
     }
     return fail(`MPEG-TS feed gave no bytes (HTTP ${ts.status})`, ts.status);
   }
 
+  const playlistRequestAt = Date.now();
   const playlist = await browserTrustGet(url, 256 * 1024, left());
+  playlistMs = Math.max(1, Date.now() - playlistRequestAt);
   noteCors(playlist.acao);
   if (playlist.status === null) return fail(playlist.error || "origin did not answer", null);
   if (playlist.status !== 200 && playlist.status !== 206) return fail(`HTTP ${playlist.status}`, playlist.status);
@@ -552,6 +567,7 @@ async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise
       httpStatus: playlist.status,
       browserCors: acaoSeen,
       ms: Date.now() - started,
+      playlistMs,
       detail: "playlist served, no segments listed right now",
     };
   }
@@ -575,6 +591,7 @@ async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise
     httpStatus: playlist.status,
     browserCors: acaoSeen,
     ms: Date.now() - started,
+    playlistMs,
     detail: `playlist + 1 of ${media.segments.length} segments transferred`,
   };
 }
@@ -1791,14 +1808,18 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
           status: "DEGRADED",
           errorCode: "TLS_CHAIN_UNVERIFIED",
           httpStatus: verdict.httpStatus,
-          responseTime: verdict.ms,
+          // The playlist leg, not the whole walk: this number is compared against
+          // `SLOW_LATENCY_MS` and the ranking bands, which both describe one
+          // request everywhere else the checker reports a time.
+          responseTime: verdict.playlistMs,
           finalUrl: url,
           playlistType: verdict.playlistType,
           isLive: verdict.isLive,
           segmentCount: verdict.segmentCount,
           browserCors: verdict.browserCors,
           error:
-            `Media delivered (${verdict.detail}) once the chain was trusted the way a browser trusts it. ` +
+            `Media delivered (${verdict.detail}) once the chain was trusted the way a browser trusts it ` +
+            `(playlist ${verdict.playlistMs}ms, whole recovery walk ${verdict.ms}ms). ` +
             "Viewers whose own trust store cannot fill the gap may still fail to play it.",
         }),
         url,

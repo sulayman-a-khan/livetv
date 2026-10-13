@@ -737,10 +737,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         setManualLog({ type: "err", text: data.error || "Could not create the channel." });
         return;
       }
+      // The stored verdict, not `probe.ok`, decides what happened: `ok` means only
+      // "fully healthy", while a link that proved media still registers as active.
+      const storedActive = data.stream?.status === "active";
       setManualLog({
-        type: data.probe?.ok ? "ok" : "err",
-        text: data.probe?.ok
-          ? `Added "${data.channel.name}" (${manualForm.category}) with a verified link at ${data.probe.latency}ms. It is unpinned, so viewers cannot see it yet.`
+        type: storedActive ? "ok" : "err",
+        text: storedActive
+          ? data.probe?.ok
+            ? `Added "${data.channel.name}" (${manualForm.category}) with a verified link at ${data.probe.latency}ms. It is unpinned, so viewers cannot see it yet.`
+            : `Added "${data.channel.name}" (${manualForm.category}) with a link that delivers media but the checker could not grade fully healthy: ${data.probe?.reason || "verified with reservations"}. It is unpinned, so viewers cannot see it yet.`
           : `Added "${data.channel.name}" but the probe failed: ${data.probe?.reason || "unreachable"}. The link is stored as broken and the channel stays unpinned until you verify it.`,
       });
       setManualForm((f) => ({ ...f, name: "", logo: "", streamUrl: "" }));

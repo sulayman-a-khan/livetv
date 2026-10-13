@@ -133,10 +133,15 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
       const data = await res.json();
       if (data.success) {
         setNewUrl("");
+        // What was stored decides the message: `probe.ok` means only "fully
+        // healthy", and a link that proved media registers as active without it.
+        const storedActive = data.stream?.status === "active";
         setMessage({
-          type: data.probe?.ok ? "ok" : "err",
-          text: data.probe?.ok
-            ? `Link added and verified (${data.probe.latency}ms). Servers re-sorted fastest-first.`
+          type: storedActive ? "ok" : "err",
+          text: storedActive
+            ? data.probe?.ok
+              ? `Link added and verified (${data.probe.latency}ms). Servers re-sorted fastest-first.`
+              : `Link added and delivering media (${data.probe?.latency}ms), but the checker could not grade it fully healthy: ${data.probe?.reason || "verified with reservations"}. Servers re-sorted fastest-first.`
             : `Link added but the probe failed: ${data.probe?.reason || "unreachable"}. It is stored as broken.`,
         });
         await onSaved();
@@ -169,11 +174,17 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
         return;
       }
       const label = linkHealthLabel(data.stream?.health || "unverified");
+      // `healthy` and `slow` are the only verdicts that mean the pass is stored as
+      // working and left in the viewer ladder. A failed probe always lands on
+      // `temporarily-failed` or worse, so this can never read a failure as success.
+      const inService = data.stream?.health === "healthy" || data.stream?.health === "slow";
       if (action === "test") {
         setMessage({
-          type: data.probe?.ok ? "ok" : "err",
+          type: data.probe?.ok || inService ? "ok" : "err",
           text: data.probe?.ok
             ? `Probe passed (${data.probe.latency}ms). Link is now ${label.toLowerCase()}.`
+            : inService
+            ? `Media arrives, but the checker could not grade the link fully healthy: ${data.probe?.reason || "verified with reservations"}. Link is now ${label.toLowerCase()} and stays in the viewer ladder.`
             : data.stream?.health === "unplayable"
             ? `The origin serves it, but a viewer's browser cannot: ${data.probe?.reason || "blocked"}. Link is hidden from the UI now — no daily-failure streak needed.`
             : data.stream?.health === "delivery-failed"
@@ -184,9 +195,11 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
         setMessage({ type: "ok", text: "Link taken out of service. Viewers cannot reach it and the health checker leaves it alone." });
       } else {
         setMessage({
-          type: data.probe?.ok ? "ok" : "err",
+          type: data.probe?.ok || inService ? "ok" : "err",
           text: data.probe?.ok
             ? `Restored and verified (${data.probe.latency}ms).`
+            : inService
+            ? `Restored and delivering media (${data.probe?.latency}ms), though the checker could not grade it fully healthy: ${data.probe?.reason || "verified with reservations"}.`
             : `Restored, but the verification probe failed: ${data.probe?.reason || "unreachable"}. It stays out of the viewer ladder until it plays.`,
         });
       }

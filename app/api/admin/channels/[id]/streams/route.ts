@@ -7,6 +7,7 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { canonicalStreamUrl } from "@/lib/channelIdentity";
 import { probeStreamUrl } from "@/lib/streamProbe";
+import { probeEstablishesPlayability } from "@/lib/streamHealth";
 import { refreshChannelLinks } from "@/lib/maintenanceRunner";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,8 @@ export async function POST(
     }
 
     const probe = await probeStreamUrl(url, 8000);
-    const status: "active" | "broken" = probe.ok ? "active" : "broken";
+    const working = probeEstablishesPlayability(probe);
+    const status: "active" | "broken" = working ? "active" : "broken";
     const now = new Date();
     const conn = await connectToDatabase();
 
@@ -69,8 +71,8 @@ export async function POST(
         priority: existing.length + 1,
         status,
         latency: probe.latency,
-        failedAttempts: probe.ok ? 0 : 1,
-        firstFailedAt: probe.ok ? null : now,
+        failedAttempts: working ? 0 : 1,
+        firstFailedAt: working ? null : now,
         lastCheckedAt: now,
         // The admin's own link: automation may re-rank and re-probe it, but it
         // never retires or deletes it because a playlist stopped listing it.
@@ -107,8 +109,8 @@ export async function POST(
       url,
       priority: existing.length + 1,
       status,
-      failedAttempts: probe.ok ? 0 : 1,
-      firstFailedAt: probe.ok ? null : now,
+      failedAttempts: working ? 0 : 1,
+      firstFailedAt: working ? null : now,
       lastCheckedAt: now,
       latency: probe.latency,
       manual: true,

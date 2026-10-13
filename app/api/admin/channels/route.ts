@@ -6,6 +6,7 @@ import { inMemoryDb, type InMemoryChannel } from "@/lib/inMemoryStore";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { canonicalChannelKey } from "@/lib/channelIdentity";
 import { probeStreamUrl } from "@/lib/streamProbe";
+import { probeEstablishesPlayability } from "@/lib/streamHealth";
 import { normalizeCategory } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
     }
 
     const probe = await probeStreamUrl(url, 8000);
-    const status: "active" | "broken" = probe.ok ? "active" : "broken";
+    const working = probeEstablishesPlayability(probe);
+    const status: "active" | "broken" = working ? "active" : "broken";
     const now = new Date();
 
     if (conn) {
@@ -105,8 +107,8 @@ export async function POST(req: NextRequest) {
         priority: 1,
         status,
         latency: probe.latency,
-        failedAttempts: probe.ok ? 0 : 1,
-        firstFailedAt: probe.ok ? null : now,
+        failedAttempts: working ? 0 : 1,
+        firstFailedAt: working ? null : now,
         lastCheckedAt: now,
         // Hand-added: a playlist sync or the dead-link purge may never retire it.
         manual: true,
@@ -145,8 +147,8 @@ export async function POST(req: NextRequest) {
       priority: 1,
       status,
       latency: probe.latency,
-      failedAttempts: probe.ok ? 0 : 1,
-      firstFailedAt: probe.ok ? null : now,
+      failedAttempts: working ? 0 : 1,
+      firstFailedAt: working ? null : now,
       lastCheckedAt: now,
       manual: true,
       browserBlocker: probe.browserBlocker,

@@ -5,6 +5,7 @@ import StreamLink from "@/models/StreamLink";
 import { parseM3uContent } from "@/lib/m3uParser";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { probeStreamUrl } from "@/lib/streamProbe";
+import { probeEstablishesPlayability } from "@/lib/streamHealth";
 import { canonicalChannelKey } from "@/lib/channelIdentity";
 import { runMaintenance } from "@/lib/maintenanceRunner";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
@@ -139,7 +140,8 @@ export async function POST(req: NextRequest) {
 
             if (!existingLink) {
               const probe = await probeStreamUrl(item.streamUrl, 8000);
-              const status = probe.ok ? "active" : "broken";
+              const working = probeEstablishesPlayability(probe);
+              const status = working ? "active" : "broken";
               const existingCount = await StreamLink.countDocuments({ channelId: channel._id });
 
               await StreamLink.create({
@@ -148,12 +150,12 @@ export async function POST(req: NextRequest) {
                 priority: existingCount + 1,
                 status,
                 latency: probe.latency,
-                failedAttempts: probe.ok ? 0 : 1,
-                firstFailedAt: probe.ok ? null : new Date(),
+                failedAttempts: working ? 0 : 1,
+                firstFailedAt: working ? null : new Date(),
                 browserBlocker: probe.browserBlocker,
               });
 
-              if (probe.ok) activeLinksAdded++;
+              if (working) activeLinksAdded++;
               else brokenLinksAdded++;
               emitProbe(item.name, status);
             } else {
@@ -198,7 +200,8 @@ export async function POST(req: NextRequest) {
 
             if (!existingLink) {
               const probe = await probeStreamUrl(item.streamUrl, 8000);
-              const status = probe.ok ? "active" : "broken";
+              const working = probeEstablishesPlayability(probe);
+              const status = working ? "active" : "broken";
               const chStreams = memoryStreams.filter((s) => s.channelId === channel!._id);
 
               inMemoryDb.addStream({
@@ -207,8 +210,8 @@ export async function POST(req: NextRequest) {
                 url: item.streamUrl,
                 priority: chStreams.length + 1,
                 status,
-                failedAttempts: probe.ok ? 0 : 1,
-                firstFailedAt: probe.ok ? null : new Date(),
+                failedAttempts: working ? 0 : 1,
+                firstFailedAt: working ? null : new Date(),
                 lastCheckedAt: new Date(),
                 latency: probe.latency || 120,
                 browserBlocker: probe.browserBlocker,
@@ -216,7 +219,7 @@ export async function POST(req: NextRequest) {
                 updatedAt: new Date(),
               });
 
-              if (probe.ok) activeLinksAdded++;
+              if (working) activeLinksAdded++;
               else brokenLinksAdded++;
               emitProbe(item.name, status);
             } else {

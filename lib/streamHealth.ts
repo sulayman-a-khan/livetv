@@ -115,6 +115,30 @@ export function toLastCheckDetail(result: HlsCheckResult) {
 export const MAX_CONSECUTIVE_FAILURES = 3;
 
 /**
+ * Whether a probe proves a viewer can watch this link *the moment it is registered*
+ * — the one verdict the add-time writers (`/api/admin/channels`,
+ * `/api/admin/channels/[id]/streams`, `/api/admin/ingest-m3u`) make for themselves
+ * instead of going through `decideStreamHealth`.
+ *
+ * Deliberately narrower than the pass rules. A scheduled pass already accepts any
+ * `DEGRADED` as working, because the link is being judged on evidence that it once
+ * delivered and a re-test is already scheduled. Registering a brand-new URL from a
+ * `DEGRADED` that never produced media — a manifest that lists no segment yet, or a
+ * rate-limit answer — would hand an unproven link to viewers on the strength of a
+ * reachability check, so it keeps the existing `broken` path. A `DEGRADED` that
+ * counted a segment off the playlist, or carried bytes off a raw `.ts` feed (which
+ * lists no playlist by design), has the media evidence and is registered as working.
+ */
+export function probeEstablishesPlayability(
+  result: Pick<HlsCheckResult, "ok" | "status" | "errorCode" | "segmentCount" | "playlistType">
+): boolean {
+  if (result.ok) return true;
+  if (result.status !== "DEGRADED") return false;
+  if (result.errorCode === "NO_SEGMENTS_LISTED" || result.errorCode === "RATE_LIMITED") return false;
+  return (result.segmentCount ?? 0) > 0 || result.playlistType === null;
+}
+
+/**
  * How long a link must stay down, without ever recovering, before the maintenance
  * sweep deletes it. Measured from `firstFailedAt` — the instant the current
  * outage began — so the window is wall-clock, not a count of checks: three daily

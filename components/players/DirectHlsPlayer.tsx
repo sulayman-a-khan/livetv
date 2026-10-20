@@ -14,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { FreeStreamMirror, isYouTubeStream } from "@/lib/freeChannelService";
+import { extractYouTubeVideoId } from "@/lib/youtube";
 
 interface DirectHlsPlayerProps {
   channelName: string;
@@ -306,6 +307,16 @@ export default function DirectHlsPlayer({
   const isYouTube = useMemo(() => {
     return activeStream ? isYouTubeStream(activeStream.url) : false;
   }, [activeStream]);
+
+  // Concrete video id for the iframe, or null when the URL names a channel
+  // rather than a video (e.g. youtube.com/@handle/live). The canonical parser
+  // is the single source of truth here — the inline regex this replaced read a
+  // channel-live URL as an empty capture and produced embed/null (a black
+  // screen with no explanation). The null case is handled in the embed branch.
+  const youTubeVideoId = useMemo(
+    () => (activeStream ? extractYouTubeVideoId(activeStream.url) : null),
+    [activeStream]
+  );
 
   /**
    * The attempt now on trial. A channel or mirror change is detected during
@@ -796,12 +807,6 @@ export default function DirectHlsPlayer({
     setShowQualityMenu(false);
   };
 
-  const extractYouTubeId = (url: string) => {
-    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|live\/)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return match && match[2].length === 11 ? match[2] : null;
-  };
-
   return (
     <div
       ref={containerRef}
@@ -811,15 +816,30 @@ export default function DirectHlsPlayer({
     >
       {/* YouTube Live Embed Mode */}
       {isYouTube && activeStream ? (
-        <div className="w-full h-full relative">
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${extractYouTubeId(activeStream.url)}?autoplay=1&mute=0&controls=1&modestbranding=1&rel=0`}
-            title={channelName}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-            className="w-full h-full border-0"
-          />
-        </div>
+        youTubeVideoId ? (
+          <div className="w-full h-full relative">
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${youTubeVideoId}?autoplay=1&mute=0&controls=1&modestbranding=1&rel=0`}
+              title={channelName}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+              className="w-full h-full border-0"
+            />
+          </div>
+        ) : (
+          // A channel-style YouTube URL (@handle/live) names no fixed video, so
+          // there is nothing to embed. Say so instead of pointing an iframe at
+          // embed/null, which renders a silent black player.
+          <div className="w-full h-full flex flex-col items-center justify-center px-6 text-center bg-black">
+            <p className="text-sm font-black text-white tracking-tight">
+              This YouTube stream can&apos;t be embedded directly
+            </p>
+            <p className="text-xs font-medium text-slate-400 mt-1.5 max-w-sm">
+              It points at a channel&apos;s live feed rather than a specific video.
+              Open it on YouTube to watch.
+            </p>
+          </div>
+        )
       ) : (
         /* Bare-metal Direct HLS Video Element */
         <video

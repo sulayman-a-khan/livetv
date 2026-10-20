@@ -43,15 +43,21 @@ FreeTV is a Production-Grade Automated Live Streaming Web Platform built with Ne
 - Local MongoDB running at `mongodb://127.0.0.1:27017/freetv` (or a MongoDB Atlas connection URI)
 
 ### Step 1: Clone & Configure Environment
+Copy the committed template and fill in your own values (`.env.local` is gitignored, never committed):
 ```bash
-# Environment variables in .env.local  (never commit this file)
-MONGODB_URI=mongodb://127.0.0.1:27017/freetv
+cp .env.example .env.local
+```
+`.env.example` holds placeholders only — no secret value is stored in this repository.
+The variables it documents:
+```bash
+MONGODB_URI=mongodb://127.0.0.1:27017/freetv   # or a MongoDB Atlas URI
 # Generate your own: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ADMIN_SECRET_KEY=
+CRON_SECRET=
+YOUTUBE_API_KEY=
 NEXT_PUBLIC_ENABLE_ADS=false
 ```
-No secret value is stored in this repository. With `ADMIN_SECRET_KEY` empty, every
-`/api/admin/*` route answers 401 and the admin gate stays locked.
+With `ADMIN_SECRET_KEY` empty, every `/api/admin/*` route answers 401 and the admin gate stays locked.
 
 ### Step 2: Install Dependencies
 ```bash

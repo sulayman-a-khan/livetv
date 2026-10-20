@@ -91,21 +91,7 @@ export async function GET(
           // the player a URL that is already known to stall. The same holds for a
           // link already marked "Not delivering": another usable mirror on this
           // channel still carries it, but that link alone no longer does.
-          let usableStreams = rankStreams(streams.filter(isUsableViewerLink));
-
-          const directUrl = (channel as any).streamUrl || (channel as any).url;
-          if (usableStreams.length === 0 && directUrl) {
-            usableStreams = [
-              {
-                _id: `direct_${channel._id}`,
-                channelId: channel._id,
-                url: directUrl,
-                priority: 1,
-                status: "active",
-                latency: 100,
-              } as any,
-            ];
-          }
+          const usableStreams = rankStreams(streams.filter(isUsableViewerLink));
 
           return NextResponse.json(
             {
@@ -134,26 +120,7 @@ export async function GET(
     }
 
     const candidates = streams.filter((s) => s.channelId === id && !s.adminDisabled);
-    let chStreams = rankStreams(candidates.filter(isUsableViewerLink));
-
-    const directUrl = (channel as any).streamUrl || (channel as any).url;
-    if (chStreams.length === 0 && directUrl) {
-      chStreams = [
-        {
-          _id: `direct_${channel._id}`,
-          channelId: channel._id,
-          url: directUrl,
-          priority: 1,
-          status: "active",
-          latency: 100,
-          failedAttempts: 0,
-          firstFailedAt: null,
-          lastCheckedAt: new Date(),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
-    }
+    const chStreams = rankStreams(candidates.filter(isUsableViewerLink));
 
     return NextResponse.json(
       {

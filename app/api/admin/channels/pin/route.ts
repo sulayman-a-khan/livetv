@@ -32,15 +32,29 @@ export async function POST(req: NextRequest) {
     const conn = await connectToDatabase();
 
     if (conn && mongoose.isValidObjectId(channelId)) {
-      // MongoDB Mode
-      await Channel.findByIdAndUpdate(channelId, {
+      // MongoDB Mode — report a miss instead of claiming a pin that never happened.
+      const updated = await Channel.findByIdAndUpdate(channelId, {
         isPinned,
         priorityOrder: order,
       });
+      if (!updated) {
+        return NextResponse.json(
+          { success: false, error: "Channel not found" },
+          { status: 404 }
+        );
+      }
+      // Always update in-memory store too
+      inMemoryDb.updateChannelPin(channelId, isPinned, order);
+    } else {
+      // In-memory mode (or a custom string id Mongo could never hold).
+      const updated = inMemoryDb.updateChannelPin(channelId, isPinned, order);
+      if (!updated) {
+        return NextResponse.json(
+          { success: false, error: "Channel not found" },
+          { status: 404 }
+        );
+      }
     }
-
-    // Always update in-memory store too
-    inMemoryDb.updateChannelPin(channelId, isPinned, order);
 
     return NextResponse.json({
       success: true,

@@ -32,6 +32,7 @@ import PlaylistEntry from "@/models/PlaylistEntry";
 import { parseM3uContent } from "./m3uParser";
 import { canonicalChannelKey, canonicalStreamUrl } from "./channelIdentity";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "./streamProbe";
+import { checkPublicUrlSafety } from "./ssrfGuard";
 import { refreshChannelLinks } from "./maintenanceRunner";
 import {
   groupPlaylistEntries,
@@ -91,6 +92,15 @@ const PLAYLIST_USER_AGENT =
 
 /** Downloads a playlist and rejects anything that is not a channel playlist. */
 async function fetchPlaylistContent(url: string): Promise<string> {
+  // A stored source URL is fetched automatically by the scheduler, so refuse one
+  // that names this machine, a private network or the metadata endpoint before
+  // the request is made (lib/ssrfGuard.ts). Recorded as a source failure, exactly
+  // like an unreachable host, so it never crashes the sync.
+  const safety = checkPublicUrlSafety(url);
+  if (!safety.ok) {
+    throw new PlaylistFetchError(safety.reason || "Playlist URL is not safe for the server to fetch");
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let body = "";

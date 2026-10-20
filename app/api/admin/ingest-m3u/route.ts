@@ -9,6 +9,7 @@ import { probeEstablishesPlayability } from "@/lib/streamHealth";
 import { canonicalChannelKey } from "@/lib/channelIdentity";
 import { runMaintenance } from "@/lib/maintenanceRunner";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { checkPublicUrlSafety } from "@/lib/ssrfGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,17 @@ export async function POST(req: NextRequest) {
         let m3uText = m3uTextInput;
 
         if (m3uUrl) {
+          // Refuse a playlist URL that names this machine, a private network or
+          // the metadata endpoint before the server fetches it (lib/ssrfGuard.ts).
+          const urlSafety = checkPublicUrlSafety(m3uUrl);
+          if (!urlSafety.ok) {
+            // No explicit controller.close() here: this path runs synchronously
+            // at the top of start(), before the HTTP layer attaches a reader, and
+            // the finally block below already closes the stream exactly once. A
+            // second close() would error the stream and discard this very frame.
+            send({ phase: "error", error: urlSafety.reason || "Playlist URL is not safe to fetch" });
+            return;
+          }
           send({ phase: "fetch", message: `Downloading playlist from ${m3uUrl}...` });
           const started = Date.now();
           const response = await fetch(m3uUrl, {

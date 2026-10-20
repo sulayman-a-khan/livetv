@@ -16,6 +16,7 @@
     "tests/**/*.ts",
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
-    "lib/streamHealth.ts"
+    "lib/streamHealth.ts",
+    "lib/ssrfGuard.ts"
   ]
 }

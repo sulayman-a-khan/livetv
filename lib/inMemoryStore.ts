@@ -308,7 +308,15 @@ function saveToDisk() {
       channels: global.__freetv_in_memory_channels || [],
       streams: global.__freetv_in_memory_streams || [],
     };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
+    // Atomic write. A crash mid-serialize must never leave store.json truncated:
+    // a truncated file fails JSON.parse on the next boot, ensureLoaded catches it
+    // and silently falls back to the seed catalogue — losing every ingested
+    // channel. Write to a temp file on the same volume, then rename over the
+    // target (rename replaces atomically on both POSIX and Windows). The pid in
+    // the temp name keeps concurrent processes from colliding.
+    const tmpFile = `${DATA_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf-8");
+    fs.renameSync(tmpFile, DATA_FILE);
   } catch (err) {
     console.error("[inMemoryStore] Failed to write store.json to disk:", err);
   }
@@ -342,12 +350,15 @@ export const inMemoryDb = {
     global.__freetv_in_memory_streams?.push(st);
     saveToDisk();
   },
-  deleteChannel: (id: string) => {
+  deleteChannel: (id: string): boolean => {
     ensureLoaded();
+    let removed = false;
     if (global.__freetv_in_memory_channels) {
+      const before = global.__freetv_in_memory_channels.length;
       global.__freetv_in_memory_channels = global.__freetv_in_memory_channels.filter(
         (c) => c._id !== id
       );
+      removed = global.__freetv_in_memory_channels.length < before;
     }
     if (global.__freetv_in_memory_streams) {
       global.__freetv_in_memory_streams = global.__freetv_in_memory_streams.filter(
@@ -355,15 +366,20 @@ export const inMemoryDb = {
       );
     }
     saveToDisk();
+    return removed;
   },
-  deleteStream: (id: string) => {
+  deleteStream: (id: string): boolean => {
     ensureLoaded();
+    let removed = false;
     if (global.__freetv_in_memory_streams) {
+      const before = global.__freetv_in_memory_streams.length;
       global.__freetv_in_memory_streams = global.__freetv_in_memory_streams.filter(
         (s) => s._id !== id
       );
+      removed = global.__freetv_in_memory_streams.length < before;
     }
     saveToDisk();
+    return removed;
   },
   updateChannelLogo: (id: string, logo: string) => {
     ensureLoaded();
@@ -376,17 +392,20 @@ export const inMemoryDb = {
     }
     saveToDisk();
   },
-  updateChannelPin: (id: string, isPinned: boolean, priorityOrder: number) => {
+  updateChannelPin: (id: string, isPinned: boolean, priorityOrder: number): boolean => {
     ensureLoaded();
+    let found = false;
     if (global.__freetv_in_memory_channels) {
       const ch = global.__freetv_in_memory_channels.find((c) => c._id === id);
       if (ch) {
+        found = true;
         ch.isPinned = isPinned;
         ch.priorityOrder = priorityOrder;
         ch.updatedAt = new Date();
       }
     }
     saveToDisk();
+    return found;
   },
   updatePinnedOrder: (orderedIds: string[]) => {
     ensureLoaded();

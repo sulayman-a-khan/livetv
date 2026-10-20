@@ -19,12 +19,11 @@
     "lint": "next lint",
     "test:ranking": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js",
     "test:link-registration": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js .tmp-tests/tests/link-registration.test.js",
+    "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",
-    "worker": "node scripts/health-checker.js",
     "seed": "node scripts/seed.js"
   },
   "dependencies": {
-    "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "hls.js": "^1.5.15",
     "lucide-react": "^0.439.0",
@@ -32,8 +31,7 @@
     "mpegts.js": "^1.8.2",
     "next": "^14.2.10",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.5.2"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.16.5",

@@ -29,24 +29,33 @@ export async function POST(req: NextRequest) {
 
     const conn = await connectToDatabase();
 
+    // Counts what was actually deleted, not what was submitted.
+    let deletedCount = 0;
+
     if (conn) {
       // MongoDB Mode: Bulk delete channels with valid ObjectIds
       const validMongoIds = ids.filter((id: string) => mongoose.isValidObjectId(id));
       if (validMongoIds.length > 0) {
-        await Channel.deleteMany({ _id: { $in: validMongoIds } });
+        const res = await Channel.deleteMany({ _id: { $in: validMongoIds } });
         await StreamLink.deleteMany({ channelId: { $in: validMongoIds } });
+        deletedCount += res.deletedCount ?? 0;
       }
-    }
-
-    // Always clean inMemoryDb for all provided IDs
-    for (const id of ids) {
-      inMemoryDb.deleteChannel(id);
+      // Custom string ids can only live in the local store; valid ObjectIds were
+      // already counted above, so their store copies are cleaned without double-counting.
+      for (const id of ids) {
+        const removed = inMemoryDb.deleteChannel(id);
+        if (removed && !mongoose.isValidObjectId(id)) deletedCount += 1;
+      }
+    } else {
+      for (const id of ids) {
+        if (inMemoryDb.deleteChannel(id)) deletedCount += 1;
+      }
     }
 
     return NextResponse.json({
       success: true,
-      count: ids.length,
-      message: `Successfully deleted ${ids.length} marked channels and their stream links.`,
+      count: deletedCount,
+      message: `Successfully deleted ${deletedCount} of ${ids.length} marked channels and their stream links.`,
     });
   } catch (error: any) {
     console.error("POST /api/admin/channels/bulk-delete error:", error);

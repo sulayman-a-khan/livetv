@@ -216,9 +216,13 @@ export function startPlaylistMonitor() {
     ).padStart(2, "0")}:00 UTC (a failed fetch retries after ${FAILED_RETRY_MS / 3_600_000}h).`
   );
 
-  setTimeout(() => {
+  const firstTick = setTimeout(() => {
     runPlaylistMonitorTick();
   }, FIRST_TICK_MS);
+  // Match the interval below: don't let the boot timer hold a long-running
+  // process's event loop open. Guarded because a browser/edge setTimeout is a
+  // number with no unref.
+  if (firstTick.unref) firstTick.unref();
 
   global.__freetv_playlist_check_interval = setInterval(() => {
     runPlaylistMonitorTick();

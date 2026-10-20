@@ -81,11 +81,10 @@ const StreamLinkSchema = new Schema<IStreamLink>(
   { timestamps: true }
 );
 
-// Ensure index on channelId and status for fast queries
-StreamLinkSchema.index({ channelId: 1, status: 1 });
 // Mirrors are fetched as "this channel's usable links, ranked" — the stored
 // `priority` leads and a tie is broken by `_id`, so `latency` stays in this index
-// only as the tail it already is; no sort asks for it.
+// only as the tail it already is; no sort asks for it. Its {channelId} and
+// {channelId,status} prefixes cover the unranked lookups too.
 StreamLinkSchema.index({ channelId: 1, status: 1, priority: 1, latency: 1 });
 // The health checker picks the least-recently-probed links; without this index
 // that query is a collection scan plus an in-memory sort.

@@ -269,16 +269,30 @@ export async function DELETE(
 
     // Remember the owner so the remaining links can be renumbered afterwards.
     let channelId: string | null = null;
+    let deleted = false;
 
     if (conn && mongoose.isValidObjectId(id)) {
       const doc = await StreamLink.findById(id).lean();
-      if (doc) channelId = String(doc.channelId);
-      await StreamLink.findByIdAndDelete(id);
+      if (doc) {
+        channelId = String(doc.channelId);
+        await StreamLink.findByIdAndDelete(id);
+        deleted = true;
+      }
     }
 
-    if (!channelId) {
+    if (!deleted) {
       const mem = inMemoryDb.getStreams().find((s) => s._id === id);
-      if (mem) channelId = mem.channelId;
+      if (mem) {
+        channelId = mem.channelId;
+        deleted = true;
+      }
+    }
+
+    if (!deleted) {
+      return NextResponse.json(
+        { success: false, error: "Stream link not found" },
+        { status: 404 }
+      );
     }
 
     // Always clean inMemoryDb as well

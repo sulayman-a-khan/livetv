@@ -25,7 +25,7 @@ const CATALOGUE_CACHE = "public, s-maxage=30, stale-while-revalidate=300";
 
 /** Only the fields the grid, the rails and the watch sidebar actually render. */
 const CHANNEL_FIELDS =
-  "_id name logo category tags isPinned priorityOrder streamUrl url";
+  "_id name logo category tags isPinned priorityOrder";
 
 /**
  * Mirror rows as they may leave the server. `headers` (upstream Referer/Origin
@@ -168,15 +168,13 @@ export async function GET(req: NextRequest) {
           // `primaryStream` published here is the Server 1 of this channel's ladder
           // — and the mirror the watch page and the TV app dial first.
           const streams = rankStreams(pickUsableStreams(streamMap.get(cId) || []));
-          const directUrl = (c as any).streamUrl || (c as any).url;
           const primaryStream = streams.length > 0 ? toPublicStream(streams[0], 1) : null;
 
           return {
             ...c,
             _id: cId,
             logo: getChannelLogo(c.name, c.logo),
-            ...(directUrl ? { streamUrl: directUrl } : {}),
-            activeStreamCount: streams.length || (directUrl ? 1 : 0),
+            activeStreamCount: streams.length,
             primaryStream,
           };
         })
@@ -207,18 +205,13 @@ export async function GET(req: NextRequest) {
           // Same ranking rule as the MongoDB branch: without it the first stored
           // row, not the best server, would become this channel's `primaryStream`.
           const chActiveStreams = rankStreams(pickUsableStreams(candidates));
-          const directUrl = (c as any).streamUrl || (c as any).url;
           const primaryStream =
-            chActiveStreams.length > 0
-              ? toPublicStream(chActiveStreams[0], 1)
-              : directUrl
-              ? { _id: `direct_${c._id}`, url: directUrl, priority: 1, status: "active", latency: 0, failedAttempts: 0 }
-              : null;
+            chActiveStreams.length > 0 ? toPublicStream(chActiveStreams[0], 1) : null;
 
           return {
             ...c,
             logo: getChannelLogo(c.name, c.logo),
-            activeStreamCount: chActiveStreams.length || (directUrl ? 1 : 0),
+            activeStreamCount: chActiveStreams.length,
             primaryStream,
           };
         })

@@ -1,10 +1,3 @@
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
 /**
  * Normalizes channel names for deduplication & multi-source consolidation.
  * Strips resolutions (1080p, 720p, 480p, 360p, 576p, 4k), broadcast tags (HD, FHD, UHD, SD),

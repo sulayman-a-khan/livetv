@@ -25,10 +25,20 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const automated = await getAutomatedHealthStatus();
+  try {
+    const automated = await getAutomatedHealthStatus();
 
-  return NextResponse.json(
-    { success: true, automatedHealthCheck: automated },
-    { headers: { "Cache-Control": "no-store" } }
-  );
+    return NextResponse.json(
+      { success: true, automatedHealthCheck: automated },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (err) {
+    // A DB hiccup must still answer JSON: the dashboard parses this response,
+    // and an unhandled throw would surface as a non-JSON 500 it chokes on.
+    console.error("[health-status] failed to read automated health status", err);
+    return NextResponse.json(
+      { success: false, error: "Failed to read health status" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
+    );
+  }
 }

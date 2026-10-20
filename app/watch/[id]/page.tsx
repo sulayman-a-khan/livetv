@@ -68,6 +68,12 @@ export default function WatchPage() {
   // Sidebar auto-scroll refs (keeps the playing channel visible in the list)
   const listRef = useRef<HTMLDivElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
+  // The navigation state the sidebar was last centered for. The silent 60s
+  // health poll replaces the channel array (new identity) without any real
+  // navigation; without this the auto-scroll effect would re-center on every
+  // refresh and yank the list back to the playing channel while the viewer
+  // scrolls. See the effect below.
+  const lastScrollKeyRef = useRef<string | null>(null);
 
   // Guards against out-of-order responses: only the response matching the
   // most recently requested channel is allowed to update state. Without this,
@@ -467,10 +473,21 @@ export default function WatchPage() {
   useEffect(() => {
     if (sidebarLoading) return;
 
+    // Only re-center when the navigation state actually changed. A silent
+    // health refresh gives filteredSidebarChannels a new identity every 60s
+    // while activeChannelId/category/height are unchanged — scrolling on that
+    // yanks the viewer's list back to the playing channel mid-browse.
+    const scrollKey = `${activeChannelId}|${activeCategorySlug}|${leftHeight ?? ""}`;
+    if (lastScrollKeyRef.current === scrollKey) return;
+
     const raf = requestAnimationFrame(() => {
       const container = listRef.current;
       const item = activeItemRef.current;
       if (!container || !item) return;
+
+      // Mark as centered only once a real target exists, so a first run against
+      // a not-yet-populated list still re-centers when the rows arrive.
+      lastScrollKeyRef.current = scrollKey;
 
       // Center the active row inside the scroll container (never the page).
       const target =
@@ -484,7 +501,7 @@ export default function WatchPage() {
     });
 
     return () => cancelAnimationFrame(raf);
-  }, [activeChannelId, sidebarLoading, filteredSidebarChannels, leftHeight]);
+  }, [activeChannelId, activeCategorySlug, sidebarLoading, filteredSidebarChannels, leftHeight]);
 
   /**
    * Instant channel switch: the picked sidebar entry goes into local state

@@ -97,8 +97,11 @@ async function handle(
 
   try {
     // The monitor works out what is due: the daily slot, plus any source whose
-    // last fetch failed and has waited out its retry window.
-    const result = await runPlaylistMonitorTick(false);
+    // last fetch failed and has waited out its retry window. An authorized POST
+    // with `force` re-checks every source regardless of its slot — the value the
+    // response echoes, so the two can no longer disagree. Vercel cron calls GET,
+    // which leaves `force` false and the due-only behaviour unchanged.
+    const result = await runPlaylistMonitorTick(force);
     ran.playlist = {
       checked: result.checked,
       changed: result.changed,

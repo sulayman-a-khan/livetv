@@ -51,13 +51,6 @@ export function canonicalChannelKey(name: string): string {
     .trim();
 }
 
-/** True when two channel names refer to the same channel. */
-export function isSameChannel(a: string, b: string): boolean {
-  const ka = canonicalChannelKey(a);
-  const kb = canonicalChannelKey(b);
-  return Boolean(ka) && ka === kb;
-}
-
 /**
  * Normalizes a stream URL for duplicate detection: protocol and trailing
  * slashes are ignored so http:// and https:// variants of one link collapse.

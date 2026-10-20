@@ -40,6 +40,8 @@ yarn-error.log*
 Thumbs.db
 .vercel
 .env*
+# ...except the committed template, which holds placeholders only (no secrets).
+!.env.example
 scratch_channels.json
 
 # Runtime data — local JSON mirror of channels + stream links. Holds live

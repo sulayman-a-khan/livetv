@@ -3,11 +3,8 @@ import mongoose from "mongoose";
 import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
-import SportsEvent from "@/models/SportsEvent";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
-import { resolveStreamUrl } from "@/lib/streamUrl";
-import { getDynamicStreamBaseUrl } from "@/lib/settings";
 import { isUsableViewerLink } from "@/lib/streamHealth";
 import { rankStreams } from "@/lib/channelMaintenance";
 
@@ -22,8 +19,7 @@ const CHANNEL_CACHE = "public, s-maxage=15, stale-while-revalidate=120";
 
 // Curated-only, the same rule the catalogue list uses: an unpinned channel
 // answers 404 here, so a saved or guessed `/watch/<id>` link cannot bypass the
-// pin. `SportsEvent` documents are not catalogue channels — the Live Sports
-// Arena links straight to them — so they stay reachable below.
+// pin.
 
 /**
  * `headers` (upstream Referer/Origin, sometimes provider credentials) and the
@@ -73,7 +69,7 @@ export async function GET(
     const { id } = params;
     const conn = await connectToDatabase();
 
-    // 1. If MongoDB is connected, query Channel or SportsEvent
+    // 1. If MongoDB is connected, query the Channel catalogue
     if (conn) {
       if (mongoose.isValidObjectId(id)) {
         const [channel, streams] = await Promise.all([
@@ -124,56 +120,6 @@ export async function GET(
             { headers: { "Cache-Control": CHANNEL_CACHE } }
           );
         }
-      }
-
-      // 1b. Check if this ID is a SportsEvent in MongoDB
-      try {
-        const sportDoc = mongoose.isValidObjectId(id)
-          ? await SportsEvent.findById(id).lean()
-          : await SportsEvent.findOne({ $or: [{ externalId: id }, { _id: id } as any] }).lean();
-
-        if (sportDoc) {
-          const activeBaseUrl = await getDynamicStreamBaseUrl();
-          const primary = resolveStreamUrl(sportDoc.primaryStreamUrl || "", activeBaseUrl);
-          const backups = (sportDoc.backupStreamUrls || []).filter(Boolean).map((u) => resolveStreamUrl(u, activeBaseUrl));
-          const streams: any[] = [];
-          if (primary) {
-            streams.push({
-              _id: `sport_primary_${sportDoc._id}`,
-              channelId: String(sportDoc._id),
-              url: primary,
-              priority: 1,
-              status: "active",
-              latency: 50,
-            });
-          }
-          backups.forEach((bUrl, i) => {
-            streams.push({
-              _id: `sport_backup_${sportDoc._id}_${i}`,
-              channelId: String(sportDoc._id),
-              url: bUrl,
-              priority: i + 2,
-              status: "active",
-              latency: 80,
-            });
-          });
-
-          return NextResponse.json(
-            {
-              success: true,
-              channel: {
-                _id: String(sportDoc._id),
-                name: sportDoc.matchTitle,
-                logo: getChannelLogo(sportDoc.sportType, ""),
-                category: "Sports",
-                streams,
-              },
-            },
-            { headers: { "Cache-Control": CHANNEL_CACHE } }
-          );
-        }
-      } catch {
-        // Continue to fallback
       }
     }
 

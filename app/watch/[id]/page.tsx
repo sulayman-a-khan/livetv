@@ -255,53 +255,25 @@ export default function WatchPage() {
         });
         setCurrentStreamIndex(0);
       } else {
-        // Fallback 1: check /api/events for a sports event match
-        let sportsFound = false;
-        try {
-          const evRes = await fetch(`/api/events?_t=${Date.now()}`, { cache: "no-store" });
-          if (evRes.ok) {
-            const evData = await evRes.json();
-            const list = evData?.events || evData?.data || [];
-            const evMatch = list.find((e: any) => e.id === channelId || e._id === channelId);
-            if (evMatch) {
-              sportsFound = true;
-              const pUrl = evMatch.primaryStreamUrl || evMatch.streamUrl || "";
-              const bUrls = evMatch.backupStreamUrls || [];
-              const candidates = buildFreeStreamLadder(pUrl, bUrls, channelId);
-              setChannel({
-                _id: channelId,
-                name: evMatch.matchTitle || "Live Sports Match",
-                logo: "",
-                category: evMatch.sportType || "Live Sports",
-                streams: candidates,
-              });
-              setCurrentStreamIndex(0);
-            }
-          }
-        } catch {
-          // ignore error and check query params
-        }
-
-        // Fallback 2: check if direct stream query parameter exists
-        if (!sportsFound) {
-          const streamParam = searchParamsRef.current.get("stream");
-          const titleParam = searchParamsRef.current.get("title");
-          if (streamParam) {
-            const candidates = buildFreeStreamLadder(streamParam, [], channelId);
-            setChannel({
-              _id: channelId,
-              name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
-              logo: "",
-              category: "Live Sports",
-              streams: candidates,
-            });
-            setCurrentStreamIndex(0);
-          } else if (!isInitial) {
-            // Switching to this channel failed at the metadata level — stay on whatever was already playing
-            revertFailedSwitch();
-          } else {
-            setError(data.error || "Channel stream not found");
-          }
+        // A direct stream query parameter: `/watch/<id>?stream=<url>&title=<t>`
+        // plays a feed the catalogue does not (yet) hold.
+        const streamParam = searchParamsRef.current.get("stream");
+        const titleParam = searchParamsRef.current.get("title");
+        if (streamParam) {
+          const candidates = buildFreeStreamLadder(streamParam, [], channelId);
+          setChannel({
+            _id: channelId,
+            name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+            logo: "",
+            category: "Live Sports",
+            streams: candidates,
+          });
+          setCurrentStreamIndex(0);
+        } else if (!isInitial) {
+          // Switching to this channel failed at the metadata level — stay on whatever was already playing
+          revertFailedSwitch();
+        } else {
+          setError(data.error || "Channel stream not found");
         }
       }
     } catch {

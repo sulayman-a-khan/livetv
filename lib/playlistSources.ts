@@ -4,8 +4,8 @@
  * Shared validation and dashboard payload for the playlist source admin routes,
  * so `POST`, `PATCH` and `GET` cannot disagree about what a source is.
  *
- * A playlist source is exactly the same "source" concept used by Secure HLS per
- * card: it is a provider of stream URLs, and any number of channels can come out
+ * A playlist source is exactly the same "source" concept used per card: it is a
+ * provider of stream URLs, and any number of channels can come out
  * of one of them. Nothing here makes a source global — the playlist only feeds
  * the channels named inside it.
  */
@@ -51,7 +51,7 @@ function toBool(raw: unknown, fallback: boolean): boolean {
 
 /**
  * Validates a create (all fields considered) or a patch (only keys that were
- * sent). Mirrors how the Secure HLS source registry validates its input.
+ * sent). Mirrors how the per-card source registry validates its input.
  */
 export function validateSourceInput(
   body: Record<string, unknown>,

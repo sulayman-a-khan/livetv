@@ -6,7 +6,7 @@ import { APP_DOWNLOAD_URL, isEmbeddedApp } from "@/lib/appRuntime";
 
 interface HeaderProps {
   /**
-   * The player and arena pages let their content run to 1400px; without this
+   * The player pages let their content run to 1400px; without this
    * the logo and the download CTA stay inset at 1280px and no longer line up
    * with the edges of the screen below them.
    */

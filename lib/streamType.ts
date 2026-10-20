@@ -11,11 +11,10 @@
  * origin URL from a link that an older build stored behind our own proxy.
  */
 
-/** Path of the /api/stream media relay. The direct catalogue never routes
- *  through it — those feeds play from the origin's own URL. Only the
- *  secured/forwarded Live Sports Arena path uses it. It lives here so a link
- *  stored in that wrapped form is still recognised, by the classifier below and
- *  by toDirectStreamUrl, which reads it back to the origin it wrapped. */
+/** Path of the app's own media relay. The direct catalogue never routes
+ *  through it — those feeds play from the origin's own URL. It lives here so a
+ *  link stored in that wrapped form is still recognised, by the classifier below
+ *  and by toDirectStreamUrl, which reads it back to the origin it wrapped. */
 export const STREAM_PROXY_PATH = "/api/stream";
 
 /** True if the URL is (or points at) a raw MPEG-TS / Xtream .ts feed.

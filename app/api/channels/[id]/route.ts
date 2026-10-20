@@ -106,6 +106,14 @@ export async function GET(
             { headers: { "Cache-Control": CHANNEL_CACHE } }
           );
         }
+
+        // A valid Mongo id that matched no pinned channel 404s here: falling
+        // through to the local store would let a diverged pinned copy bypass
+        // the curated-only gate (and in production hit demo-seed data).
+        return NextResponse.json(
+          { success: false, error: "Channel not found" },
+          { status: 404 }
+        );
       }
     }
 

@@ -342,12 +342,15 @@ export const inMemoryDb = {
     global.__freetv_in_memory_streams?.push(st);
     saveToDisk();
   },
-  deleteChannel: (id: string) => {
+  deleteChannel: (id: string): boolean => {
     ensureLoaded();
+    let removed = false;
     if (global.__freetv_in_memory_channels) {
+      const before = global.__freetv_in_memory_channels.length;
       global.__freetv_in_memory_channels = global.__freetv_in_memory_channels.filter(
         (c) => c._id !== id
       );
+      removed = global.__freetv_in_memory_channels.length < before;
     }
     if (global.__freetv_in_memory_streams) {
       global.__freetv_in_memory_streams = global.__freetv_in_memory_streams.filter(
@@ -355,15 +358,20 @@ export const inMemoryDb = {
       );
     }
     saveToDisk();
+    return removed;
   },
-  deleteStream: (id: string) => {
+  deleteStream: (id: string): boolean => {
     ensureLoaded();
+    let removed = false;
     if (global.__freetv_in_memory_streams) {
+      const before = global.__freetv_in_memory_streams.length;
       global.__freetv_in_memory_streams = global.__freetv_in_memory_streams.filter(
         (s) => s._id !== id
       );
+      removed = global.__freetv_in_memory_streams.length < before;
     }
     saveToDisk();
+    return removed;
   },
   updateChannelLogo: (id: string, logo: string) => {
     ensureLoaded();
@@ -376,17 +384,20 @@ export const inMemoryDb = {
     }
     saveToDisk();
   },
-  updateChannelPin: (id: string, isPinned: boolean, priorityOrder: number) => {
+  updateChannelPin: (id: string, isPinned: boolean, priorityOrder: number): boolean => {
     ensureLoaded();
+    let found = false;
     if (global.__freetv_in_memory_channels) {
       const ch = global.__freetv_in_memory_channels.find((c) => c._id === id);
       if (ch) {
+        found = true;
         ch.isPinned = isPinned;
         ch.priorityOrder = priorityOrder;
         ch.updatedAt = new Date();
       }
     }
     saveToDisk();
+    return found;
   },
   updatePinnedOrder: (orderedIds: string[]) => {
     ensureLoaded();

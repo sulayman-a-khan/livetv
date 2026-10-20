@@ -26,13 +26,28 @@ export async function DELETE(
     const conn = await connectToDatabase();
 
     if (conn && mongoose.isValidObjectId(id)) {
-      // MongoDB Mode
-      await Channel.findByIdAndDelete(id);
+      // MongoDB Mode — a miss is reported truthfully instead of pretending
+      // the delete happened.
+      const deleted = await Channel.findByIdAndDelete(id);
+      if (!deleted) {
+        return NextResponse.json(
+          { success: false, error: "Channel not found" },
+          { status: 404 }
+        );
+      }
       await StreamLink.deleteMany({ channelId: id });
+      // Keep the local store from diverging from the deleted Mongo doc.
+      inMemoryDb.deleteChannel(id);
+    } else {
+      // In-memory mode (or a custom string id Mongo could never hold).
+      const removed = inMemoryDb.deleteChannel(id);
+      if (!removed) {
+        return NextResponse.json(
+          { success: false, error: "Channel not found" },
+          { status: 404 }
+        );
+      }
     }
-
-    // Always check/clean inMemoryDb as well
-    inMemoryDb.deleteChannel(id);
 
     return NextResponse.json({
       success: true,

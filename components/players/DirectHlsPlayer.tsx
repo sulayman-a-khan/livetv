@@ -689,7 +689,13 @@ export default function DirectHlsPlayer({
 
         switch (data.type) {
           case Hls.ErrorTypes.NETWORK_ERROR:
-            // Try recovery once, then move to next server
+            // Try recovery once, then move to next server. Clear any in-flight
+            // recovery timer first: a second network error inside the 3s window
+            // would otherwise overwrite the handle and orphan the earlier timer.
+            if (recoverTimerRef.current) {
+              clearTimeout(recoverTimerRef.current);
+              recoverTimerRef.current = null;
+            }
             hls.startLoad();
             recoverTimerRef.current = setTimeout(() => {
               recoverTimerRef.current = null;
@@ -760,6 +766,20 @@ export default function DirectHlsPlayer({
       }
     }, 3500);
   };
+
+  // The controls-hide timer is independent of the loader lifecycle above, so
+  // clear it on unmount: otherwise it can fire a setControlsVisible against an
+  // unmounted component (a silent no-op in React 18, but nothing should outlive
+  // the player).
+  useEffect(
+    () => () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+    },
+    []
+  );
 
   const togglePlay = () => {
     const video = videoRef.current;

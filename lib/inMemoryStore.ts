@@ -308,7 +308,15 @@ function saveToDisk() {
       channels: global.__freetv_in_memory_channels || [],
       streams: global.__freetv_in_memory_streams || [],
     };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf-8");
+    // Atomic write. A crash mid-serialize must never leave store.json truncated:
+    // a truncated file fails JSON.parse on the next boot, ensureLoaded catches it
+    // and silently falls back to the seed catalogue — losing every ingested
+    // channel. Write to a temp file on the same volume, then rename over the
+    // target (rename replaces atomically on both POSIX and Windows). The pid in
+    // the temp name keeps concurrent processes from colliding.
+    const tmpFile = `${DATA_FILE}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf-8");
+    fs.renameSync(tmpFile, DATA_FILE);
   } catch (err) {
     console.error("[inMemoryStore] Failed to write store.json to disk:", err);
   }

@@ -62,6 +62,7 @@ import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
+import { checkPublicUrlSafety } from "@/lib/ssrfGuard";
 
 const execFileAsync = promisify(execFile);
 
@@ -1681,6 +1682,25 @@ async function probeTsStream(
  * between retries) are returned immediately without wasting attempts.
  */
 export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {}): Promise<HlsCheckResult> {
+  // Never point the server at an admin-supplied URL that names this machine, a
+  // private network, or the link-local/metadata range (see lib/ssrfGuard.ts).
+  // Reported as an invalid link rather than thrown, because every caller — the
+  // ingest, the health runner, the admin routes — expects a result object, and
+  // a rejected URL must never become an "active" link.
+  const safety = checkPublicUrlSafety(rawUrl);
+  if (!safety.ok) {
+    return baseResult({
+      status: "INVALID",
+      errorCode: "UNKNOWN_ERROR",
+      httpStatus: null,
+      responseTime: 0,
+      finalUrl: rawUrl,
+      playlistType: null,
+      isLive: true,
+      error: safety.reason || "URL is not safe for the server to fetch",
+    });
+  }
+
   // YouTube Live links aren't raw HLS manifests — they're played through
   // YouTube's own IFrame Player API (see YouTubeLivePlayer.tsx), so none of
   // the m3u8/segment checks below apply to them. Every #EXTM3U/segment check

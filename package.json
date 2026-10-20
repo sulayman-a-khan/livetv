@@ -19,6 +19,7 @@
     "lint": "next lint",
     "test:ranking": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js",
     "test:link-registration": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js .tmp-tests/tests/link-registration.test.js",
+    "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",
     "seed": "node scripts/seed.js"
   },

@@ -45,7 +45,7 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import { toDirectStreamUrl } from "@/lib/streamType";
+import { toDirectStreamUrl, isMpegTsUrl } from "@/lib/streamType";
 import type mpegtsNamespace from "mpegts.js";
 
 type MpegtsModule = typeof mpegtsNamespace;
@@ -133,8 +133,8 @@ export default function MpegTsPlayer({
   const hasLoadedOnceRef = useRef(false);
   const mountedRef = useRef(true);
   /** Host callbacks read through a ref: prop identity churn must not reload a feed. */
-  const hostCallbacksRef = useRef({ onAllServersFailed });
-  hostCallbacksRef.current = { onAllServersFailed };
+  const hostCallbacksRef = useRef({ onAllServersFailed, onSwitchingChange });
+  hostCallbacksRef.current = { onAllServersFailed, onSwitchingChange };
 
   // ---- Fullscreen state (parity with HlsPlayer) ----
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -392,6 +392,21 @@ export default function MpegTsPlayer({
     lastAppliedIdRef.current = target._id;
     setDisplayedIndex(nextIdx);
     setCurrentStreamIndex(nextIdx);
+
+    // Cross-type hand-off: the next mirror isn't a raw TS feed, so advancing the
+    // index makes the watch page unmount this player and mount the one that
+    // matches target.url (e.g. DirectHlsPlayer for an .m3u8). That incoming
+    // player owns its own tuning overlay and never reports to the host, so if we
+    // set switching=true here the host's CONNECTING badge would be stranded
+    // after we unmount — our own state/effect never gets to clear it. Release it
+    // synchronously through the callback ref instead, and skip loading target.url
+    // through mpegts.js (it can't demux an .m3u8 anyway); the swapped-in player
+    // loads it.
+    if (!isMpegTsUrl(target.url)) {
+      hostCallbacksRef.current.onSwitchingChange?.(false, null);
+      return;
+    }
+
     setSwitching(true);
     setPendingChannelLabel(channelName);
     // Re-arm the watchdog for the fresh connection, exactly as a switch does.

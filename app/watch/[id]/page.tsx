@@ -263,9 +263,9 @@ export default function WatchPage() {
           const candidates = buildFreeStreamLadder(streamParam, [], channelId);
           setChannel({
             _id: channelId,
-            name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+            name: titleParam ? decodeURIComponent(titleParam) : "Direct Stream",
             logo: "",
-            category: "Live Sports",
+            category: "Sports",
             streams: candidates,
           });
           setCurrentStreamIndex(0);
@@ -284,9 +284,9 @@ export default function WatchPage() {
         const candidates = buildFreeStreamLadder(streamParam, [], channelId);
         setChannel({
           _id: channelId,
-          name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+          name: titleParam ? decodeURIComponent(titleParam) : "Direct Stream",
           logo: "",
-          category: "Live Sports",
+          category: "Sports",
           streams: candidates,
         });
       } else if (!isInitial) {
@@ -340,17 +340,17 @@ export default function WatchPage() {
     const titleParam = searchParamsRef.current.get("title");
 
     if (streamParam) {
-      setActiveChannelId(channelIdParam || "live-sports-event");
+      setActiveChannelId(channelIdParam || "direct");
       const candidates = buildFreeStreamLadder(
         streamParam,
         [],
         channelIdParam || "direct"
       );
       setChannel({
-        _id: channelIdParam || "live-sports-event",
-        name: titleParam ? decodeURIComponent(titleParam) : "Live Sports Stream",
+        _id: channelIdParam || "direct",
+        name: titleParam ? decodeURIComponent(titleParam) : "Direct Stream",
         logo: "",
-        category: "Live Sports",
+        category: "Sports",
         streams: candidates,
       });
       setInitialLoading(false);
@@ -405,8 +405,8 @@ export default function WatchPage() {
       if (found) return found;
     }
     if (channel) {
-      // A sports-event placeholder (or any legacy label) is folded onto its rail
-      // by the same classifier the backend uses, so the sidebar opens on Sports.
+      // A rail is chosen with the same classifier the backend uses, so a channel
+      // arriving with legacy label text still opens on the right sidebar rail.
       const rail = normalizeCategory(channel.category, channel.name);
       const matched = CATEGORIES.find((cat) => cat.category === rail);
       if (matched) return matched;

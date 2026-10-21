@@ -6,7 +6,7 @@ import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import LinkHealthBadge, { linkHealthLabel, type LinkProbeDetail } from "@/components/LinkHealthBadge";
 import HlsPlayer from "@/components/HlsPlayer";
-import YouTubeLivePlayer from "@/components/YouTubeLivePlayer";
+import { DirectHlsPlayer } from "@/components/players";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
 import {
   X,
@@ -467,7 +467,19 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             </div>
             <div className="relative w-full aspect-video bg-black">
               {isYouTubeUrl(testStream.url) ? (
-                <YouTubeLivePlayer channelName={name} youtubeUrl={testStream.url} />
+                <DirectHlsPlayer
+                  channelName={name}
+                  streams={[
+                    {
+                      _id: testStream._id,
+                      url: testStream.url,
+                      priority: 0,
+                      status: "active",
+                      latency: testStream.latency || 0,
+                      isYouTube: true,
+                    },
+                  ]}
+                />
               ) : isMpegTsUrl(testStream.url) ? (
                 <MpegTsPlayer
                   channelName={name}

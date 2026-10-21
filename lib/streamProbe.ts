@@ -1702,12 +1702,12 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
   }
 
   // YouTube Live links aren't raw HLS manifests — they're played through
-  // YouTube's own IFrame Player API (see YouTubeLivePlayer.tsx), so none of
+  // YouTube's own IFrame Player API (inside DirectHlsPlayer), so none of
   // the m3u8/segment checks below apply to them. Every #EXTM3U/segment check
   // would fail against a YouTube page (it's HTML, not a playlist), which
   // would otherwise get a perfectly fine YouTube link marked "broken" and
   // eventually purged by the health checker. Treat it as healthy here and
-  // let YouTubeLivePlayer itself report a real playback failure if the
+  // let the player itself report a real playback failure if the
   // broadcast turns out not to be live.
   if (isYouTubeUrl(rawUrl)) {
     return baseResult({

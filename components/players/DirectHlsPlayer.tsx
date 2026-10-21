@@ -12,6 +12,8 @@ import {
   Gauge,
   Check,
   RotateCcw,
+  RefreshCw,
+  AlertCircle,
 } from "lucide-react";
 import { FreeStreamMirror, isYouTubeStream } from "@/lib/freeChannelService";
 import { extractYouTubeVideoId } from "@/lib/youtube";
@@ -23,6 +25,72 @@ interface DirectHlsPlayerProps {
   currentStreamIndex?: number;
   onStreamIndexChange?: (index: number) => void;
   onAllServersFailed?: () => void;
+}
+
+/**
+ * A YouTube mirror plays through YouTube's own IFrame Player API inside this
+ * same component, so the channel gets the app's chrome (top badge + bottom
+ * control bar) instead of a bare YouTube iframe with YouTube's native controls.
+ *
+ * This deliberately does NOT pull a raw .m3u8 out of YouTube and feed it to
+ * hls.js: YouTube's Terms of Service prohibit accessing videos through anything
+ * but their own player/APIs and prohibit stripping ads, and YouTube bot-gates
+ * manifest extraction from hosted IPs (and IP-locks the segments), so it could
+ * not play on Vercel anyway. The sanctioned embed is used instead — YouTube's
+ * own ads/branding on that stream still show, which is the trade-off for playing
+ * it at all. The IFrame API is driven with controls:0 so the custom bar below is
+ * the only visible chrome.
+ */
+declare global {
+  interface Window {
+    YT?: {
+      Player: new (
+        el: HTMLElement | string,
+        opts: {
+          videoId?: string;
+          playerVars?: Record<string, string | number>;
+          events?: {
+            onReady?: (e: { target: YTPlayerInstance }) => void;
+            onStateChange?: (e: { data: number; target: YTPlayerInstance }) => void;
+            onError?: (e: { data: number }) => void;
+          };
+        }
+      ) => YTPlayerInstance;
+      PlayerState: { ENDED: number; PLAYING: number; PAUSED: number; BUFFERING: number; CUED: number };
+    };
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+interface YTPlayerInstance {
+  playVideo: () => void;
+  pauseVideo: () => void;
+  mute: () => void;
+  unMute: () => void;
+  isMuted: () => boolean;
+  setVolume: (v: number) => void;
+  getPlayerState: () => number;
+  destroy: () => void;
+}
+
+/** Loads the IFrame API script at most once per page, however many players use it. */
+let ytApiLoadPromise: Promise<void> | null = null;
+function loadYouTubeIframeApi(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.YT?.Player) return Promise.resolve();
+  if (ytApiLoadPromise) return ytApiLoadPromise;
+
+  ytApiLoadPromise = new Promise((resolve) => {
+    const previous = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previous?.();
+      resolve();
+    };
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+  });
+  return ytApiLoadPromise;
 }
 
 interface LevelInfo {
@@ -308,15 +376,15 @@ export default function DirectHlsPlayer({
     return activeStream ? isYouTubeStream(activeStream.url) : false;
   }, [activeStream]);
 
-  // Concrete video id for the iframe, or null when the URL names a channel
-  // rather than a video (e.g. youtube.com/@handle/live). The canonical parser
-  // is the single source of truth here — the inline regex this replaced read a
-  // channel-live URL as an empty capture and produced embed/null (a black
-  // screen with no explanation). The null case is handled in the embed branch.
-  const youTubeVideoId = useMemo(
-    () => (activeStream ? extractYouTubeVideoId(activeStream.url) : null),
-    [activeStream]
-  );
+  // ---- YouTube IFrame-API playback state (only used when isYouTube) ----
+  // The mount div the IFrame API replaces with its own iframe, and the player
+  // instance whose methods the shared control bar drives when isYouTube.
+  const ytMountRef = useRef<HTMLDivElement>(null);
+  const ytPlayerRef = useRef<YTPlayerInstance | null>(null);
+  // resolving = looking up the live video id / booting the embed; ready = the
+  // iframe is up and the custom chrome is live; error = it couldn't be played.
+  const [ytStatus, setYtStatus] = useState<"idle" | "resolving" | "ready" | "error">("idle");
+  const [ytError, setYtError] = useState<string | null>(null);
 
   /**
    * The attempt now on trial. A channel or mirror change is detected during
@@ -333,17 +401,25 @@ export default function DirectHlsPlayer({
   }
 
   /**
-   * The header pill states only what this player actually observes: whether the
-   * loader is still waiting for a frame, whether frames are arriving, and the
-   * level hls.js really switched to. Nothing here is decorative or assumed.
-   *
-   * A YouTube mirror plays inside YouTube's own iframe, from which this component
-   * gets no frame, no level and no pause event — so it has nothing true to report
-   * and the pill is dropped rather than guessed at.
+   * The header pill states what this player actually observes. For a direct HLS
+   * mirror that is whether the loader is still waiting for a frame, whether
+   * frames are arriving, and the level hls.js really switched to. For a YouTube
+   * mirror it is the IFrame API's own player state (which the embed reports back
+   * through onStateChange), so the pill reads the same LIVE/PAUSED/TUNING as any
+   * other channel instead of being dropped. Nothing here is decorative or assumed.
    */
   const headerStatus = useMemo(() => {
     if (isYouTube) {
-      return null;
+      if (ytStatus === "error") {
+        return { label: "NO SIGNAL", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
+      }
+      if (ytStatus !== "ready") {
+        return { label: "TUNING", dot: "bg-cyan-300 animate-pulse", chip: "text-cyan-300 bg-cyan-500/10 border-cyan-500/30" };
+      }
+      if (isPlaying) {
+        return { label: "LIVE", dot: "bg-emerald-400 animate-pulse", chip: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" };
+      }
+      return { label: "PAUSED", dot: "bg-slate-400", chip: "text-slate-300 bg-slate-500/10 border-slate-500/30" };
     }
     if (phase === "weak") {
       return { label: "NO SIGNAL", dot: "bg-red-500 animate-pulse", chip: "text-red-400 bg-red-500/10 border-red-500/30" };
@@ -355,7 +431,7 @@ export default function DirectHlsPlayer({
       return { label: "LIVE", dot: "bg-emerald-400 animate-pulse", chip: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" };
     }
     return { label: "PAUSED", dot: "bg-slate-400", chip: "text-slate-300 bg-slate-500/10 border-slate-500/30" };
-  }, [isYouTube, phase, isPlaying]);
+  }, [isYouTube, ytStatus, phase, isPlaying]);
 
   // Resolution cap calculation: Mobile -> 480p max, Desktop -> 720p max
   const getDeviceMaxHeight = useCallback(() => {
@@ -756,6 +832,110 @@ export default function DirectHlsPlayer({
     purgeAndDestroyPlayer,
   ]);
 
+  // YouTube loader effect — the IFrame-API mirror of the HLS loader above, and
+  // completely separate from it (the HLS effect early-returns when isYouTube).
+  // Resolves the active mirror to a concrete video id — directly from the URL, or
+  // for a channel-style @handle/live link via /api/youtube/resolve — then boots a
+  // fresh YouTube iframe with its own controls disabled so the shared custom bar
+  // is the only chrome. Re-runs on a mirror/channel change and tears the iframe
+  // down on cleanup, so switching away from YouTube leaves nothing behind.
+  useEffect(() => {
+    if (!isYouTube || !activeStream) return;
+
+    let cancelled = false;
+    const url = activeStream.url;
+    setYtStatus("resolving");
+    setYtError(null);
+
+    async function resolveAndPlay() {
+      // Fast path: the URL already names a video — skip the network round trip.
+      let videoId = extractYouTubeVideoId(url);
+
+      if (!videoId) {
+        try {
+          const res = await fetch("/api/youtube/resolve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          });
+          const data = await res.json();
+          if (!data.success || !data.videoId) {
+            throw new Error(data.error || "Couldn't resolve YouTube live video");
+          }
+          videoId = data.videoId;
+        } catch (err) {
+          if (cancelled) return;
+          setYtError(err instanceof Error ? err.message : "Couldn't reach that YouTube channel");
+          setYtStatus("error");
+          return;
+        }
+      }
+
+      if (cancelled || !videoId) return;
+
+      await loadYouTubeIframeApi();
+      if (cancelled || !ytMountRef.current || !window.YT) return;
+
+      // A mirror/channel switch gets a brand-new iframe: loading a video into an
+      // existing player leaves it paused (the play() has no user activation
+      // behind it), whereas a fresh embed carrying autoplay=1 starts like the
+      // first one did. destroy() leaves a placeholder div behind, so clear the
+      // mount before appending the new one.
+      if (ytPlayerRef.current) {
+        try {
+          ytPlayerRef.current.destroy();
+        } catch {
+          /* already gone */
+        }
+        ytPlayerRef.current = null;
+      }
+      ytMountRef.current?.replaceChildren();
+      const mount = document.createElement("div");
+      mount.className = "w-full h-full";
+      ytMountRef.current?.appendChild(mount);
+
+      ytPlayerRef.current = new window.YT.Player(mount, {
+        videoId,
+        // controls:0 keeps YouTube's own bar off entirely — the shared custom
+        // control bar below replaces it, matching the direct-HLS look.
+        playerVars: { autoplay: 1, playsinline: 1, rel: 0, controls: 0, iv_load_policy: 3, modestbranding: 1 },
+        events: {
+          onReady: (e) => {
+            if (cancelled) return;
+            setYtStatus("ready");
+            setIsMuted(e.target.isMuted());
+            setIsPlaying(e.target.getPlayerState() === 1);
+          },
+          onStateChange: (e) => {
+            if (cancelled) return;
+            setIsPlaying(e.data === 1);
+          },
+          onError: () => {
+            if (cancelled) return;
+            setYtError(`Couldn't play ${channelName} on YouTube right now`);
+            setYtStatus("error");
+          },
+        },
+      });
+    }
+
+    resolveAndPlay();
+
+    return () => {
+      cancelled = true;
+      if (ytPlayerRef.current) {
+        try {
+          ytPlayerRef.current.destroy();
+        } catch {
+          /* already gone */
+        }
+        ytPlayerRef.current = null;
+      }
+      ytMountRef.current?.replaceChildren();
+      setYtStatus("idle");
+    };
+  }, [isYouTube, activeStream, channelName]);
+
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {
     setControlsVisible(true);
@@ -782,6 +962,13 @@ export default function DirectHlsPlayer({
   );
 
   const togglePlay = () => {
+    if (isYouTube) {
+      const p = ytPlayerRef.current;
+      if (!p) return;
+      if (isPlaying) p.pauseVideo();
+      else p.playVideo();
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -793,6 +980,18 @@ export default function DirectHlsPlayer({
   };
 
   const toggleMute = () => {
+    if (isYouTube) {
+      const p = ytPlayerRef.current;
+      if (!p) return;
+      if (isMuted) {
+        p.unMute();
+        setIsMuted(false);
+      } else {
+        p.mute();
+        setIsMuted(true);
+      }
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.muted = !video.muted;
@@ -800,10 +999,20 @@ export default function DirectHlsPlayer({
   };
 
   const handleVolumeChange = (newVol: number) => {
+    setVolume(newVol);
+    if (isYouTube) {
+      const p = ytPlayerRef.current;
+      if (!p) return;
+      p.setVolume(Math.round(newVol * 100));
+      if (newVol > 0 && isMuted) {
+        p.unMute();
+        setIsMuted(false);
+      }
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.volume = newVol;
-    setVolume(newVol);
     if (newVol > 0 && isMuted) {
       video.muted = false;
       setIsMuted(false);
@@ -834,32 +1043,34 @@ export default function DirectHlsPlayer({
       onMouseLeave={() => setControlsVisible(false)}
       className="relative w-full aspect-video bg-black overflow-hidden select-none group font-sans"
     >
-      {/* YouTube Live Embed Mode */}
+      {/* YouTube Live — played through YouTube's IFrame Player API inside this
+          same player, so it wears the app's badge + control bar like any other
+          channel instead of YouTube's native iframe controls. */}
       {isYouTube && activeStream ? (
-        youTubeVideoId ? (
-          <div className="w-full h-full relative">
-            <iframe
-              src={`https://www.youtube-nocookie.com/embed/${youTubeVideoId}?autoplay=1&mute=0&controls=1&modestbranding=1&rel=0`}
-              title={channelName}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              className="w-full h-full border-0"
-            />
-          </div>
-        ) : (
-          // A channel-style YouTube URL (@handle/live) names no fixed video, so
-          // there is nothing to embed. Say so instead of pointing an iframe at
-          // embed/null, which renders a silent black player.
-          <div className="w-full h-full flex flex-col items-center justify-center px-6 text-center bg-black">
-            <p className="text-sm font-black text-white tracking-tight">
-              This YouTube stream can&apos;t be embedded directly
-            </p>
-            <p className="text-xs font-medium text-slate-400 mt-1.5 max-w-sm">
-              It points at a channel&apos;s live feed rather than a specific video.
-              Open it on YouTube to watch.
-            </p>
-          </div>
-        )
+        <div className="w-full h-full relative">
+          {/* The IFrame API replaces this div's contents with its own iframe. */}
+          <div ref={ytMountRef} className="absolute inset-0 w-full h-full" />
+
+          {/* The YouTube iframe swallows every pointer event, so hover/tap that
+              reveals the custom chrome has to be caught on a transparent layer
+              above it; events bubble to the container's onMouseMove. Sits below
+              the badge/control bar (z-20) so those stay clickable. */}
+          {ytStatus === "ready" && <div className="absolute inset-0 z-10 cursor-pointer" />}
+
+          {ytStatus === "resolving" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 z-20">
+              <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+              <p className="text-xs font-bold text-slate-300">Connecting to {channelName} on YouTube...</p>
+            </div>
+          )}
+
+          {ytStatus === "error" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/90 z-20 px-6 text-center">
+              <AlertCircle className="w-8 h-8 text-red-400" />
+              <p className="text-xs font-bold text-slate-300">{ytError}</p>
+            </div>
+          )}
+        </div>
       ) : (
         /* Bare-metal Direct HLS Video Element */
         <video
@@ -957,8 +1168,11 @@ export default function DirectHlsPlayer({
         )}
       </div>
 
-      {/* Bottom Control Bar */}
-      {!isYouTube && (
+      {/* Bottom Control Bar — shared by both transports. For a YouTube mirror the
+          same buttons drive the IFrame API (see togglePlay/toggleMute/…) instead
+          of the <video> element, and the quality menu stays hidden because a
+          YouTube embed reports no hls.js levels. */}
+      {(
         <div
           className={`absolute bottom-0 inset-x-0 z-20 p-3 bg-gradient-to-t from-black/95 via-black/60 to-transparent flex items-center justify-between gap-3 transition-opacity duration-300 ${
             controlsVisible ? "opacity-100" : "opacity-0"

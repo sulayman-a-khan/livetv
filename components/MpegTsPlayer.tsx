@@ -31,7 +31,7 @@
  * buffered clip. Frequent mpegts ERROR events from small buffer shifts are
  * logged and ignored, so they never flash the status bar.
  *
- * The .m3u8 (HlsPlayer) and YouTube (YouTubeLivePlayer) paths are untouched —
+ * The .m3u8 and YouTube paths (both DirectHlsPlayer) are untouched —
  * the watch page picks this component only for `.ts` sources.
  */
 

@@ -2,8 +2,8 @@
  * Stream-type helpers.
  *
  * The app plays three kinds of source, each through its own player:
- *   - YouTube Live  -> YouTubeLivePlayer (YouTube's IFrame Player API)
- *   - HLS (.m3u8)   -> HlsPlayer (hls.js dual-slot ping-pong)
+ *   - YouTube Live  -> DirectHlsPlayer (YouTube's IFrame Player API, app chrome)
+ *   - HLS (.m3u8)   -> DirectHlsPlayer (hls.js)
  *   - MPEG-TS (.ts) -> MpegTsPlayer (mpegts.js)
  *
  * Nothing here fetches media — it only classifies a stored URL so the watch

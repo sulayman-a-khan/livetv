@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb, type InMemoryStreamLink } from "@/lib/inMemoryStore";
@@ -47,6 +47,8 @@ export async function GET(req: NextRequest) {
     }
 
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable");
+    if (unavailable) return unavailable;
 
     if (conn) {
       // MongoDB Mode

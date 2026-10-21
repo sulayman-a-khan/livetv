@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb, type InMemoryChannel } from "@/lib/inMemoryStore";
@@ -54,6 +54,8 @@ export async function POST(req: NextRequest) {
 
     const normalizedName = canonicalChannelKey(name);
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was saved");
+    if (unavailable) return unavailable;
 
     // One identity, one record. Maintenance will not merge an unpinned duplicate
     // away, so a clash here has to be resolved by the admin, not by automation.

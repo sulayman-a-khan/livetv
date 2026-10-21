@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
@@ -68,6 +68,11 @@ export async function GET(
   try {
     const { id } = params;
     const conn = await connectToDatabase();
+    // Without this the request below would answer a live channel with the seed
+    // store's "Channel not found", making a database that merely took a moment
+    // to answer look like a deleted channel.
+    const unavailable = databaseUnavailable(conn, "Channel details unavailable");
+    if (unavailable) return unavailable;
 
     // 1. If MongoDB is connected, query the Channel catalogue
     if (conn) {

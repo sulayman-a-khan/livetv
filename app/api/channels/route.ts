@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
@@ -128,20 +128,11 @@ export async function GET(req: NextRequest) {
 
     const conn = await connectToDatabase();
 
-    /**
-     * A missing connection on Vercel is an outage, not an empty site. Without
-     * this guard the request falls into the JSON store below, and `data/store.json`
-     * is gitignored and never deployed — so the store resolves to its seed
-     * catalogue, where nothing is pinned, and the visitor gets a *successful*
-     * empty list that then sits in the edge cache looking like "no channels".
-     * Locally the store is the real database substitute, so that path stays.
-     */
-    if (!conn && process.env.VERCEL) {
-      return NextResponse.json(
-        { success: false, error: "Catalogue source unavailable" },
-        { status: 503, headers: { "Cache-Control": "no-store" } }
-      );
-    }
+    // A missing connection on Vercel is an outage, not an empty site: without
+    // this guard the request falls into the JSON store, whose seed catalogue has
+    // nothing pinned, and the visitor gets a *successful* empty list.
+    const unavailable = databaseUnavailable(conn, "Catalogue source unavailable");
+    if (unavailable) return unavailable;
 
     if (conn) {
       // MongoDB Mode: the pinned catalogue only, then the optional filters.

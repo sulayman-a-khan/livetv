@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { refreshChannelLinks } from "@/lib/maintenanceRunner";
@@ -105,6 +105,8 @@ export async function PATCH(
 
     const { id } = params;
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was saved");
+    if (unavailable) return unavailable;
     const now = new Date();
 
     if (conn && mongoose.isValidObjectId(id)) {
@@ -267,6 +269,8 @@ export async function DELETE(
 
     const { id } = params;
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was deleted");
+    if (unavailable) return unavailable;
 
     // Remember the owner so the remaining links can be renumbered afterwards.
     let channelId: string | null = null;

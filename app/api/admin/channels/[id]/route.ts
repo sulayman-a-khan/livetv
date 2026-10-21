@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
@@ -24,6 +24,8 @@ export async function DELETE(
 
     const { id } = params;
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was deleted");
+    if (unavailable) return unavailable;
 
     if (conn && mongoose.isValidObjectId(id)) {
       // MongoDB Mode — a miss is reported truthfully instead of pretending
@@ -119,6 +121,8 @@ export async function PUT(
 
     patch.isManuallyEdited = true;
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was saved");
+    if (unavailable) return unavailable;
 
     if (conn && mongoose.isValidObjectId(id)) {
       const updated = await Channel.findByIdAndUpdate(id, patch, { new: true }).lean();

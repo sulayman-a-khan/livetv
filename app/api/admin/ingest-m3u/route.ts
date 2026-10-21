@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, mustUseDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { parseM3uContent } from "@/lib/m3uParser";
@@ -97,6 +97,16 @@ export async function POST(req: NextRequest) {
       const send = (event: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
+      // An error path may end the stream itself, and the `finally` below runs
+      // afterwards. Closing an already closed controller throws, which errors
+      // the response and discards the very frame that explains the failure —
+      // so the close happens at most once.
+      let streamEnded = false;
+      const endStream = () => {
+        if (streamEnded) return;
+        streamEnded = true;
+        controller.close();
+      };
 
       try {
         let m3uText = m3uTextInput;
@@ -106,10 +116,9 @@ export async function POST(req: NextRequest) {
           // the metadata endpoint before the server fetches it (lib/ssrfGuard.ts).
           const urlSafety = checkPublicUrlSafety(m3uUrl);
           if (!urlSafety.ok) {
-            // No explicit controller.close() here: this path runs synchronously
-            // at the top of start(), before the HTTP layer attaches a reader, and
-            // the finally block below already closes the stream exactly once. A
-            // second close() would error the stream and discard this very frame.
+            // No explicit end here: this path runs synchronously at the top of
+            // start(), before the HTTP layer attaches a reader, and the `finally`
+            // below ends the stream once the frame has been delivered.
             send({ phase: "error", error: urlSafety.reason || "Playlist URL is not safe to fetch" });
             return;
           }
@@ -136,7 +145,7 @@ export async function POST(req: NextRequest) {
                         : fetchError?.message || "the request failed"
                     }`,
             });
-            controller.close();
+            endStream();
             return;
           }
           if (!response.ok) {
@@ -144,7 +153,7 @@ export async function POST(req: NextRequest) {
               phase: "error",
               error: `Failed to fetch M3U URL: ${response.status} ${response.statusText}`,
             });
-            controller.close();
+            endStream();
             return;
           }
 
@@ -159,7 +168,7 @@ export async function POST(req: NextRequest) {
                 MAX_PLAYLIST_BYTES / 1024 / 1024
               } MB limit.`,
             });
-            controller.close();
+            endStream();
             return;
           }
           const downloaded = await readCappedText(response, MAX_PLAYLIST_BYTES);
@@ -168,7 +177,7 @@ export async function POST(req: NextRequest) {
               phase: "error",
               error: `The playlist is larger than the ${MAX_PLAYLIST_BYTES / 1024 / 1024} MB limit.`,
             });
-            controller.close();
+            endStream();
             return;
           }
           m3uText = downloaded;
@@ -181,7 +190,7 @@ export async function POST(req: NextRequest) {
 
         if (!m3uText || typeof m3uText !== "string") {
           send({ phase: "error", error: "Playlist is empty or not valid text." });
-          controller.close();
+          endStream();
           return;
         }
 
@@ -195,6 +204,17 @@ export async function POST(req: NextRequest) {
         });
 
         const conn = await connectToDatabase();
+        // A deployment cannot import into the seed store: every channel would be
+        // written to an ephemeral lambda disk and still be reported as ingested.
+        // No explicit end here: the `finally` below closes the stream once.
+        if (!conn && mustUseDatabase()) {
+          send({
+            phase: "error",
+            error:
+              "MongoDB is unreachable, so the import was stopped before anything was written.",
+          });
+          return;
+        }
         send({
           phase: "mode",
           message: conn ? "Connected to MongoDB — probing streams..." : "In-memory mode — probing streams...",
@@ -425,7 +445,7 @@ export async function POST(req: NextRequest) {
         console.error("POST /api/admin/ingest-m3u error:", error);
         send({ phase: "error", error: error?.message || "Failed to ingest M3U playlist" });
       } finally {
-        controller.close();
+        endStream();
       }
     },
   });

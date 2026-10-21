@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
@@ -212,6 +212,11 @@ export async function POST(req: NextRequest) {
     const body = auth.body;
 
     const conn = await connectToDatabase();
+    // A pass that could not reach the catalogue must not probe the seed store:
+    // its verdicts would be written against links no viewer has, and the batch
+    // would report a clean run. The runner retries a 503 as a batch failure.
+    const unavailable = databaseUnavailable(conn, "Database unavailable — this batch checked nothing");
+    if (unavailable) return unavailable;
     const now = new Date();
     const requestedCursor =
       typeof body.before === "string" && !Number.isNaN(Date.parse(body.before))

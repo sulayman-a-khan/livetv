@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { authorizeAdminRequest } from "@/lib/adminAuth";
@@ -47,6 +47,8 @@ export async function POST(req: NextRequest) {
     }
 
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was saved");
+    if (unavailable) return unavailable;
 
     if (conn) {
       if (!mongoose.isValidObjectId(channelId)) {

@@ -1,11 +1,14 @@
 import mongoose from "mongoose";
+import { NextResponse } from "next/server";
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Skip retrying immediately after a failed connection attempt so a MongoDB
-// outage doesn't cost every single request its own full timeout — after a
-// failure we fall back to in-memory instantly for this long, then try again.
-// On Vercel serverless each cold start is a fresh process, so keep it short.
+// outage doesn't cost every single request its own full timeout — during the
+// cooldown `connectToDatabase` returns null instantly instead of waiting, and
+// the caller decides what a null connection means for its route (see
+// `databaseUnavailable`). On Vercel serverless each cold start is a fresh
+// process, so keep it short.
 const RETRY_COOLDOWN_MS = process.env.VERCEL ? 2_000 : 10_000;
 
 interface MongooseCache {
@@ -28,7 +31,8 @@ if (!global.mongooseCache) {
 /**
  * Connects to MongoDB with a short connection timeout.
  * If MongoDB is not running/reachable, catches the error and returns null
- * so API routes seamlessly switch to the in-memory data store.
+ * so API routes seamlessly switch to the in-memory data store. On a deployment
+ * that switch is not seamless — see `mustUseDatabase`.
  */
 export async function connectToDatabase(): Promise<typeof mongoose | null> {
   if (cached.conn && cached.conn.connection && cached.conn.connection.readyState === 1) {
@@ -69,4 +73,37 @@ export async function connectToDatabase(): Promise<typeof mongoose | null> {
     // Return null so inMemoryDb is used smoothly
     return null;
   }
+}
+
+/**
+ * Whether this process may treat the in-memory store as its catalogue.
+ *
+ * `data/store.json` is developer data and is never deployed, so on Vercel the
+ * store is the seed catalogue — a handful of demo channels, none of them
+ * pinned. Falling back there is not a degraded view of the real data, it is a
+ * different dataset answering confidently: the watch page reports a live
+ * channel as missing, an admin action claims a change that dies with the
+ * lambda, and a health pass probes links that belong to no viewer. Off Vercel
+ * the same fallback is the entire point of running locally, so only a
+ * deployment is required to have a database.
+ */
+export function mustUseDatabase(): boolean {
+  return Boolean(process.env.VERCEL);
+}
+
+/**
+ * The response a route should return instead of reaching for the in-memory
+ * store: 503 so a client can retry, `no-store` so the edge cannot freeze the
+ * outage into 30 seconds of an empty-looking site. Returns null when the caller
+ * should continue — the database answered, or this is a local run.
+ */
+export function databaseUnavailable(
+  conn: typeof mongoose | null,
+  error: string
+): NextResponse | null {
+  if (conn || !mustUseDatabase()) return null;
+  return NextResponse.json(
+    { success: false, error },
+    { status: 503, headers: { "Cache-Control": "no-store" } }
+  );
 }

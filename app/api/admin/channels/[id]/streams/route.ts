@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
-import { connectToDatabase } from "@/lib/db";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
@@ -50,6 +50,8 @@ export async function POST(
     const status: "active" | "broken" = working ? "active" : "broken";
     const now = new Date();
     const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(conn, "Database unavailable — nothing was saved");
+    if (unavailable) return unavailable;
 
     if (conn && mongoose.isValidObjectId(id)) {
       const channel = await Channel.findById(id);

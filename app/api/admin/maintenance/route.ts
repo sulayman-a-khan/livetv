@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/adminAuth";
+import { connectToDatabase, databaseUnavailable } from "@/lib/db";
 import { runMaintenance } from "@/lib/maintenanceRunner";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,12 @@ export async function POST(req: NextRequest) {
         { status: auth.status }
       );
     }
+    const conn = await connectToDatabase();
+    const unavailable = databaseUnavailable(
+      conn,
+      "Database unavailable — nothing was cleaned up"
+    );
+    if (unavailable) return unavailable;
     const report = await runMaintenance();
     return NextResponse.json({ success: true, report });
   } catch (error: any) {

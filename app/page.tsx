@@ -80,6 +80,16 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
       <Header />
 
+      {/* Promo banner — phones only, edge to edge under the navbar */}
+      <div className="sm:hidden">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/images/mobile-promo-banner.jpg"
+          alt="খেলা ও টিভি দেখুন যখন তখন"
+          className="block w-full h-auto"
+        />
+      </div>
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
         {/* Channel rails */}
         {loading ? (

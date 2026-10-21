@@ -32,7 +32,6 @@ export interface CategoryConfig {
   flag: string;
   subtitle: string;
   description: string;
-  image: string;
   /** The exact `Channel.category` value this rail lists. */
   category: ChannelCategory;
 }
@@ -47,7 +46,6 @@ export const CATEGORIES: CategoryConfig[] = [
     subtitle: "Live Sports • Football • Cricket & More",
     description:
       "Stream live sports broadcasts, football leagues, international cricket tournaments, and match highlights in crystal clear HD.",
-    image: "/images/cat_sports.jpg",
     category: "Sports",
   },
   {
@@ -59,7 +57,6 @@ export const CATEGORIES: CategoryConfig[] = [
     subtitle: "News • Entertainment • Islamic & More",
     description:
       "Watch your favorite Bangladeshi TV channels live. News, drama, entertainment and more.",
-    image: "/images/cat_bangladesh.jpg",
     category: "Bangla",
   },
   {
@@ -71,7 +68,6 @@ export const CATEGORIES: CategoryConfig[] = [
     subtitle: "News • Movies • Entertainment & More",
     description:
       "Watch popular Indian TV channels live featuring 24/7 breaking news, Bollywood movies, Hindi dramas and regional entertainment.",
-    image: "/images/cat_india.jpg",
     category: "Indian",
   },
   {
@@ -83,7 +79,6 @@ export const CATEGORIES: CategoryConfig[] = [
     subtitle: "News • Drama • Entertainment & More",
     description:
       "Stream top Pakistani television channels live with popular dramas, talk shows, news coverage and live sports.",
-    image: "/images/cat_pakistan.jpg",
     category: "Pakistani",
   },
   {
@@ -95,7 +90,6 @@ export const CATEGORIES: CategoryConfig[] = [
     subtitle: "Nature • Science • History & More",
     description:
       "Explore documentary channels covering wildlife, science, history, travel and the natural world in crystal clear HD.",
-    image: "/images/hero_banner.jpg",
     category: "Documentary",
   },
 ];

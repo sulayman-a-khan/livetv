@@ -376,6 +376,13 @@ export default function DirectHlsPlayer({
     return activeStream ? isYouTubeStream(activeStream.url) : false;
   }, [activeStream]);
 
+  // Hosts that rebuild their `streams` prop every render (the admin editor sits
+  // under a 1s dashboard tick and passes an inline array) hand us a NEW
+  // activeStream object each time even though nothing about the mirror changed.
+  // Loader effects must key off this stable URL string, not the object identity,
+  // or they tear the player down and rebuild it on every parent re-render.
+  const activeStreamUrl = activeStream ? activeStream.url : null;
+
   // ---- YouTube IFrame-API playback state (only used when isYouTube) ----
   // The mount div the IFrame API replaces with its own iframe, and the player
   // instance whose methods the shared control bar drives when isYouTube.
@@ -840,10 +847,10 @@ export default function DirectHlsPlayer({
   // is the only chrome. Re-runs on a mirror/channel change and tears the iframe
   // down on cleanup, so switching away from YouTube leaves nothing behind.
   useEffect(() => {
-    if (!isYouTube || !activeStream) return;
+    if (!isYouTube || !activeStreamUrl) return;
 
     let cancelled = false;
-    const url = activeStream.url;
+    const url = activeStreamUrl;
     setYtStatus("resolving");
     setYtError(null);
 
@@ -934,7 +941,7 @@ export default function DirectHlsPlayer({
       ytMountRef.current?.replaceChildren();
       setYtStatus("idle");
     };
-  }, [isYouTube, activeStream, channelName]);
+  }, [isYouTube, activeStreamUrl, channelName]);
 
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {

@@ -55,6 +55,61 @@ export default function ChannelRail({ title, accent, categorySlug, channels }: C
     return () => ro.disconnect();
   }, [updateArrows, channels.length]);
 
+  /**
+   * First-load affordance: glide the rail forward a few channels and back to
+   * the start, so it reads as a swipeable row rather than a clipped list.
+   * Abandoned the moment the user touches it, never shown under reduced motion,
+   * and skipped entirely when the channels already fit.
+   */
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el || channels.length === 0) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 8) return;
+
+    // A few channels forward, measured from the tiles themselves so the sweep
+    // reads the same on a 390px phone and a 1440px desktop.
+    const kids = Array.from(el.children) as HTMLElement[];
+    const step =
+      kids.length > 1 ? kids[1].offsetLeft - kids[0].offsetLeft : Math.round(el.clientWidth * 0.25);
+    const target = Math.min(max, Math.round(step * 4) || Math.round(max * 0.3));
+
+    // snap-mandatory yanks a scripted sweep straight back to the first tile.
+    const sweepTo = (left: number) => {
+      el.style.scrollSnapType = "none";
+      el.scrollTo({ left, behavior: "smooth" });
+    };
+
+    let done = false;
+    const abort = () => {
+      done = true;
+      el.style.scrollSnapType = "";
+    };
+
+    const timers = [
+      window.setTimeout(() => {
+        if (!done) sweepTo(target);
+      }, 500),
+      window.setTimeout(() => {
+        if (!done) el.scrollTo({ left: 0, behavior: "smooth" });
+      }, 1300),
+      window.setTimeout(() => {
+        el.style.scrollSnapType = "";
+      }, 2200),
+    ];
+
+    const gestures = ["pointerdown", "touchstart", "wheel", "keydown"];
+    gestures.forEach((type) => el.addEventListener(type, abort, { passive: true, once: true }));
+
+    return () => {
+      abort();
+      timers.forEach(clearTimeout);
+      gestures.forEach((type) => el.removeEventListener(type, abort));
+    };
+  }, [channels.length]);
+
   const scrollByPage = (dir: 1 | -1) => {
     const el = scrollerRef.current;
     if (!el) return;

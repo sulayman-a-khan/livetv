@@ -617,8 +617,8 @@ export default function WatchPage() {
       </div>
 
       <main className="flex-1 min-h-0 flex flex-col overflow-hidden lg:block lg:overflow-visible max-w-[1400px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-3 lg:py-6 lg:space-y-5">
-        {/* Top Back Navigation - shown while loading / on error (non-sticky) */}
-        {(initialLoading || (!initialLoading && error)) && (
+        {/* Top Back Navigation - shown on error (non-sticky) */}
+        {!initialLoading && error && (
           <div>
             <Link
               href={`/`}
@@ -629,15 +629,6 @@ export default function WatchPage() {
               </div>
               <span>Back to Home</span>
             </Link>
-          </div>
-        )}
-
-        {initialLoading && (
-          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-10 text-center max-w-md mx-auto my-12 shadow-2xl">
-            <SatelliteReceiver tone="locking" />
-            <p className="mt-3 text-xs font-bold text-cyan-200 tracking-wide">
-              Locking onto satellite signal...
-            </p>
           </div>
         )}
 
@@ -655,7 +646,7 @@ export default function WatchPage() {
           </div>
         )}
 
-        {!initialLoading && channel && !error && (
+        {!error && (channel || initialLoading) && (
           <div className="flex flex-col flex-1 min-h-0 gap-3 lg:grid lg:grid-cols-12 lg:gap-6 lg:items-start lg:flex-none lg:min-h-0">
             {/* ========== LEFT: Player + Channel Info Card (8 cols) ========== */}
             <div ref={leftColRef} className="lg:col-span-8 space-y-4 shrink-0">
@@ -679,7 +670,18 @@ export default function WatchPage() {
 
                 {/* TV Player Box */}
                 <div className="relative overflow-hidden border-0 rounded-none bg-black shadow-2xl">
-                  {channel.streams.length === 0 ? (
+                  {initialLoading ? (
+                    // The page itself renders as soon as the route is entered; only
+                    // the frame waits for the channel-details fetch, holding the same
+                    // receiver the player shows while it tunes. No separate
+                    // full-page loading screen stands between home and this page.
+                    <div className="relative w-full aspect-video bg-black flex flex-col items-center justify-center">
+                      <SatelliteReceiver tone="locking" />
+                      <p className="mt-2 text-xs font-bold text-cyan-200 tracking-wide">
+                        Locking onto satellite signal...
+                      </p>
+                    </div>
+                  ) : !channel ? null : channel.streams.length === 0 ? (
                     // The API only lists channels with a verified playable link,
                     // so getting here means every mirror failed since this page
                     // loaded. Say so instead of pointing a player at nothing.
@@ -733,47 +735,49 @@ export default function WatchPage() {
               </div>
 
               {/* Bottom Channel Info Banner - Hidden on Mobile */}
-              <div className="hidden lg:flex rounded-2xl border border-slate-800/80 bg-[#0a1222] p-4 sm:p-5 items-center gap-4 shadow-xl">
-                {/* White Logo Container */}
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white p-2.5 flex items-center justify-center shrink-0 shadow-md">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={getChannelLogo(channel.name, channel.logo)}
-                    alt={channel.name}
-                    className="max-w-full max-h-full object-contain"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      if (!target.dataset.fallback) {
-                        target.dataset.fallback = "true";
-                        const initials = channel.name.substring(0, 2).toUpperCase();
-                        target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
-                      }
-                    }}
-                  />
-                </div>
-
-                {/* Channel Details */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <h1 className="text-base sm:text-lg font-black text-white tracking-tight">
-                      {channel.name}
-                    </h1>
-                    {/* Category Pill */}
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                      {currentCategoryConfig.title}
-                    </span>
-                    {/* Live Pill */}
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-400 border border-red-500/30">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                      <span>LIVE</span>
-                    </span>
+              {channel && (
+                <div className="hidden lg:flex rounded-2xl border border-slate-800/80 bg-[#0a1222] p-4 sm:p-5 items-center gap-4 shadow-xl">
+                  {/* White Logo Container */}
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white p-2.5 flex items-center justify-center shrink-0 shadow-md">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={getChannelLogo(channel.name, channel.logo)}
+                      alt={channel.name}
+                      className="max-w-full max-h-full object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement;
+                        if (!target.dataset.fallback) {
+                          target.dataset.fallback = "true";
+                          const initials = channel.name.substring(0, 2).toUpperCase();
+                          target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
+                        }
+                      }}
+                    />
                   </div>
 
-                  <p className="text-xs text-slate-400">
-                    {channel.category || "Live TV"} • HD Quality Stream
-                  </p>
+                  {/* Channel Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h1 className="text-base sm:text-lg font-black text-white tracking-tight">
+                        {channel.name}
+                      </h1>
+                      {/* Category Pill */}
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        {currentCategoryConfig.title}
+                      </span>
+                      {/* Live Pill */}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-400 border border-red-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                        <span>LIVE</span>
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-400">
+                      {channel.category || "Live TV"} • HD Quality Stream
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* ========== RIGHT: Category Channels Sidebar (4 cols) ========== */}

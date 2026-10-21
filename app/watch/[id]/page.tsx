@@ -735,7 +735,7 @@ export default function WatchPage() {
               </div>
 
               {/* Bottom Channel Info Banner - Hidden on Mobile */}
-              {channel && (
+              {channel ? (
                 <div className="hidden lg:flex rounded-2xl border border-slate-800/80 bg-[#0a1222] p-4 sm:p-5 items-center gap-4 shadow-xl">
                   {/* White Logo Container */}
                   <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white p-2.5 flex items-center justify-center shrink-0 shadow-md">
@@ -775,6 +775,15 @@ export default function WatchPage() {
                     <p className="text-xs text-slate-400">
                       {channel.category || "Live TV"} • HD Quality Stream
                     </p>
+                  </div>
+                </div>
+              ) : (
+                // Same box as the banner: the sidebar card is sized off this column's height.
+                <div className="hidden lg:flex rounded-2xl border border-slate-800/80 bg-[#0a1222] p-4 sm:p-5 items-center gap-4 shadow-xl">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white/[0.06] shrink-0 animate-pulse" />
+                  <div className="flex-1 min-w-0 animate-pulse">
+                    <div className="h-[18px] w-44 max-w-full rounded bg-white/[0.06] mb-1" />
+                    <div className="h-3 w-32 max-w-full rounded bg-white/[0.06]" />
                   </div>
                 </div>
               )}

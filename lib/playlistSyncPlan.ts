@@ -398,18 +398,3 @@ export function planPlaylistSync(
 
   return plan;
 }
-
-/**
- * Stats the dashboard shows per source, derived from the summary the last run
- * stored. Kept in one place so the API and the UI agree on the wording.
- */
-export function describeSyncStats(stats: PlaylistSyncPlan["stats"]): string {
-  const parts: string[] = [];
-  if (stats.updatedUrls) parts.push(`${stats.updatedUrls} updated URL(s)`);
-  if (stats.linksAddedActive) parts.push(`${stats.linksAddedActive} working link(s)`);
-  if (stats.linksAddedBroken) parts.push(`${stats.linksAddedBroken} unverified link(s)`);
-  if (stats.entriesRemoved) parts.push(`${stats.entriesRemoved} unavailable`);
-  if (stats.linksRetired) parts.push(`${stats.linksRetired} retired`);
-  if (stats.linksRevived) parts.push(`${stats.linksRevived} recovered`);
-  return parts.length ? parts.join(" · ") : "No changes";
-}

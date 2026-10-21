@@ -49,6 +49,12 @@ scratch_channels.json
 # lib/inMemoryStore.ts recreates it automatically when it is missing.
 /data/store.json
 
+# Temporary local-testing capture of the production catalogue, and the store
+# it is loaded into. Both are local-only: the capture is taken through the
+# public API and must never reach the repository or a deployment.
+/data/prod-snapshot.json
+/data/store.snapshot.json
+
 # Throwaway verification scripts
 /.tmp-verify
 

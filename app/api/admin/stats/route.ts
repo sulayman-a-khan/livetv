@@ -2,12 +2,40 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
-import { inMemoryDb } from "@/lib/inMemoryStore";
+import { inMemoryDb, type InMemoryStreamLink } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { rankStreams } from "@/lib/channelMaintenance";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Only the fields the admin dashboard renders. `headers` — the upstream
+ * Referer/Origin and, on some providers, a credential — stays on the server:
+ * the prober reads it, the browser never does.
+ */
+const ADMIN_STREAM_FIELDS =
+  "_id channelId url priority status latency failedAttempts lastCheckedAt adminDisabled browserBlocker deliveryHidden deliveryMisses manual lastCheck";
+
+/** The same projection for the in-memory store, which holds the same records. */
+function pickAdminStreamFields(s: InMemoryStreamLink) {
+  return {
+    _id: s._id,
+    channelId: s.channelId,
+    url: s.url,
+    priority: s.priority,
+    status: s.status,
+    latency: s.latency,
+    failedAttempts: s.failedAttempts,
+    lastCheckedAt: s.lastCheckedAt,
+    adminDisabled: s.adminDisabled,
+    browserBlocker: s.browserBlocker,
+    deliveryHidden: s.deliveryHidden,
+    deliveryMisses: s.deliveryMisses,
+    manual: s.manual,
+    lastCheck: s.lastCheck,
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -33,9 +61,13 @@ export async function GET(req: NextRequest) {
 
       // Single query for every stream instead of one query per channel
       // (was an N+1 query pattern — 1300+ round trips on this catalogue size).
+      // The projection is the whitelist above: a link's upstream `headers`
+      // must not travel to the browser.
       const allStreams = await StreamLink.find({
         channelId: { $in: allChannels.map((ch) => ch._id) },
-      }).lean();
+      })
+        .select(ADMIN_STREAM_FIELDS)
+        .lean();
       const streamsByChannel = new Map<string, typeof allStreams>();
       for (const s of allStreams) {
         const key = String(s.channelId);
@@ -67,7 +99,7 @@ export async function GET(req: NextRequest) {
     } else {
       // In-Memory Fallback Mode
       const channels = inMemoryDb.getChannels();
-      const streams = inMemoryDb.getStreams();
+      const streams = inMemoryDb.getStreams().map(pickAdminStreamFields);
 
       const activeStreams = streams.filter((s) => s.status === "active").length;
       const degradedStreams = streams.filter((s) => s.status === "degraded").length;

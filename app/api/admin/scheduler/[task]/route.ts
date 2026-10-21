@@ -60,6 +60,14 @@ export async function GET(req: NextRequest, { params }: { params: { task: string
 }
 
 export async function POST(req: NextRequest, { params }: { params: { task: string } }) {
+  // The credential is checked before the body is read, so a request that
+  // presents a wrong one is rejected without the server buffering a payload.
+  if (!authorized(req)) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized: set CRON_SECRET or send x-admin-secret" },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
   const body = await req.json().catch(() => ({}));
   return handle(req, params.task, body?.force === true || String(body?.force) === "1");
 }

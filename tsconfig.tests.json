@@ -17,6 +17,7 @@
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
     "lib/streamHealth.ts",
-    "lib/ssrfGuard.ts"
+    "lib/ssrfGuard.ts",
+    "lib/safeFetch.ts"
   ]
 }

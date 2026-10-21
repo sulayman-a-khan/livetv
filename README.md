@@ -7,8 +7,8 @@ FreeTV is a Production-Grade Automated Live Streaming Web Platform built with Ne
 ## Key Features
 
 1. **Cricfy / Sportsfy Inspired Modern UI**:
-   - Dark mode glassmorphism UI with live badges, country flags, active stream counts, and category pills.
-   - Filters for **Live Sports (Cricket, Football, Others)**, **Bangladesh**, **India**, **Pakistan**, **News**, and **Entertainment**.
+   - Dark mode glassmorphism UI with live badges, category badge flags, active stream counts, and category pills.
+   - Category rails for **Sports**, **Bangla**, **Indian**, **Pakistani**, and **Documentary** (defined once in `lib/categories.ts`).
 
 2. **Smart 5-Second Auto-Failover HLS Player**:
    - Built with `hls.js`.
@@ -17,12 +17,12 @@ FreeTV is a Production-Grade Automated Live Streaming Web Platform built with Ne
    - Stream mirror pills allow manual stream switching with latency indicators.
 
 3. **Database Architecture (MongoDB + Mongoose)**:
-   - `Channel`: `name`, `normalizedName` (unique indexed), `logo`, `category`, `subCategory`, `country`.
-   - `StreamLink`: `channelId` (ref), `url`, `priority`, `status` ('active'/'degraded'/'broken'), `failedAttempts`, `firstFailedAt`, `latency`, `lastCheckedAt`.
+   - `Channel`: `name`, `normalizedName` (unique indexed; holds the `canonicalChannelKey` identity key), `logo`, `category` (one of the five in `lib/categories.ts`), `isPinned`, `priorityOrder`, `tags`, `isManuallyEdited`.
+   - `StreamLink`: `channelId` (ref), `url`, `priority`, `status` ('active'/'degraded'/'broken'), `failedAttempts`, `firstFailedAt`, `lastCheckedAt`, `latency`, plus the health bookkeeping `lastCountedFailureDay`, `browserBlocker`, `deliveryMisses`, `lastDeliveryMissAt`, `deliveryHidden`, `manual`, `adminDisabled`. The `headers` and `lastCheck` fields are server-side only and are never published to the public API.
 
 4. **Hidden Admin Gate & M3U Ingestion (`/admin-secret-gate`)**:
    - Secured by the `ADMIN_SECRET_KEY` env variable. There is no built-in default: with the variable unset, every admin route rejects the request. Never commit a real secret here — this repository is public.
-   - M3U parser deduplicates channels by normalized name and maps multiple stream URLs as backup mirrors.
+   - M3U parser deduplicates channels by their `canonicalChannelKey` identity key and maps multiple stream URLs as backup mirrors.
    - Dashboard with live channel stats and manual health check execution button.
 
 5. **Automated Health Checks & 72-Hour Auto-Cleaner (GitHub Actions)**:
@@ -40,7 +40,7 @@ FreeTV is a Production-Grade Automated Live Streaming Web Platform built with Ne
 
 ### Prerequisites
 - Node.js 18+ installed
-- Local MongoDB running at `mongodb://127.0.0.1:27017/freetv` (or a MongoDB Atlas connection URI)
+- Local MongoDB at `mongodb://127.0.0.1:27017/freetv` (or a MongoDB Atlas connection URI) — optional; with `MONGODB_URI` unset the app uses the local JSON store instead.
 
 ### Step 1: Clone & Configure Environment
 Copy the committed template and fill in your own values (`.env.local` is gitignored, never committed):
@@ -64,11 +64,15 @@ With `ADMIN_SECRET_KEY` empty, every `/api/admin/*` route answers 401 and the ad
 npm install
 ```
 
-### Step 3: Seed Sample Live Channels & Working Streams
-Populate the database with sample Sports (Cricket/Football), News, and Regional channels across Bangladesh, India, and Pakistan:
+### Step 3: Get a Local Channel Catalogue
+MongoDB is optional locally: with `MONGODB_URI` unset the app falls back to a local JSON store at `data/store.json`. Fill it by ingesting an M3U playlist through `/admin-secret-gate` — or capture the live catalogue read-only into a temporary snapshot:
+
 ```bash
-npm run seed
+npm run snapshot:production   # writes data/prod-snapshot.json (git-ignored, public fields only)
+npm run dev:snapshot          # runs `next dev` against that snapshot instead of data/store.json
 ```
+
+`dev:snapshot` never contacts MongoDB, never writes `data/store.json`, and writes only to `data/store.snapshot.json`. Both snapshot files are git-ignored and are never picked up by a production build.
 
 ### Step 4: Start Next.js Development Server
 ```bash
@@ -84,4 +88,4 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 2. Enter the Admin Secret Key — the value you set as `ADMIN_SECRET_KEY`. It is not stored in this repository.
 3. Paste an M3U Playlist URL or raw M3U text content.
 4. Click **Ingest M3U Stream Links** to automatically deduplicate channels and attach backup mirrors.
-5. Click **Run Health Check (30 Batch)** to trigger instant background health checks.
+5. Click **Run Health Check (All Pinned)** to trigger instant background health checks.

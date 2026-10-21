@@ -281,7 +281,7 @@ const hourField = fields[1] ?? "";
 const hours = hourField.split(",").map((part) => Number(part));
 const evenSpacing =
   hours.length === 6 &&
-  hours.every((hour, index) => Number.isFinite(hour)) &&
+  hours.every((hour) => Number.isFinite(hour)) &&
   hours.every((hour, index) => (hours[(index + 1) % 6] - hour + 24) % 24 === 4);
 check(
   "the pass fires every four hours at :37",

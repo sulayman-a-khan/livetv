@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
 import { deleteSource, updateSource, validateSourceInput } from "@/lib/playlistSources";
 
 export const dynamic = "force-dynamic";
@@ -23,13 +23,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const body = await req.json().catch(() => ({}));
-    if (!isAuthorizedAdmin(req, body.secretKey)) {
+    const auth = await authorizeAdminRequest(req);
+    if (!auth.ok) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const body = auth.body;
 
     const { value, errors } = validateSourceInput(body, false);
     if (errors.length > 0) {

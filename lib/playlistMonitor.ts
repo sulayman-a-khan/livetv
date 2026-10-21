@@ -19,7 +19,6 @@
  */
 
 import { connectToDatabase } from "./db";
-import PlaylistSource from "@/models/PlaylistSource";
 import { syncAllDueSources, type PlaylistSyncSummary } from "./playlistSync";
 
 /** UTC hour every daily source check is anchored to. Change only this. */
@@ -243,23 +242,4 @@ export function getPlaylistMonitorStatus(): PlaylistMonitorStatus {
     lastTickAt: global.__freetv_playlist_last_tick || null,
     lastResult: global.__freetv_playlist_last_result || null,
   };
-}
-
-/** Sources that are past their daily check, or due for a fetch retry, right now. */
-export async function countDueSources(): Promise<number> {
-  const conn = await connectToDatabase();
-  if (!conn) return 0;
-  const now = new Date();
-  return PlaylistSource.countDocuments({
-    active: true,
-    monitored: true,
-    $or: [
-      { lastCheckedAt: null },
-      { lastCheckedAt: { $lt: lastScheduledSyncAt(now) } },
-      {
-        lastStatus: "failed",
-        lastCheckedAt: { $lt: new Date(now.getTime() - FAILED_RETRY_MS) },
-      },
-    ],
-  });
 }

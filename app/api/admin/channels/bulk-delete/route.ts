@@ -4,20 +4,20 @@ import { connectToDatabase } from "@/lib/db";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest } from "@/lib/adminAuth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-
-    if (!isAuthorizedAdmin(req, body.secretKey)) {
+    const auth = await authorizeAdminRequest(req);
+    if (!auth.ok) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const body = auth.body;
 
     const { ids } = body;
     if (!Array.isArray(ids) || ids.length === 0) {

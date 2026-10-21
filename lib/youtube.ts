@@ -68,19 +68,3 @@ export function extractYouTubeVideoId(url: string): string | null {
   }
 }
 
-/**
- * True for a channel-style "live" URL that names a channel/handle rather
- * than a specific video — these have no fixed video ID and must be resolved
- * against YouTube's Data API server-side to find whatever is live right now.
- */
-export function isYouTubeChannelLiveUrl(url: string): boolean {
-  if (!isYouTubeUrl(url)) return false;
-  if (extractYouTubeVideoId(url)) return false;
-  try {
-    const parsed = new URL(url);
-    const segments = parsed.pathname.split("/").filter(Boolean);
-    return segments.includes("live") || segments.includes("streams");
-  } catch {
-    return false;
-  }
-}

@@ -12,7 +12,7 @@ import {
 } from "@/lib/streamHealth";
 import { refreshChannelLinks, runMaintenance } from "@/lib/maintenanceRunner";
 import { rankingShifted } from "@/lib/channelMaintenance";
-import { isAuthorizedAdmin, isAuthorizedByBearer } from "@/lib/adminAuth";
+import { authorizeAdminRequest } from "@/lib/adminAuth";
 import {
   applyBatchOutcome,
   beginHealthRun,
@@ -194,21 +194,22 @@ async function measurePending(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-
     // Two credentials, deliberately not the same one. The dashboard presents the
     // admin secret; the external runner presents `HEALTH_CHECK_SECRET`, which is
     // accepted by this route only — it cannot delete links, edit channels or run
     // maintenance, so the machine that schedules the pass never holds the key
     // that owns the admin area. Both paths fail closed when their variable is
     // unset, so an unconfigured deployment simply has no external runner.
-    const viaRunCredential = isAuthorizedByBearer(req, "HEALTH_CHECK_SECRET");
-    if (!viaRunCredential && !isAuthorizedAdmin(req, body.secretKey)) {
+    // The credential is settled before the body is read, so a request that
+    // presents a wrong one is rejected without the server buffering a payload.
+    const auth = await authorizeAdminRequest(req, { bearerEnv: "HEALTH_CHECK_SECRET" });
+    if (!auth.ok) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const body = auth.body;
 
     const conn = await connectToDatabase();
     const now = new Date();
@@ -260,7 +261,7 @@ export async function POST(req: NextRequest) {
     // genuinely mid-flight is refused rather than allowed to test the same links
     // a second time and count them twice.
     const begun = await beginHealthRun({
-      trigger: viaRunCredential ? "github" : "admin",
+      trigger: auth.credential === "bearer" ? "github" : "admin",
       requestedCursor,
       eligible: measure.pending,
       now,

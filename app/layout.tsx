@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import Header from "@/components/Header";
 import AdManager from "@/components/AdManager";
-import { Tv, ShieldCheck } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "SoluPlay - Automated Production Live Streaming Platform",

@@ -8,6 +8,7 @@ import fs from "fs";
 import path from "path";
 import { getChannelLogo } from "./utils";
 import { normalizeCategory, type ChannelCategory } from "./categories";
+import { canonicalChannelKey } from "./channelIdentity";
 
 export interface InMemoryChannel {
   _id: string;
@@ -97,6 +98,35 @@ export interface InMemoryStreamLink {
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
+
+/**
+ * Opt-in local testing snapshot.
+ *
+ * `LOCAL_CATALOGUE_SNAPSHOT` points at a capture of the production catalogue
+ * (see `scripts/snapshot-production-catalogue.mjs`), so a local run shows the
+ * same channels and the same viewer-visible ladder the live site shows.
+ *
+ * Three conditions all have to hold before the snapshot is used, and every one
+ * of them is about keeping production safe:
+ *   - the variable is set — a normal local run is completely unaffected,
+ *   - there is no `MONGODB_URI` — a configured database always wins,
+ *   - the process is not on Vercel — a snapshot can never be selected in a
+ *     deployment.
+ *
+ * In snapshot mode the catalogue is persisted to `store.snapshot.json` instead
+ * of `store.json`, so a testing run can never overwrite the developer's own
+ * local catalogue.
+ */
+const SNAPSHOT_ENV = "LOCAL_CATALOGUE_SNAPSHOT";
+const snapshotPath = (process.env[SNAPSHOT_ENV] || "").trim();
+const SNAPSHOT_ACTIVE = Boolean(snapshotPath) && !process.env.MONGODB_URI && !process.env.VERCEL;
+const SNAPSHOT_FILE = SNAPSHOT_ACTIVE ? path.resolve(process.cwd(), snapshotPath) : "";
+const SNAPSHOT_STORE_FILE = path.join(DATA_DIR, "store.snapshot.json");
+/** Where the catalogue is read from. */
+const READ_FILE =
+  SNAPSHOT_ACTIVE && fs.existsSync(SNAPSHOT_STORE_FILE) ? SNAPSHOT_STORE_FILE : SNAPSHOT_ACTIVE ? SNAPSHOT_FILE : DATA_FILE;
+/** Where the catalogue is written to. */
+const WRITE_FILE = SNAPSHOT_ACTIVE ? SNAPSHOT_STORE_FILE : DATA_FILE;
 
 const seedChannel = (
   _id: string,
@@ -260,8 +290,8 @@ function ensureLoaded(force: boolean = false) {
   }
 
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = fs.readFileSync(DATA_FILE, "utf-8");
+    if (fs.existsSync(READ_FILE)) {
+      const raw = fs.readFileSync(READ_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed.channels) && Array.isArray(parsed.streams)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,6 +305,13 @@ function ensureLoaded(force: boolean = false) {
           priorityOrder: typeof c.priorityOrder === "number" ? c.priorityOrder : 99,
           createdAt: c.createdAt ? new Date(c.createdAt) : new Date(),
           updatedAt: c.updatedAt ? new Date(c.updatedAt) : new Date(),
+          // A capture of the production catalogue carries no `normalizedName`
+          // (the public API does not publish it), so it is derived from the
+          // same key function every other code path uses.
+          normalizedName:
+            typeof c.normalizedName === "string" && c.normalizedName
+              ? c.normalizedName
+              : canonicalChannelKey(c.name),
           // A hand-edited record keeps its own logo; only a stored record gets
           // its missing logo resolved.
           logo: c.isManuallyEdited ? c.logo : getChannelLogo(c.name, c.logo),
@@ -291,7 +328,7 @@ function ensureLoaded(force: boolean = false) {
       }
     }
   } catch (err) {
-    console.error("[inMemoryStore] Failed to read store.json from disk:", err);
+    console.error("[inMemoryStore] Failed to read the catalogue from disk:", err);
   }
 
   global.__freetv_in_memory_channels = [...INITIAL_CHANNELS];
@@ -308,17 +345,17 @@ function saveToDisk() {
       channels: global.__freetv_in_memory_channels || [],
       streams: global.__freetv_in_memory_streams || [],
     };
-    // Atomic write. A crash mid-serialize must never leave store.json truncated:
+    // Atomic write. A crash mid-serialize must never leave the store truncated:
     // a truncated file fails JSON.parse on the next boot, ensureLoaded catches it
     // and silently falls back to the seed catalogue — losing every ingested
     // channel. Write to a temp file on the same volume, then rename over the
     // target (rename replaces atomically on both POSIX and Windows). The pid in
     // the temp name keeps concurrent processes from colliding.
-    const tmpFile = `${DATA_FILE}.${process.pid}.tmp`;
+    const tmpFile = `${WRITE_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tmpFile, DATA_FILE);
+    fs.renameSync(tmpFile, WRITE_FILE);
   } catch (err) {
-    console.error("[inMemoryStore] Failed to write store.json to disk:", err);
+    console.error("[inMemoryStore] Failed to write the catalogue to disk:", err);
   }
 }
 
@@ -381,17 +418,6 @@ export const inMemoryDb = {
     saveToDisk();
     return removed;
   },
-  updateChannelLogo: (id: string, logo: string) => {
-    ensureLoaded();
-    if (global.__freetv_in_memory_channels) {
-      const ch = global.__freetv_in_memory_channels.find((c) => c._id === id);
-      if (ch) {
-        ch.logo = logo;
-        ch.updatedAt = new Date();
-      }
-    }
-    saveToDisk();
-  },
   updateChannelPin: (id: string, isPinned: boolean, priorityOrder: number): boolean => {
     ensureLoaded();
     let found = false;
@@ -407,18 +433,22 @@ export const inMemoryDb = {
     saveToDisk();
     return found;
   },
-  updatePinnedOrder: (orderedIds: string[]) => {
+  /** Returns how many of the given ids were actually re-ordered. */
+  updatePinnedOrder: (orderedIds: string[]): number => {
     ensureLoaded();
+    let applied = 0;
     if (global.__freetv_in_memory_channels) {
       orderedIds.forEach((id, index) => {
         const ch = global.__freetv_in_memory_channels!.find((c) => c._id === id);
         if (ch) {
           ch.priorityOrder = index + 1;
           ch.updatedAt = new Date();
+          applied++;
         }
       });
     }
     saveToDisk();
+    return applied;
   },
   /**
    * Generic field patch used by the admin editor and the maintenance runner.

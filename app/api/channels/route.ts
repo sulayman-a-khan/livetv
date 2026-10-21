@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
         const cId = stream.channelId ? stream.channelId.toString() : "";
         if (!cId) continue;
         if (!streamMap.has(cId)) streamMap.set(cId, []);
-        streamMap.set(cId, [...streamMap.get(cId)!, stream]);
+        streamMap.get(cId)!.push(stream);
       }
 
       const result = channels

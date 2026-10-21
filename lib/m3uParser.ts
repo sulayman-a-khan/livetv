@@ -3,7 +3,6 @@ import { classifyCategory, type ChannelCategory } from "./categories";
 
 export interface ParsedM3uChannel {
   name: string;
-  normalizedName: string;
   logo: string;
   /** Exactly one of the five catalogue categories. */
   category: ChannelCategory;
@@ -46,9 +45,9 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
     } else if (line.startsWith("http://") || line.startsWith("https://")) {
       if (currentMeta && currentMeta.name) {
         const rawName = currentMeta.name;
-        const normalized = normalizeChannelName(rawName);
 
-        if (normalized) {
+        // A name with no alphanumeric characters carries no identity — skip it.
+        if (normalizeChannelName(rawName)) {
           const category = classifyCategory(rawName, currentMeta.groupTitle || "");
 
           // Resolve logo online if tvg-logo attribute was missing or empty
@@ -56,7 +55,6 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
 
           channels.push({
             name: rawName,
-            normalizedName: normalized,
             logo,
             category,
             streamUrl: line,

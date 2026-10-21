@@ -73,3 +73,115 @@ export function isAuthorizedByBearer(req: NextRequest, envName: string): boolean
   const token = header.replace(/^Bearer\s+/i, "").trim();
   return Boolean(token) && safeEquals(token, expected);
 }
+
+/** The message every admin route has always answered an unauthorized call with. */
+const UNAUTHORIZED_ERROR = "Unauthorized: Invalid Admin Secret Key";
+
+/**
+ * The largest admin request body the server will read, in bytes.
+ *
+ * The cap is what keeps the body-secret fallback from becoming a way to make
+ * the server allocate an arbitrary amount of memory: only a request that
+ * carries no `x-admin-secret` header is read before the decision is made, and
+ * that read is bounded by this budget.
+ */
+export const MAX_ADMIN_BODY_BYTES = 256 * 1024;
+
+/**
+ * The parsed admin request body. Every route declares its own shape; before
+ * this helper existed the body came from `req.json()`, which is `any`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AdminRequestBody = any;
+
+export type AdminAuthResult =
+  | { ok: true; body: AdminRequestBody; credential: "admin" | "bearer" }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Reads and parses the request body, or null when it is larger than the cap.
+ *
+ * The declared `content-length` is checked first, so an oversized payload is
+ * refused before it is buffered; the byte count of what actually arrived is
+ * checked again afterwards, because a chunked request declares no length.
+ */
+async function readRequestBody(
+  req: NextRequest,
+  maxBytes: number
+): Promise<AdminRequestBody | null> {
+  const declared = Number(req.headers.get("content-length") || "");
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+
+  const text = await req.text();
+  if (Buffer.byteLength(text, "utf8") > maxBytes) return null;
+
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    // A body that is not JSON is treated as an empty one, exactly as the
+    // `req.json().catch(() => ({}))` this replaces.
+    return {};
+  }
+}
+
+/**
+ * Authorizes an admin request and hands back its parsed body.
+ *
+ * The credential is decided BEFORE the body is read, so a request that presents
+ * a wrong secret is rejected without the server ever buffering its payload.
+ *
+ * The secret travels in the `x-admin-secret` header or in a `secretKey` body
+ * field. The header has always taken precedence, and it still does: a request
+ * that presents a wrong header is rejected even when its body carries the
+ * right secret. Only a request with NO header falls back to reading the body,
+ * and that read is capped.
+ *
+ * `bearerEnv` names the environment variable whose value may also be presented
+ * as `Authorization: Bearer …` — used by the scheduled passes, which hold a
+ * narrower credential than the admin secret.
+ */
+export async function authorizeAdminRequest(
+  req: NextRequest,
+  options: { maxBodyBytes?: number; bearerEnv?: string } = {}
+): Promise<AdminAuthResult> {
+  const maxBodyBytes = options.maxBodyBytes ?? MAX_ADMIN_BODY_BYTES;
+
+  const viaRunCredential = options.bearerEnv
+    ? isAuthorizedByBearer(req, options.bearerEnv)
+    : false;
+
+  if (viaRunCredential) {
+    // The run credential wins over the admin secret, exactly as the routes that
+    // accept both have always treated it: a scheduled pass is a scheduled pass.
+    const body = await readRequestBody(req, maxBodyBytes);
+    if (!body) {
+      return { ok: false, status: 413, error: "Request body too large" };
+    }
+    return { ok: true, body, credential: "bearer" };
+  }
+
+  if (isAuthorizedAdmin(req)) {
+    const body = await readRequestBody(req, maxBodyBytes);
+    if (!body) {
+      return { ok: false, status: 413, error: "Request body too large" };
+    }
+    return { ok: true, body, credential: "admin" };
+  }
+
+  const header = (req.headers.get("x-admin-secret") || "").trim();
+  if (header) {
+    // A header was presented and it was wrong. The body does not get a second
+    // chance — this is the precedence the routes have always had.
+    return { ok: false, status: 401, error: UNAUTHORIZED_ERROR };
+  }
+
+  // No header: the secret may still travel in the body. This is the only path
+  // that reads the body before the decision, so it is bounded.
+  const body = await readRequestBody(req, maxBodyBytes);
+  if (!body || !isAuthorizedAdmin(req, typeof body.secretKey === "string" ? body.secretKey : undefined)) {
+    return { ok: false, status: 401, error: UNAUTHORIZED_ERROR };
+  }
+  return { ok: true, body, credential: "admin" };
+}
+

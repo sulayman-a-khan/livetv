@@ -19,9 +19,10 @@
     "lint": "next lint",
     "test:ranking": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js",
     "test:link-registration": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js .tmp-tests/tests/link-registration.test.js",
-    "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js",
+    "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js .tmp-tests/tests/safe-fetch.test.js",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",
-    "seed": "node scripts/seed.js"
+    "snapshot:production": "node scripts/snapshot-production-catalogue.mjs",
+    "dev:snapshot": "node scripts/run-with-snapshot.mjs next dev"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -37,7 +38,11 @@
     "@types/node": "^20.16.5",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
     "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^14.2.35",
     "postcss": "^8.4.45",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4"

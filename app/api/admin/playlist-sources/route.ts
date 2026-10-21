@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
 import { createSource, getSourcesPayload, validateSourceInput } from "@/lib/playlistSources";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +38,11 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    if (!isAuthorizedAdmin(req, body.secretKey)) return unauthorized();
+    const auth = await authorizeAdminRequest(req);
+    if (!auth.ok) {
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
+    }
+    const body = auth.body;
 
     const { value, errors } = validateSourceInput(body, true);
     if (errors.length > 0) {

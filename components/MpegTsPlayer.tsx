@@ -3,7 +3,7 @@
 /**
  * MpegTsPlayer — raw MPEG-TS / Xtream `.ts` live playback.
  *
- * A drop-in sibling of HlsPlayer for channels whose active link is a raw
+ * A drop-in sibling of DirectHlsPlayer for channels whose active link is a raw
  * transport stream rather than an HLS `.m3u8` playlist. `.ts` can't be handed
  * straight to a browser <video> (no MSE demuxer for bare TS), so mpegts.js
  * (dynamically imported, so it never runs during SSR) demuxes the TS into fMP4
@@ -584,7 +584,7 @@ export default function MpegTsPlayer({
     createAndLoad(target.url);
   };
 
-  // ---- Fullscreen (native API + rotate frame + CSS fallback, parity w/ HlsPlayer) ----
+  // ---- Fullscreen (native API + rotate frame + CSS fallback, parity w/ DirectHlsPlayer) ----
   useEffect(() => {
     const onFsChange = () => {
       const active = Boolean(document.fullscreenElement);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest } from "@/lib/adminAuth";
 import { loadSourceById } from "@/lib/playlistSources";
 import { syncPlaylistSource, type PlaylistSyncEvent } from "@/lib/playlistSync";
 
@@ -19,14 +19,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const body = await req.json().catch(() => ({}));
-
-  if (!isAuthorizedAdmin(req, body.secretKey)) {
+  const auth = await authorizeAdminRequest(req);
+  if (!auth.ok) {
     return NextResponse.json(
-      { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-      { status: 401 }
+      { success: false, error: auth.error },
+      { status: auth.status }
     );
   }
+  const body = auth.body;
 
   let source;
   try {

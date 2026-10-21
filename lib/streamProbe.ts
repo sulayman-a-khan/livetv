@@ -62,7 +62,8 @@ import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
 import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
-import { checkPublicUrlSafety } from "@/lib/ssrfGuard";
+import { checkPublicUrlSafety, checkRedirectTarget } from "@/lib/ssrfGuard";
+import { safeFetch, UnsafeUrlError, checkHostResolvesPublic } from "@/lib/safeFetch";
 
 const execFileAsync = promisify(execFile);
 
@@ -168,9 +169,6 @@ export interface HlsCheckResult {
    */
   deliveryMisses: number;
 }
-
-/** Kept for backward compatibility with existing imports. */
-export type ProbeResult = HlsCheckResult;
 
 export interface ProbeOptions {
   /** Per-request timeout for the playlist/segment fetches. Default 5000ms. */
@@ -400,57 +398,82 @@ function browserTrustGet(url: string, maxBytes: number, timeoutMs: number): Prom
       return;
     }
 
-    const req = httpsRequest(
-      url,
-      { method: "GET", headers: buildHeaders(), rejectUnauthorized: false, timeout: timeoutMs },
-      (res) => {
-        const code = res.statusCode || 0;
-        const location = res.headers.location;
-        if (code >= 300 && code < 400 && location) {
-          res.resume();
-          let next: string;
-          try {
-            next = new URL(location, url).toString();
-          } catch {
-            done({ status: code, error: "unreadable redirect" });
-            return;
-          }
-          if (!next.toLowerCase().startsWith("https://")) {
-            done({ status: code, error: "redirect left HTTPS" });
-            return;
-          }
-          browserTrustGet(next, maxBytes, Math.max(1, timeoutMs - 250)).then(done);
-          return;
-        }
-
-        const contentType = String(res.headers["content-type"] || "").toLowerCase();
-        const acao = res.headers["access-control-allow-origin"] || null;
-        const chunks: Buffer[] = [];
-        let kept = 0;
-        let bytes = 0;
-        const collect = () => Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
-        res.on("data", (chunk: Buffer) => {
-          bytes += chunk.length;
-          if (kept < maxBytes) {
-            chunks.push(chunk);
-            kept += chunk.length;
-          } else {
-            req.destroy();
-          }
-        });
-        res.on("end", () => done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes }));
-        res.on("error", () =>
-          done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes, error: "body transfer failed" })
-        );
+    // The URL can come out of a playlist (a variant or a segment), so it is
+    // checked here too: a playlist may point a segment at the server's own
+    // network, and this request must not go there.
+    void (async () => {
+      let hostname: string;
+      try {
+        hostname = new URL(url).hostname;
+      } catch {
+        done({ error: "unreadable URL" });
+        return;
       }
-    );
 
-    req.on("timeout", () => {
-      req.destroy();
-      done({ error: `no response within ${timeoutMs}ms` });
-    });
-    req.on("error", (e: { code?: string; message?: string }) => done({ error: e?.code || e?.message || "request failed" }));
-    req.end();
+      const hostVerdict = await checkHostResolvesPublic(hostname);
+      if (!hostVerdict.ok) {
+        done({ error: hostVerdict.reason || "refused an internal destination" });
+        return;
+      }
+
+      const req = httpsRequest(
+        url,
+        { method: "GET", headers: buildHeaders(), rejectUnauthorized: false, timeout: timeoutMs },
+        (res) => {
+          const code = res.statusCode || 0;
+          const location = res.headers.location;
+          if (code >= 300 && code < 400 && location) {
+            res.resume();
+            let next: string;
+            try {
+              next = new URL(location, url).toString();
+            } catch {
+              done({ status: code, error: "unreadable redirect" });
+              return;
+            }
+            if (!next.toLowerCase().startsWith("https://")) {
+              done({ status: code, error: "redirect left HTTPS" });
+              return;
+            }
+            // The hop is checked before it is followed, not after.
+            const hop = checkRedirectTarget(url, next);
+            if (!hop.ok) {
+              done({ status: code, error: hop.reason || "redirect to a refused destination" });
+              return;
+            }
+            browserTrustGet(next, maxBytes, Math.max(1, timeoutMs - 250)).then(done);
+            return;
+          }
+
+          const contentType = String(res.headers["content-type"] || "").toLowerCase();
+          const acao = res.headers["access-control-allow-origin"] || null;
+          const chunks: Buffer[] = [];
+          let kept = 0;
+          let bytes = 0;
+          const collect = () => Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
+          res.on("data", (chunk: Buffer) => {
+            bytes += chunk.length;
+            if (kept < maxBytes) {
+              chunks.push(chunk);
+              kept += chunk.length;
+            } else {
+              req.destroy();
+            }
+          });
+          res.on("end", () => done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes }));
+          res.on("error", () =>
+            done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes, error: "body transfer failed" })
+          );
+        }
+      );
+
+      req.on("timeout", () => {
+        req.destroy();
+        done({ error: `no response within ${timeoutMs}ms` });
+      });
+      req.on("error", (e: { code?: string; message?: string }) => done({ error: e?.code || e?.message || "request failed" }));
+      req.end();
+    })();
   });
 }
 
@@ -602,6 +625,8 @@ interface FetchOutcome {
   responseTime: number;
   errorCode: HlsErrorCode | null;
   errorMessage: string | null;
+  /** Set when the URL was refused before any request was made. */
+  unsafeReason?: string;
 }
 
 /** fetch() with a hard timeout and Node/undici error classification (DNS, TLS, connection refused, abort). */
@@ -615,11 +640,23 @@ async function timedFetch(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    // Every hop is checked (lib/safeFetch.ts): the URL itself, every redirect
+    // it hands out, and the variant/segment URLs a playlist points at.
+    const response = await safeFetch(url, { ...init, signal: controller.signal });
     return { response, responseTime: Date.now() - start, errorCode: null, errorMessage: null };
   } catch (err: unknown) {
     const responseTime = Date.now() - start;
     const e = err as { name?: string; message?: string; cause?: { code?: string } };
+
+    if (err instanceof UnsafeUrlError) {
+      return {
+        response: null,
+        responseTime,
+        errorCode: "UNKNOWN_ERROR",
+        errorMessage: err.message,
+        unsafeReason: err.message,
+      };
+    }
 
     if (e?.name === "AbortError") {
       return { response: null, responseTime, errorCode: "TIMEOUT", errorMessage: "Request timed out" };
@@ -831,14 +868,6 @@ function parseM3U8(text: string): ParsedPlaylist {
     isLive: isValidHls && !hasEndlist,
     hasEndlist,
   };
-}
-
-/** Picks the lowest-bandwidth variant — we're checking health, not quality, so use the least bandwidth necessary. */
-function pickCheapestVariant(variants: ParsedVariant[]): ParsedVariant | null {
-  if (variants.length === 0) return null;
-  const withBandwidth = variants.filter((v) => v.bandwidth !== null);
-  if (withBandwidth.length === 0) return variants[0];
-  return withBandwidth.reduce((lowest, v) => ((v.bandwidth as number) < (lowest.bandwidth as number) ? v : lowest));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1135,6 +1164,18 @@ async function probeOnce(
   const playlistFetch = await timedFetch(url, { method: "GET", headers }, clipped(options.timeoutMs));
 
   if (!playlistFetch.response) {
+    // A URL the server refuses to fetch — an internal destination, or a
+    // redirect into one — is not a link that might work later. It is reported
+    // the same way an unsafe URL is reported at the top of this function.
+    if (playlistFetch.unsafeReason) {
+      return baseResult({
+        status: "INVALID",
+        errorCode: "UNKNOWN_ERROR",
+        responseTime: playlistFetch.responseTime,
+        finalUrl: url,
+        error: playlistFetch.unsafeReason,
+      });
+    }
     // Nothing came back before the budget ran out: that is a delivery miss,
     // whatever the individual request would have called itself.
     if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
@@ -1576,6 +1617,19 @@ async function probeTsStream(
     Math.max(1, Math.min(options.timeoutMs, options.deliveryDeadlineMs))
   );
   if (!res.response) {
+    // A feed the server refuses to fetch is not a feed that failed: it was
+    // never allowed to be requested.
+    if (res.unsafeReason) {
+      return baseResult({
+        status: "INVALID",
+        errorCode: "UNKNOWN_ERROR",
+        responseTime: res.responseTime,
+        playlistType: null,
+        isLive: true,
+        finalUrl: url,
+        error: res.unsafeReason,
+      });
+    }
     // A `.ts` feed that hands over no bytes inside the budget is exactly the
     // failure mode this check exists for.
     if (res.errorCode === "TIMEOUT" || res.responseTime >= options.deliveryDeadlineMs) {
@@ -1862,5 +1916,6 @@ export async function probeStreamUrl(url: string, timeoutMs: number = 5000): Pro
   return checkHlsStream(url, { timeoutMs });
 }
 
-// Exported for potential reuse/testing elsewhere in the project.
-export { redactUrl, resolveUrl, parseM3U8, pickCheapestVariant };
+// `redactUrl` is imported by lib/playlistSync.ts; the rest are internal to
+// this module.
+export { redactUrl };

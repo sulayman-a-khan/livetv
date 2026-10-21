@@ -25,6 +25,13 @@ interface DirectHlsPlayerProps {
   currentStreamIndex?: number;
   onStreamIndexChange?: (index: number) => void;
   onAllServersFailed?: () => void;
+  /**
+   * Bumped by the host to make the player load the current mirror again. The
+   * loader keys off the mirror's URL, so a host that wants the same link
+   * retried has to say so — a new object carrying the same URL is not a new
+   * stream, and the player would treat it as nothing having changed.
+   */
+  reloadToken?: number;
 }
 
 /**
@@ -324,6 +331,7 @@ export default function DirectHlsPlayer({
   currentStreamIndex: controlledIndex,
   onStreamIndexChange,
   onAllServersFailed,
+  reloadToken,
 }: DirectHlsPlayerProps) {
   const [internalIndex, setInternalIndex] = useState(0);
   const activeIndex = controlledIndex !== undefined ? controlledIndex : internalIndex;
@@ -368,20 +376,24 @@ export default function DirectHlsPlayer({
   const [showQualityMenu, setShowQualityMenu] = useState(false);
 
   // Active stream mirror
-  const activeStream = useMemo(() => {
-    return streams[activeIndex] || streams[0] || null;
-  }, [streams, activeIndex]);
+  //
+  // The mirror on trial is identified by its URL, not by the object behind it:
+  // hosts that rebuild their `streams` prop every render hand us a new object
+  // for the same link, and an identity-keyed loader would tear the player down
+  // and re-request the manifest on every parent re-render.
+  const activeStreamUrl = streams[activeIndex]?.url ?? streams[0]?.url ?? null;
 
-  const isYouTube = useMemo(() => {
-    return activeStream ? isYouTubeStream(activeStream.url) : false;
-  }, [activeStream]);
+  const isYouTube = activeStreamUrl ? isYouTubeStream(activeStreamUrl) : false;
 
-  // Hosts that rebuild their `streams` prop every render (the admin editor sits
-  // under a 1s dashboard tick and passes an inline array) hand us a NEW
-  // activeStream object each time even though nothing about the mirror changed.
-  // Loader effects must key off this stable URL string, not the object identity,
-  // or they tear the player down and rebuild it on every parent re-render.
-  const activeStreamUrl = activeStream ? activeStream.url : null;
+  /**
+   * The ladder the callbacks act on. `handleNextServer` sits in the loader
+   * effect's dependency list, so it must keep its identity when the host hands
+   * us a rebuilt `streams` array — otherwise the loader restarts the stream on
+   * every parent re-render. Reading the ladder through a ref keeps the
+   * callback stable while it always acts on the current mirrors.
+   */
+  const ladderRef = useRef({ streams, activeIndex, controlledIndex });
+  ladderRef.current = { streams, activeIndex, controlledIndex };
 
   // ---- YouTube IFrame-API playback state (only used when isYouTube) ----
   // The mount div the IFrame API replaces with its own iframe, and the player
@@ -399,7 +411,7 @@ export default function DirectHlsPlayer({
    * resetting there left one bare black frame between the old player's teardown
    * and the receiver coming up.
    */
-  const attemptKey = `${channelId ?? ""}|${activeIndex}|${activeStream?.url ?? ""}`;
+  const attemptKey = `${channelId ?? ""}|${activeIndex}|${activeStreamUrl ?? ""}|${reloadToken ?? 0}`;
   const [renderedAttemptKey, setRenderedAttemptKey] = useState(attemptKey);
   if (renderedAttemptKey !== attemptKey) {
     setRenderedAttemptKey(attemptKey);
@@ -496,6 +508,7 @@ export default function DirectHlsPlayer({
   const handleNextServer = useCallback(
     (exhaustedReason: string) => {
       const { onAllServersFailed, onStreamIndexChange } = callbacksRef.current;
+      const { streams, activeIndex, controlledIndex } = ladderRef.current;
 
       const giveUp = () => {
         if (phaseRef.current === "weak") return;
@@ -525,7 +538,7 @@ export default function DirectHlsPlayer({
         onStreamIndexChange?.(nextIdx);
       }
     },
-    [streams, activeIndex, controlledIndex, disarmTimers]
+    [disarmTimers]
   );
 
   /**
@@ -579,6 +592,7 @@ export default function DirectHlsPlayer({
    */
   const handleRetryMirror = useCallback(() => {
     const { onAllServersFailed, onStreamIndexChange } = callbacksRef.current;
+    const { streams, activeIndex, controlledIndex } = ladderRef.current;
     disarmTimers();
     if (streams.length <= 1) {
       onAllServersFailed?.();
@@ -589,7 +603,7 @@ export default function DirectHlsPlayer({
       setInternalIndex(nextIdx);
     }
     onStreamIndexChange?.(nextIdx);
-  }, [streams, activeIndex, controlledIndex, disarmTimers]);
+  }, [disarmTimers]);
 
   // Main stream loader effect — re-runs on every channel or server-mirror
   // switch and synchronously tears the previous instance down first, so no
@@ -615,7 +629,7 @@ export default function DirectHlsPlayer({
     }
     disarmTimers();
 
-    if (!activeStream || isYouTube) {
+    if (!activeStreamUrl || isYouTube) {
       // Nothing for the receiver to tune: an empty mirror list gets the host's
       // off-air card, and a YouTube feed paints its own iframe player.
       setPhase("live");
@@ -627,10 +641,16 @@ export default function DirectHlsPlayer({
     setLevels([]);
     setSelectedLevel(-1);
 
+    if (reloadToken) {
+      console.info(
+        `[DirectHlsPlayer] ${channelName}: retrying mirror ${activeIndex + 1} (retry ${reloadToken})`
+      );
+    }
+
     const video = videoRef.current;
     if (!video) return;
 
-    const streamUrl = activeStream.url;
+    const streamUrl = activeStreamUrl;
     const maxHeightCap = getDeviceMaxHeight();
 
     // Arm the delivery deadline for this connection. `markLocked` disarms it once
@@ -829,7 +849,7 @@ export default function DirectHlsPlayer({
   }, [
     channelId,
     activeIndex,
-    activeStream,
+    activeStreamUrl,
     isYouTube,
     getDeviceMaxHeight,
     channelName,
@@ -837,6 +857,7 @@ export default function DirectHlsPlayer({
     handleNextServer,
     markLocked,
     purgeAndDestroyPlayer,
+    reloadToken,
   ]);
 
   // YouTube loader effect — the IFrame-API mirror of the HLS loader above, and
@@ -853,6 +874,10 @@ export default function DirectHlsPlayer({
     const url = activeStreamUrl;
     setYtStatus("resolving");
     setYtError(null);
+
+    if (reloadToken) {
+      console.info(`[DirectHlsPlayer] ${channelName}: retrying YouTube mirror (retry ${reloadToken})`);
+    }
 
     async function resolveAndPlay() {
       // Fast path: the URL already names a video — skip the network round trip.
@@ -941,7 +966,7 @@ export default function DirectHlsPlayer({
       ytMountRef.current?.replaceChildren();
       setYtStatus("idle");
     };
-  }, [isYouTube, activeStreamUrl, channelName]);
+  }, [isYouTube, activeStreamUrl, channelName, reloadToken]);
 
   // Mouse activity timer for overlay controls
   const handleMouseMove = () => {
@@ -1053,7 +1078,7 @@ export default function DirectHlsPlayer({
       {/* YouTube Live — played through YouTube's IFrame Player API inside this
           same player, so it wears the app's badge + control bar like any other
           channel instead of YouTube's native iframe controls. */}
-      {isYouTube && activeStream ? (
+      {isYouTube && activeStreamUrl ? (
         <div className="w-full h-full relative">
           {/* The IFrame API replaces this div's contents with its own iframe. */}
           <div ref={ytMountRef} className="absolute inset-0 w-full h-full" />

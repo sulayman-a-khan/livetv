@@ -4,7 +4,7 @@ import { connectToDatabase } from "@/lib/db";
 import StreamLink from "@/models/StreamLink";
 import { inMemoryDb } from "@/lib/inMemoryStore";
 import { refreshChannelLinks } from "@/lib/maintenanceRunner";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
 import { checkHlsStream } from "@/lib/streamProbe";
 import {
   classifyLinkHealth,
@@ -86,13 +86,14 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const body = await req.json().catch(() => ({}));
-    if (!isAuthorizedAdmin(req, body.secretKey)) {
+    const auth = await authorizeAdminRequest(req);
+    if (!auth.ok) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
+    const body = auth.body;
 
     const action = String(body.action || "").toLowerCase();
     if (!["test", "disable", "restore"].includes(action)) {

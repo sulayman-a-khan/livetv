@@ -5,12 +5,12 @@ const nextConfig = {
   // engines) so their published ESM doesn't ship untranspilable modern syntax.
   transpilePackages: ["hls.js", "lucide-react", "mpegts.js"],
   typescript: {
-    // Vercel build-এর সময় টাইপস্ক্রিপ্ট এরর বাইপাস করবে
-    ignoreBuildErrors: true,
+    // Type errors must fail the build — a build that ignores them ships broken code.
+    ignoreBuildErrors: false,
   },
   eslint: {
-    // Build-এর সময় ESLint এরর বাইপাস করবে
-    ignoreDuringBuilds: true,
+    // Lint errors must fail the build too.
+    ignoreDuringBuilds: false,
   },
   experimental: {
     instrumentationHook: true,

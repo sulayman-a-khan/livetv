@@ -8,14 +8,15 @@
  * pointed at its own network — the cloud metadata endpoint (169.254.169.254),
  * localhost services, or internal hosts — and read whatever answers back.
  *
- * This is a hostname-literal + scheme guard, not a DNS-resolving one: it blocks
- * the obvious private/loopback/link-local/metadata literals and any non-http(s)
- * scheme, and deliberately allows every public hostname (the catalogue is all
- * public http/https origins). A public-looking hostname that resolves to an
- * internal address (DNS rebinding) is out of scope here by design — closing that
- * needs a resolve-and-recheck pass, which was declined to keep the fetch path
- * simple. Callers decide how to surface a rejection (probe returns a verdict,
- * ingest/sync report a source error).
+ * This module is the pure half of that guard: it classifies a host (an IP
+ * literal or a DNS name) and validates a URL's scheme and literal host without
+ * touching the network. `lib/safeFetch.ts` is the half that needs I/O — it
+ * resolves the hostname, refuses a destination inside the server's own network
+ * and re-checks every redirect hop on the way.
+ *
+ * A DNS name is judged by resolving it, not by guessing from its spelling, so
+ * the range tests below apply to IP literals only: applied to a hostname they
+ * would reject innocent public origins whose name merely starts with "fc".
  */
 
 export interface UrlSafetyVerdict {
@@ -27,35 +28,44 @@ export interface UrlSafetyVerdict {
 }
 
 /**
- * True for a host literal that names this machine, a private network, or the
- * link-local/metadata range. Handles IPv4, IPv6 (including bracketed and
- * IPv4-mapped forms) and the `localhost` name. Public hostnames return false.
+ * True when the host is an IP literal — an IPv4 dotted quad or an IPv6 address,
+ * with or without the brackets `new URL(...).hostname` puts around the latter
+ * and with any zone index (`%eth0`) dropped.
  */
-export function isPrivateOrInternalHost(rawHost: string): boolean {
+export function isIpLiteral(rawHost: string): boolean {
   let host = (rawHost || "").trim().toLowerCase();
-
-  // IPv6 arrives bracketed from `new URL(...).hostname` — strip the brackets.
+  if (!host) return false;
   if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+  const zone = host.indexOf("%");
+  if (zone !== -1) host = host.slice(0, zone);
 
-  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  const quads = host.split(".");
+  if (quads.length === 4 && quads.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)) {
+    return true;
+  }
+  return host.includes(":") && /^[0-9a-f:.]+$/.test(host);
+}
 
-  // IPv6 loopback / unspecified.
-  if (host === "::" || host === "::1") return true;
-
-  // IPv4-mapped IPv6. Node normalises `::ffff:127.0.0.1` to `::ffff:7f00:1`, so
-  // match the prefix rather than the dotted form and treat the whole range as
-  // internal: no legitimate public origin is ever addressed as an IPv4-mapped
-  // IPv6 literal in this catalogue, and fetch() would dial the embedded IPv4.
-  if (host.startsWith("::ffff:")) return true;
-
-  // IPv6 unique-local (fc00::/7 → fc../fd..) and link-local (fe80::/10 → fe8..feb..).
-  if (/^f[cd]/.test(host)) return true;
-  if (/^fe[89ab]/.test(host)) return true;
+/**
+ * True for an address inside this machine's own network: loopback, the private
+ * ranges, link-local (which is where the cloud metadata endpoint lives) and the
+ * IPv6 equivalents. A public address returns false.
+ *
+ * This is the same classification `isPrivateOrInternalHost` applies to a host
+ * literal, kept separate so it can also judge an address that came back from a
+ * DNS lookup.
+ */
+export function isPrivateOrInternalAddress(rawAddress: string): boolean {
+  let addr = (rawAddress || "").trim().toLowerCase();
+  if (!addr) return false;
+  if (addr.startsWith("[") && addr.endsWith("]")) addr = addr.slice(1, -1);
+  const zone = addr.indexOf("%");
+  if (zone !== -1) addr = addr.slice(0, zone);
 
   // IPv4 dotted quad.
-  const parts = host.split(".").map(Number);
-  if (parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
-    const [a, b] = parts;
+  const quads = addr.split(".");
+  if (quads.length === 4 && quads.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)) {
+    const [a, b] = quads.map(Number);
     return (
       a === 127 || // loopback
       a === 10 || // private
@@ -66,7 +76,43 @@ export function isPrivateOrInternalHost(rawHost: string): boolean {
     );
   }
 
+  // Not an IPv6 literal either — some other kind of name.
+  if (!addr.includes(":") || !/^[0-9a-f:.]+$/.test(addr)) return false;
+
+  // IPv6 loopback / unspecified.
+  if (addr === "::" || addr === "::1") return true;
+
+  // IPv4-mapped IPv6. Node normalises `::ffff:127.0.0.1` to `::ffff:7f00:1`, so
+  // match the prefix rather than the dotted form and treat the whole range as
+  // internal: no legitimate public origin is ever addressed as an IPv4-mapped
+  // IPv6 literal in this catalogue, and fetch() would dial the embedded IPv4.
+  if (addr.startsWith("::ffff:")) return true;
+
+  // IPv6 unique-local (fc00::/7 → fc.., fd..) and link-local (fe80::/10 → fe8..–feb..).
+  if (/^f[cd]/.test(addr)) return true;
+  if (/^fe[89ab]/.test(addr)) return true;
+
   return false;
+}
+
+/**
+ * True for a host literal that names this machine, a private network, or the
+ * link-local/metadata range. Handles IPv4, IPv6 (including bracketed and
+ * IPv4-mapped forms) and the `localhost` name. Public hostnames — and public
+ * IP literals — return false; whether a public name resolves to an internal
+ * address is decided by resolving it, which `lib/safeFetch.ts` does.
+ */
+export function isPrivateOrInternalHost(rawHost: string): boolean {
+  let host = (rawHost || "").trim().toLowerCase();
+  if (!host) return false;
+
+  // IPv6 arrives bracketed from `new URL(...).hostname` — strip the brackets.
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+
+  if (!isIpLiteral(host)) return false;
+  return isPrivateOrInternalAddress(host);
 }
 
 /**
@@ -103,4 +149,23 @@ export function checkPublicUrlSafety(rawUrl: string): UrlSafetyVerdict {
   }
 
   return { ok: true, url: parsed.toString() };
+}
+
+/**
+ * Validates one redirect hop: the `Location` header resolved against the URL
+ * that produced it, checked for scheme and literal host exactly like a
+ * first-hop URL. Pure — it resolves no name and performs no I/O; the resolved
+ * hostname is judged by `lib/safeFetch.ts`.
+ */
+export function checkRedirectTarget(currentUrl: string, location: string): UrlSafetyVerdict {
+  let resolved: string;
+  try {
+    resolved = new URL(location, currentUrl).toString();
+  } catch {
+    return { ok: false, reason: "Redirect target is not a valid URL" };
+  }
+
+  const verdict = checkPublicUrlSafety(resolved);
+  if (!verdict.ok) return verdict;
+  return { ok: true, url: verdict.url };
 }

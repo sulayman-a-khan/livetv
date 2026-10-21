@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import {
   AlertTriangle,
@@ -179,13 +179,22 @@ export default function PlaylistSourcePanel({
     [secretKey]
   );
 
+  /**
+   * Every read is numbered. A poll that was already in flight when the admin
+   * saved must not land afterwards and put the old value back on screen, so a
+   * response is only applied when no newer read has started since.
+   */
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const res = await fetch("/api/admin/playlist-sources", {
         headers: { "x-admin-secret": secretKey.trim() },
         cache: "no-store",
       });
       const data = await res.json();
+      if (seq !== loadSeq.current) return;
       if (data.success) {
         setSources(data.sources as SourceRow[]);
         setMonitor(data.monitor as MonitorStatus);
@@ -195,27 +204,44 @@ export default function PlaylistSourcePanel({
         setLoadError(data.error || `Failed to load playlist sources (${res.status})`);
       }
     } catch (err: any) {
+      if (seq !== loadSeq.current) return;
       setLoadError(`Error loading playlist sources: ${err.message}`);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [secretKey]);
 
+  /** True while the admin is changing something the poll would overwrite. */
+  const editing = showForm || saving || togglingId !== null || deletingId !== null;
+
+  // The list is read once on mount, so the collapsed header can show its count.
   useEffect(() => {
     load();
   }, [load]);
 
   // Keep the countdowns moving, and refresh the list while nothing is syncing.
   useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
 
+  // The refresh timer runs only while the panel is open and idle: a poll that
+  // lands in the middle of an edit replaces the value being typed with the
+  // value from before the edit, and the edit looks like it never happened. A
+  // closed panel shows nothing, so a poll behind it is work nobody sees.
   useEffect(() => {
-    if (syncingId) return;
+    if (!open || editing || syncingId) return;
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
-  }, [load, syncingId]);
+  }, [open, editing, syncingId, load]);
+
+  // Opening the panel re-reads it: a closed panel does not poll, so what it
+  // shows can be a minute old.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current) load();
+    wasOpen.current = open;
+  }, [open, load]);
 
   const openAddForm = () => {
     setForm(EMPTY_FORM);

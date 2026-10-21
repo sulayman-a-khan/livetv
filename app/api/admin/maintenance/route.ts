@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthorizedAdmin } from "@/lib/adminAuth";
+import { authorizeAdminRequest } from "@/lib/adminAuth";
 import { runMaintenance } from "@/lib/maintenanceRunner";
 
 export const dynamic = "force-dynamic";
@@ -14,15 +14,13 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-
-    if (!isAuthorizedAdmin(req, body.secretKey)) {
+    const auth = await authorizeAdminRequest(req);
+    if (!auth.ok) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
-        { status: 401 }
+        { success: false, error: auth.error },
+        { status: auth.status }
       );
     }
-
     const report = await runMaintenance();
     return NextResponse.json({ success: true, report });
   } catch (error: any) {

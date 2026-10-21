@@ -33,6 +33,7 @@ import { parseM3uContent } from "./m3uParser";
 import { canonicalChannelKey, canonicalStreamUrl } from "./channelIdentity";
 import { checkHlsStream, redactUrl, type HlsCheckResult } from "./streamProbe";
 import { checkPublicUrlSafety } from "./ssrfGuard";
+import { safeFetch, UnsafeUrlError } from "./safeFetch";
 import { refreshChannelLinks } from "./maintenanceRunner";
 import {
   groupPlaylistEntries,
@@ -105,8 +106,10 @@ async function fetchPlaylistContent(url: string): Promise<string> {
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let body = "";
   try {
-    const res = await fetch(url, {
-      redirect: "follow",
+    // Redirects are followed by hand (lib/safeFetch.ts) so every hop is checked
+    // the same way the first one was: a safe playlist URL may redirect into the
+    // server's own network, and the guard has to see that hop too.
+    const res = await safeFetch(url, {
       signal: controller.signal,
       headers: { "User-Agent": PLAYLIST_USER_AGENT, Accept: "application/x-mpegurl, text/plain, */*" },
     });
@@ -116,6 +119,9 @@ async function fetchPlaylistContent(url: string): Promise<string> {
     body = await res.text();
   } catch (err: any) {
     if (err instanceof PlaylistFetchError) throw err;
+    // A destination inside the server's own network is a source error like any
+    // other: it is recorded against the source, never fetched.
+    if (err instanceof UnsafeUrlError) throw new PlaylistFetchError(err.message);
     const reason =
       err?.name === "AbortError"
         ? `No response after ${FETCH_TIMEOUT_MS / 1000}s`

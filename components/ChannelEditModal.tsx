@@ -1,11 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { CHANNEL_CATEGORIES, normalizeCategory, type ChannelCategory } from "@/lib/categories";
-import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
+import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
 import LinkHealthBadge, { linkHealthLabel, type LinkProbeDetail } from "@/components/LinkHealthBadge";
-import HlsPlayer from "@/components/HlsPlayer";
 import { DirectHlsPlayer } from "@/components/players";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
 import {
@@ -234,6 +233,43 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
   const sortedStreams = [...channel.streams].sort(
     (a, b) => (a.priority ?? 99) - (b.priority ?? 99)
   );
+
+  /**
+   * The test player's input is fixed for as long as the tested link is the
+   * same link, so it is built once. A fresh array on every render is a new
+   * identity, and the players rebuild themselves when their stream list
+   * changes — which turned every keystroke in the name field into a teardown
+   * and a fresh request to the stream origin.
+   *
+   * The URL goes through the same normaliser the viewer's ladder uses, so the
+   * admin sees exactly what a viewer would get from this link.
+   */
+  const testStreams = useMemo(
+    () =>
+      testStream
+        ? [
+            {
+              _id: testStream._id,
+              url: normalizeDirectPublicUrl(testStream.url),
+              priority: 0,
+              status: "active" as const,
+              latency: testStream.latency || 0,
+            },
+          ]
+        : [],
+    [testStream]
+  );
+
+  /**
+   * The tested link is the only mirror on trial, so the player's "no more
+   * mirrors" hand-off is the point to try that link again. The player keys its
+   * loader off the mirror URL, so a new object carrying the same URL would not
+   * reload anything — the retry is signalled with a token instead.
+   */
+  const [testRetryToken, setTestRetryToken] = useState(0);
+  const retryTestStream = useCallback(() => {
+    setTestRetryToken((n) => n + 1);
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -466,45 +502,14 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
               </button>
             </div>
             <div className="relative w-full aspect-video bg-black">
-              {isYouTubeUrl(testStream.url) ? (
-                <DirectHlsPlayer
-                  channelName={name}
-                  streams={[
-                    {
-                      _id: testStream._id,
-                      url: testStream.url,
-                      priority: 0,
-                      status: "active",
-                      latency: testStream.latency || 0,
-                      isYouTube: true,
-                    },
-                  ]}
-                />
-              ) : isMpegTsUrl(testStream.url) ? (
-                <MpegTsPlayer
-                  channelName={name}
-                  streams={[
-                    {
-                      _id: testStream._id,
-                      url: testStream.url,
-                      priority: 0,
-                      status: "active",
-                      latency: testStream.latency || 0,
-                    },
-                  ]}
-                />
+              {isMpegTsUrl(testStream.url) ? (
+                <MpegTsPlayer channelName={channel.name} streams={testStreams} />
               ) : (
-                <HlsPlayer
-                  channelName={name}
-                  streams={[
-                    {
-                      _id: testStream._id,
-                      url: testStream.url,
-                      priority: 0,
-                      status: "active",
-                      latency: testStream.latency || 0,
-                    },
-                  ]}
+                <DirectHlsPlayer
+                  channelName={channel.name}
+                  streams={testStreams}
+                  onAllServersFailed={retryTestStream}
+                  reloadToken={testRetryToken}
                 />
               )}
             </div>

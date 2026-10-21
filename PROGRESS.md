@@ -7,16 +7,16 @@
 - [x] API Routes (`/api/channels`, `/api/channels/[id]`, `/api/admin/ingest-m3u`, `/api/admin/health-check`, `/api/admin/stats`)
 - [x] Admin Delete APIs (`/api/admin/channels/[id]`, `/api/admin/channels/bulk-delete`, `/api/admin/streams/[id]`)
 - [x] Strict Active Link Channel Filtering (`StreamLink.status === 'active'`)
-- [x] Background Worker (`scripts/health-checker.js`, `scripts/seed.js`)
+- [x] Scheduled Health Pass (GitHub Actions → `POST /api/admin/health-check` via `scripts/health-check-runner.mjs`; the old in-process worker and the sample seed script were removed)
 - [x] UI Design System & Styling (`tailwind.config.js`, `app/globals.css`)
 - [x] Frontend Core Components:
   - [x] Header & Category/Country Filter Bar (`components/Header.tsx`, `components/FilterBar.tsx`)
   - [x] Minimalist Cricfy-style Channel Card & Grid (`components/ChannelCard.tsx`, `components/ChannelGrid.tsx`)
-  - [x] Production HLS Player with 5s Smart Auto-Failover (`components/HlsPlayer.tsx`)
+  - [x] Production Direct-HLS Player with Smart Auto-Failover (`components/players/DirectHlsPlayer.tsx`; the old `components/HlsPlayer.tsx` was removed on 2026-10-21)
   - [x] Ad Monetization Module (`components/AdManager.tsx`, `lib/adConfig.ts`)
 - [x] Hidden Admin Gate (`app/admin-secret-gate/page.tsx`, `components/AdminDashboard.tsx`)
 - [x] Main Page & Live Player Page (`app/page.tsx`, `app/watch/[id]/page.tsx`)
-- [x] Build & Verification (`npm run build`, sample data seed script, worker execution check)
+- [x] Build & Verification (`npm run build`, local catalogue snapshot script, `npm run check:health-workflow`)
 
 ---
 

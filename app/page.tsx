@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
-import { RefreshCw, Tv } from "lucide-react";
+import { Tv } from "lucide-react";
 
 /** Friendly row headings for each category rail (overrides the raw category title). */
 const RAIL_TITLES: Record<string, string> = {
@@ -83,24 +83,38 @@ export default function HomePage() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
         {/* Channel rails */}
         {loading ? (
-          <div className="space-y-8" aria-busy="true">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="space-y-3">
-                <div className="h-5 w-40 rounded bg-[#0d1628] animate-pulse" />
-                <div className="flex gap-3 sm:gap-4 overflow-hidden">
-                  {Array.from({ length: 8 }).map((_, j) => (
-                    <div key={j} className="shrink-0 w-[78px] sm:w-[104px] flex flex-col items-center gap-2">
-                      <div className="w-[62px] h-[62px] sm:w-[84px] sm:h-[84px] rounded-full bg-[#0d1628] animate-pulse" />
-                      <div className="h-2.5 w-14 rounded bg-[#0d1628] animate-pulse" />
+          <div className="space-y-4 sm:space-y-10" aria-busy="true">
+            {CATEGORIES.map((category) => (
+              <div key={category.slug} className="space-y-1.5 sm:space-y-3">
+                {/* Row header: the badge box + title/subtitle line boxes ChannelRail renders */}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#0d1628] animate-pulse" />
+                  <div className="min-w-0">
+                    <div className="h-7 flex items-center">
+                      <div className="h-[18px] w-40 rounded bg-[#0d1628] animate-pulse" />
                     </div>
-                  ))}
+                    <div className="h-4 hidden sm:flex items-center">
+                      <div className="h-3 w-24 rounded bg-[#0d1628] animate-pulse" />
+                    </div>
+                  </div>
+                </div>
+                <div className="-mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 overflow-hidden">
+                  <div className="flex items-start gap-3 sm:gap-4 pt-0.5 sm:pt-1 pb-1 sm:pb-2">
+                    {Array.from({ length: 12 }).map((_, j) => (
+                      <div
+                        key={j}
+                        className="shrink-0 w-[78px] sm:w-[104px] flex flex-col items-center gap-2"
+                      >
+                        <div className="w-[62px] h-[62px] sm:w-[84px] sm:h-[84px] rounded-full bg-[#0d1628] animate-pulse" />
+                        <div className="w-full h-4 flex items-center justify-center">
+                          <div className="h-3 w-[70%] rounded bg-[#0d1628] animate-pulse" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ))}
-            <p className="flex items-center justify-center gap-2 text-xs font-bold text-slate-400 pt-2">
-              <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
-              Loading live channels...
-            </p>
           </div>
         ) : rails.length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">

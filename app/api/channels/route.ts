@@ -23,6 +23,13 @@ export const dynamic = "force-dynamic";
  */
 const CATALOGUE_CACHE = "public, s-maxage=30, stale-while-revalidate=300";
 
+/**
+ * An empty catalogue is never worth caching. Either every pinned channel lost its
+ * links at the same moment, or this response came off a degraded path — and a
+ * cached empty list hides the site from everyone until it ages out.
+ */
+const catalogueCache = (count: number) => (count > 0 ? CATALOGUE_CACHE : "no-store");
+
 /** Only the fields the grid, the rails and the watch sidebar actually render. */
 const CHANNEL_FIELDS =
   "_id name logo category tags isPinned priorityOrder";
@@ -121,6 +128,21 @@ export async function GET(req: NextRequest) {
 
     const conn = await connectToDatabase();
 
+    /**
+     * A missing connection on Vercel is an outage, not an empty site. Without
+     * this guard the request falls into the JSON store below, and `data/store.json`
+     * is gitignored and never deployed — so the store resolves to its seed
+     * catalogue, where nothing is pinned, and the visitor gets a *successful*
+     * empty list that then sits in the edge cache looking like "no channels".
+     * Locally the store is the real database substitute, so that path stays.
+     */
+    if (!conn && process.env.VERCEL) {
+      return NextResponse.json(
+        { success: false, error: "Catalogue source unavailable" },
+        { status: 503, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     if (conn) {
       // MongoDB Mode: the pinned catalogue only, then the optional filters.
       const filter: Record<string, unknown> = { isPinned: true };
@@ -185,7 +207,7 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json(
         { success: true, count: result.length, channels: result },
-        { headers: { "Cache-Control": CATALOGUE_CACHE } }
+        { headers: { "Cache-Control": catalogueCache(result.length) } }
       );
     } else {
       // In-Memory Fallback Mode — the same pinned-only rule as the MongoDB branch.
@@ -226,14 +248,14 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json(
         { success: true, count: result.length, channels: result },
-        { headers: { "Cache-Control": CATALOGUE_CACHE } }
+        { headers: { "Cache-Control": catalogueCache(result.length) } }
       );
     }
   } catch (error: any) {
     console.error("GET /api/channels error:", error);
     return NextResponse.json(
       { success: false, error: error.message || "Failed to fetch channels" },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }

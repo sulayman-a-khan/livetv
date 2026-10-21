@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
 import ChannelRail, { RailChannel } from "@/components/ChannelRail";
 import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
-import { Tv } from "lucide-react";
+import { RefreshCw, Tv, WifiOff } from "lucide-react";
 
 /** Friendly row headings for each category rail (overrides the raw category title). */
 const RAIL_TITLES: Record<string, string> = {
@@ -25,15 +25,31 @@ interface ApiChannel extends RailChannel {
 export default function HomePage() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
   const [loading, setLoading] = useState(true);
+  /** The list could not be read at all — which is not the same as being empty. */
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
-    async function load() {
+    let retryTimer: number | undefined;
+
+    setLoading(true);
+    setLoadFailed(false);
+
+    /** One attempt, then a single retry — a dropped request is usually gone by then. */
+    async function attempt(triesLeft: number) {
       try {
         // No cache busting: the route ships a short edge cache, so Vercel serves
         // the catalogue from the nearest pop instead of hitting Node each visit.
         const res = await fetch("/api/channels");
         const data = await res.json();
+        // A degraded catalogue answers 503/500 with `success: false`. Treating
+        // that as an empty list is what showed "No Channels Online" for a
+        // database that was merely slow.
+        if (!res.ok || data?.success === false) {
+          throw new Error(`Catalogue request failed (${res.status})`);
+        }
+        if (!active) return;
         const list = Array.isArray(data)
           ? data
           : Array.isArray(data?.channels)
@@ -43,20 +59,25 @@ export default function HomePage() {
           : Array.isArray(data?.items)
           ? data.items
           : [];
-        if (active) {
-          setChannels(list);
-        }
+        setChannels(list);
+        setLoading(false);
       } catch (err) {
+        if (!active) return;
         console.error("Failed to load home channels", err);
-      } finally {
-        if (active) setLoading(false);
+        if (triesLeft > 0) {
+          retryTimer = window.setTimeout(() => attempt(triesLeft - 1), 700);
+          return;
+        }
+        setLoadFailed(true);
+        setLoading(false);
       }
     }
-    load();
+    attempt(1);
     return () => {
       active = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, []);
+  }, [reloadNonce]);
 
   /** One rail per category, in the CATEGORIES order (Sports → Bangla → Indian → Pakistani → Documentary). */
   const rails = useMemo(() => {
@@ -125,6 +146,22 @@ export default function HomePage() {
                 </div>
               </div>
             ))}
+          </div>
+        ) : loadFailed ? (
+          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
+            <WifiOff className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <h3 className="text-base font-bold text-white mb-1">Channel List Unavailable</h3>
+            <p className="text-xs text-slate-400 mb-5">
+              The channel list did not come through. Check your connection and try again.
+            </p>
+            <button
+              type="button"
+              onClick={() => setReloadNonce((n) => n + 1)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#00c978] text-slate-950 text-xs font-black hover:brightness-110 active:scale-[0.98] transition-all"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Try Again
+            </button>
           </div>
         ) : rails.length === 0 ? (
           <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">

@@ -102,7 +102,7 @@ export default function HomePage() {
         <img
           src="/images/soluplay-banner-satellite.jpg"
           alt="টিভি দেখার নতুন দুনিয়া"
-          className="block w-full h-auto"
+          className="block w-full h-auto rounded-2xl"
         />
       </div>
 

@@ -6,6 +6,16 @@ import { syncPlaylistSource, type PlaylistSyncEvent } from "@/lib/playlistSync";
 export const dynamic = "force-dynamic";
 
 /**
+ * Vercel kills the function at this wall-clock limit. Declared here because the
+ * playlist download alone may take 20s (`FETCH_TIMEOUT_MS` in lib/playlistSync),
+ * which is longer than the platform default — without it a "Check now" could be
+ * cut off before the playlist is even parsed. A run that still reaches the limit
+ * is resumable: every write is keyed on (source, URL), so checking again
+ * continues from what landed instead of duplicating it.
+ */
+export const maxDuration = 60;
+
+/**
  * POST /api/admin/playlist-sources/[id]/sync
  * Runs one source's check immediately and streams progress back as Server-Sent
  * Events, the same way the M3U ingest console reports a long import. A playlist

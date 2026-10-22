@@ -128,7 +128,7 @@ export default function HomePage() {
                   key={slug}
                   type="button"
                   onClick={() => setActiveSlug(slug)}
-                  className={`px-1.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                  className={`px-1.5 sm:px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
                     isActive
                       ? "bg-[#00c978] text-slate-950 shadow-sm"
                       : "bg-[#0d1628] text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
@@ -143,10 +143,10 @@ export default function HomePage() {
           {loading ? (
             // The same card, header row, pill row and tile grid as the loaded
             // list, so nothing jumps when the channels arrive.
-            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8">
               {Array.from({ length: 24 }).map((_, i) => (
                 <div key={i} className="w-full min-w-0 flex flex-col items-center gap-1 p-1.5">
-                  <div className="w-14 h-14 rounded-full bg-[#0d1628] animate-pulse" />
+                  <div className="w-14 h-14 lg:w-[72px] lg:h-[72px] rounded-full bg-[#0d1628] animate-pulse" />
                   <div className="h-3 w-[80%] rounded bg-[#0d1628] animate-pulse" />
                 </div>
               ))}
@@ -180,7 +180,7 @@ export default function HomePage() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8">
               {visible.map((channel) => (
                 <Link
                   key={channel._id}
@@ -188,7 +188,7 @@ export default function HomePage() {
                   className="group w-full min-w-0 flex flex-col items-center gap-1 p-1.5 rounded-xl border border-transparent hover:bg-slate-800/50 transition-all text-center"
                 >
                   <div className="relative shrink-0">
-                    <div className="w-14 h-14 rounded-full bg-white/95 border border-slate-700 p-1.5 flex items-center justify-center overflow-hidden group-hover:border-slate-500">
+                    <div className="w-14 h-14 lg:w-[72px] lg:h-[72px] rounded-full bg-white/95 border border-slate-700 p-1.5 flex items-center justify-center overflow-hidden group-hover:border-slate-500">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={getChannelLogo(channel.name, channel.logo)}

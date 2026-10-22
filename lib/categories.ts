@@ -123,7 +123,7 @@ export function getCategoryBySlug(slug: string): CategoryConfig | undefined {
  * A channel is on exactly one rail: the one whose category equals its stored
  * category. The old heuristic matching (name and country regexes across six
  * overlapping rails) is gone, which is what makes the pinned board, the home
- * rails, the category page and the health batches agree on one number.
+ * grid, the category page and the health batches agree on one number.
  */
 export function isChannelInCategory(
   channel: { category?: string } | null | undefined,

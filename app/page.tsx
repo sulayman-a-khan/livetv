@@ -5,22 +5,19 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
-import ChannelRail, { RailChannel } from "@/components/ChannelRail";
-import { CATEGORIES, isChannelInCategory } from "@/lib/categories";
+import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
+import { getChannelLogo } from "@/lib/utils";
 import { RefreshCw, Tv, WifiOff } from "lucide-react";
 
-/** Friendly row headings for each category rail (overrides the raw category title). */
-const RAIL_TITLES: Record<string, string> = {
-  sports: "Sports Channels",
-  bangla: "Bangla Channels",
-  indian: "Indian Channels",
-  pakistani: "Pakistani Channels",
-  documentary: "Documentary Channels",
-};
-
-interface ApiChannel extends RailChannel {
+interface ApiChannel {
+  _id: string;
+  name: string;
+  logo: string;
   category?: string;
 }
+
+/** The pill row: "All" first, then the five categories in CATEGORIES order. */
+const FILTER_SLUGS = ["all", ...CATEGORIES.map((category) => category.slug)];
 
 export default function HomePage() {
   const [channels, setChannels] = useState<ApiChannel[]>([]);
@@ -28,6 +25,8 @@ export default function HomePage() {
   /** The list could not be read at all — which is not the same as being empty. */
   const [loadFailed, setLoadFailed] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
+  /** Which pill is on; `all` is every live channel. */
+  const [activeSlug, setActiveSlug] = useState("all");
 
   useEffect(() => {
     let active = true;
@@ -79,23 +78,19 @@ export default function HomePage() {
     };
   }, [reloadNonce]);
 
-  /** One rail per category, in the CATEGORIES order (Sports → Bangla → Indian → Pakistani → Documentary). */
-  const rails = useMemo(() => {
-    const catRails = CATEGORIES.map((category) => ({
-      slug: category.slug,
-      title: RAIL_TITLES[category.slug] || category.title,
-      badge: category.badge,
-      channels: channels.filter((ch) => isChannelInCategory(ch, category)),
-    })).filter((rail) => rail.channels.length > 0);
+  const activeCategory = activeSlug === "all" ? null : getCategoryBySlug(activeSlug);
 
-    // Fallback: channels exist but matched no rail (only possible if a record
-    // somehow carries a category outside the five) — show them all in one row.
-    if (catRails.length === 0 && channels.length > 0) {
-      return [{ slug: "all-channels", title: "All Live Channels", badge: "📺", channels }];
-    }
+  /**
+   * The API already sorts pinned first, then priorityOrder, then name, so the
+   * grid keeps that order and only filters — the same rule the watch page
+   * sidebar follows, which is what makes the two lists agree.
+   */
+  const visible = useMemo(() => {
+    if (!activeCategory) return channels;
+    return channels.filter((ch) => isChannelInCategory(ch, activeCategory));
+  }, [channels, activeCategory]);
 
-    return catRails;
-  }, [channels]);
+  const heading = activeCategory ? `${activeCategory.title} Channels` : "All Channels";
 
   return (
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
@@ -111,79 +106,118 @@ export default function HomePage() {
         />
       </div>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8 space-y-7 sm:space-y-10">
-        {/* Channel rails */}
-        {loading ? (
-          <div className="space-y-4 sm:space-y-10" aria-busy="true">
-            {CATEGORIES.map((category) => (
-              <div key={category.slug} className="space-y-1.5 sm:space-y-3">
-                {/* Row header: the badge box + title/subtitle line boxes ChannelRail renders */}
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="shrink-0 w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-[#0d1628] animate-pulse" />
-                  <div className="min-w-0">
-                    <div className="h-7 flex items-center">
-                      <div className="h-[18px] w-40 rounded bg-[#0d1628] animate-pulse" />
-                    </div>
-                    <div className="h-4 hidden sm:flex items-center">
-                      <div className="h-3 w-24 rounded bg-[#0d1628] animate-pulse" />
-                    </div>
-                  </div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8">
+        <section className="rounded-2xl border border-slate-800/80 bg-[#0a1222] overflow-hidden animate-fade-in">
+          {/* Panel header: what is listed and how many are live */}
+          <div className="p-3.5 border-b border-slate-800/80 flex items-center justify-between gap-3 bg-[#0d1628]">
+            <h2 className="text-sm font-black text-white tracking-tight truncate">{heading}</h2>
+            {!loadFailed && (
+              <span className="text-[10px] font-bold text-emerald-400 bg-[#070d18] border border-emerald-500/30 px-2.5 py-0.5 rounded-full shrink-0">
+                {loading ? "…" : `${visible.length} Live`}
+              </span>
+            )}
+          </div>
+
+          {/* Category pills — they filter this list in place */}
+          <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-2.5 overflow-x-auto scrollbar-none">
+            {FILTER_SLUGS.map((slug) => {
+              const isActive = activeSlug === slug;
+              const label = slug === "all" ? "All" : getCategoryBySlug(slug)?.name || slug;
+              return (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => setActiveSlug(slug)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                    isActive
+                      ? "bg-[#00c978] text-slate-950 shadow-sm"
+                      : "bg-[#0d1628] text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {loading ? (
+            // The same card, header row, pill row and tile grid as the loaded
+            // list, so nothing jumps when the channels arrive.
+            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+              {Array.from({ length: 24 }).map((_, i) => (
+                <div key={i} className="w-full min-w-0 flex flex-col items-center gap-1 p-1.5">
+                  <div className="w-14 h-14 rounded-full bg-[#0d1628] animate-pulse" />
+                  <div className="h-3 w-[80%] rounded bg-[#0d1628] animate-pulse" />
                 </div>
-                <div className="-mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 overflow-hidden">
-                  <div className="flex items-start gap-3 sm:gap-4 pt-0.5 sm:pt-1 pb-1 sm:pb-2">
-                    {Array.from({ length: 12 }).map((_, j) => (
-                      <div
-                        key={j}
-                        className="shrink-0 w-[78px] sm:w-[104px] flex flex-col items-center gap-2"
-                      >
-                        <div className="w-[62px] h-[62px] sm:w-[84px] sm:h-[84px] rounded-full bg-[#0d1628] animate-pulse" />
-                        <div className="w-full h-4 flex items-center justify-center">
-                          <div className="h-3 w-[70%] rounded bg-[#0d1628] animate-pulse" />
-                        </div>
-                      </div>
-                    ))}
+              ))}
+            </div>
+          ) : loadFailed ? (
+            <div className="p-16 text-center max-w-md mx-auto">
+              <WifiOff className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">Channel List Unavailable</h3>
+              <p className="text-xs text-slate-400 mb-5">
+                The channel list did not come through. Check your connection and try again.
+              </p>
+              <button
+                type="button"
+                onClick={() => setReloadNonce((n) => n + 1)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#00c978] text-slate-950 text-xs font-black hover:brightness-110 active:scale-[0.98] transition-all"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Try Again
+              </button>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="p-16 text-center max-w-md mx-auto">
+              <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">
+                {activeCategory ? `No ${activeCategory.name} Channels` : "No Channels Online"}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {activeCategory
+                  ? "Nothing is live under this category right now. Pick All to see every channel."
+                  : "There are no active streams right now. Please check back shortly."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5 p-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+              {visible.map((channel) => (
+                <Link
+                  key={channel._id}
+                  href={`/watch/${channel._id}?category=${activeSlug}`}
+                  className="group w-full min-w-0 flex flex-col items-center gap-1 p-1.5 rounded-xl border border-transparent hover:bg-slate-800/50 transition-all text-center"
+                >
+                  <div className="relative shrink-0">
+                    <div className="w-14 h-14 rounded-full bg-white/95 border border-slate-700 p-1.5 flex items-center justify-center overflow-hidden group-hover:border-slate-500">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={getChannelLogo(channel.name, channel.logo)}
+                        alt={channel.name}
+                        loading="lazy"
+                        className="max-w-full max-h-full object-contain"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if (!target.dataset.fallback) {
+                            target.dataset.fallback = "true";
+                            const initials = channel.name.substring(0, 2).toUpperCase();
+                            target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                              initials
+                            )}&background=0284c7&color=ffffff&size=200&bold=true`;
+                          }
+                        }}
+                      />
+                    </div>
+                    <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[#0a1222] animate-pulse" />
                   </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : loadFailed ? (
-          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
-            <WifiOff className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-white mb-1">Channel List Unavailable</h3>
-            <p className="text-xs text-slate-400 mb-5">
-              The channel list did not come through. Check your connection and try again.
-            </p>
-            <button
-              type="button"
-              onClick={() => setReloadNonce((n) => n + 1)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#00c978] text-slate-950 text-xs font-black hover:brightness-110 active:scale-[0.98] transition-all"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Try Again
-            </button>
-          </div>
-        ) : rails.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-[#0a1222] p-16 text-center max-w-md mx-auto my-8">
-            <Tv className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <h3 className="text-base font-bold text-white mb-1">No Channels Online</h3>
-            <p className="text-xs text-slate-400">
-              There are no active streams right now. Please check back shortly.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4 sm:space-y-10 animate-fade-in">
-            {rails.map((rail) => (
-              <ChannelRail
-                key={rail.slug}
-                title={rail.title}
-                accent={rail.badge}
-                categorySlug={rail.slug}
-                channels={rail.channels}
-              />
-            ))}
-          </div>
-        )}
+
+                  <h3 className="w-full min-w-0 text-[9px] leading-tight truncate font-bold text-slate-200 group-hover:text-white">
+                    {channel.name}
+                  </h3>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
       </main>
 
       <AppDownloadBanner />

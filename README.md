@@ -8,7 +8,7 @@ FreeTV is a Production-Grade Automated Live Streaming Web Platform built with Ne
 
 1. **Cricfy / Sportsfy Inspired Modern UI**:
    - Dark mode glassmorphism UI with live badges, category badge flags, active stream counts, and category pills.
-   - Category rails for **Sports**, **Bangla**, **Indian**, **Pakistani**, and **Documentary** (defined once in `lib/categories.ts`).
+   - The homepage lists every live channel in one grid of round logo tiles, filtered in place by the **All / Sports / Bangla / Indian / Pakistani / Documentary** pills (categories defined once in `lib/categories.ts`).
 
 2. **Smart 5-Second Auto-Failover HLS Player**:
    - Built with `hls.js`.

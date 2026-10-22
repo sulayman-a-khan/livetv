@@ -47,4 +47,4 @@ Any other framework (Capacitor, Cordova, Tauri, etc.) is fine as long as the UA 
 
 ## Verifying the app branch without the app
 
-Spoof the UA before page scripts run, then load the homepage and any `/watch/[id]` page. In Chrome DevTools, override the User-Agent to end with `SoluPlayApp/1.0`: the navbar promo, the footer promo and the ticker should all be absent from the DOM (and never fetched), while the logo, player and rails still render.
+Spoof the UA before page scripts run, then load the homepage and any `/watch/[id]` page. In Chrome DevTools, override the User-Agent to end with `SoluPlayApp/1.0`: the navbar promo, the footer promo and the ticker should all be absent from the DOM (and never fetched), while the logo, player and channel grid still render.

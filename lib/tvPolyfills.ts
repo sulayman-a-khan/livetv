@@ -20,10 +20,10 @@ function installPolyfills() {
   const w = window as any;
 
   // ---- ResizeObserver -------------------------------------------------------
-  // Used by the watch page (player height sync) and ChannelRail (scroll
-  // arrows). Without it, `new ResizeObserver(...)` throws a ReferenceError and
-  // takes the whole React tree down. The stub never fires callbacks — the UI
-  // simply keeps its initial layout, which is fine on a fixed-size TV screen.
+  // Used by the watch page for its player height sync. Without it,
+  // `new ResizeObserver(...)` throws a ReferenceError and takes the whole React
+  // tree down. The stub never fires callbacks — the UI simply keeps its initial
+  // layout, which is fine on a fixed-size TV screen.
   if (typeof w.ResizeObserver === "undefined") {
     w.ResizeObserver = class ResizeObserver {
       observe() {}

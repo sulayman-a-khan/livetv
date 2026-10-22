@@ -100,8 +100,8 @@ export default function HomePage() {
       <div className="sm:hidden max-w-7xl w-full mx-auto px-4 pt-5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/images/mobile-promo-banner.jpg"
-          alt="খেলা ও টিভি দেখুন যখন তখন"
+          src="/images/soluplay-banner-satellite.jpg"
+          alt="টিভি দেখার নতুন দুনিয়া"
           className="block w-full h-auto"
         />
       </div>

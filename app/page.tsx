@@ -96,8 +96,8 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
       <Header />
 
-      {/* Promo banner — phones only, edge to edge under the navbar */}
-      <div className="sm:hidden">
+      {/* Promo banner — phones only, inside the same container as the card below */}
+      <div className="sm:hidden max-w-7xl w-full mx-auto px-4 pt-5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/images/mobile-promo-banner.jpg"
@@ -108,8 +108,8 @@ export default function HomePage() {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8">
         <section className="rounded-2xl border border-slate-800/80 bg-[#0a1222] overflow-hidden animate-fade-in">
-          {/* Panel header: what is listed and how many are live */}
-          <div className="p-3.5 border-b border-slate-800/80 flex items-center justify-between gap-3 bg-[#0d1628]">
+          {/* Panel header: desktop only, so phones go straight into the pills */}
+          <div className="p-3.5 border-b border-slate-800/80 hidden sm:flex items-center justify-between gap-3 bg-[#0d1628]">
             <h2 className="text-sm font-black text-white tracking-tight truncate">{heading}</h2>
             {!loadFailed && (
               <span className="text-[10px] font-bold text-emerald-400 bg-[#070d18] border border-emerald-500/30 px-2.5 py-0.5 rounded-full shrink-0">
@@ -118,8 +118,8 @@ export default function HomePage() {
             )}
           </div>
 
-          {/* Category pills — they filter this list in place */}
-          <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-2.5 overflow-x-auto scrollbar-none">
+          {/* Category pills — spread edge-to-edge on phones, filtering in place */}
+          <div className="px-2 py-1.5 border-b border-slate-800/60 bg-[#080e1b] flex items-center gap-1.5 justify-between sm:gap-2.5 sm:justify-start overflow-x-auto scrollbar-none shrink-0">
             {FILTER_SLUGS.map((slug) => {
               const isActive = activeSlug === slug;
               const label = slug === "all" ? "All" : getCategoryBySlug(slug)?.name || slug;
@@ -128,7 +128,7 @@ export default function HomePage() {
                   key={slug}
                   type="button"
                   onClick={() => setActiveSlug(slug)}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
+                  className={`px-1.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-all shrink-0 cursor-pointer ${
                     isActive
                       ? "bg-[#00c978] text-slate-950 shadow-sm"
                       : "bg-[#0d1628] text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800"

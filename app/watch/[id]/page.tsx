@@ -45,6 +45,88 @@ interface SidebarChannel {
   priorityOrder?: number;
 }
 
+/**
+ * How long to wait before re-asking a channel for its stream config.
+ * `lib/db.ts` holds a failed database connection in a 2-second cooldown and
+ * answers from it instantly, so a retry that lands inside that window is handed
+ * the same 503 it is trying to escape. This sits past it.
+ */
+const CONFIG_RETRY_MS = 2_200;
+
+/** What `/api/channels/[id]` writes: a channel payload, or the route's own failure. */
+interface StreamConfigResponse {
+  success?: boolean;
+  error?: string;
+  playable?: boolean;
+  channel?: ChannelDetails & { streamUrl?: string; [key: string]: unknown };
+}
+
+interface StreamConfigAttempt {
+  data: StreamConfigResponse;
+  /** A dropped request or a 5xx — the kind that answers correctly next time. */
+  retryable: boolean;
+  /** The exception a dropped request raised, re-thrown if the retry didn't recover. */
+  thrown?: unknown;
+}
+
+/**
+ * Fetch one channel's stream config, retrying the failures that fix themselves.
+ *
+ * A Vercel instance thawed after sitting frozen can be holding a MongoDB socket
+ * that died while it slept, and answers 503 or 500 for the one request it takes
+ * to reconnect; a function that ran out of duration answers 504 with a body that
+ * isn't JSON; a phone on a weak carrier drops the request outright. Every one of
+ * those clears on the next try, which is why "tap it again" has always worked —
+ * this makes the page tap it again on the viewer's behalf instead of handing
+ * them a dead end on the first blip.
+ *
+ * A 404 is not a blip: the catalogue genuinely doesn't hold this channel, so it
+ * returns at once and no switch pays two seconds for a retry it cannot win.
+ *
+ * Every outcome resolves to a `success`-shaped object, a non-JSON body included,
+ * so the caller's one `data.success` test still covers them all.
+ */
+async function fetchStreamConfig(channelId: string): Promise<StreamConfigResponse> {
+  const attempt = async (): Promise<StreamConfigAttempt> => {
+    let res: Response;
+    try {
+      res = await fetch(`/api/channels/${channelId}`);
+    } catch (err) {
+      return { data: { success: false }, retryable: true, thrown: err };
+    }
+
+    // A 502/504 raised by the platform is an error page, not the JSON this
+    // route writes, so parse defensively and keep the status as the explanation.
+    const body = (await res.json().catch(() => null)) as StreamConfigResponse | null;
+
+    if (body?.success && body.channel) return { data: body, retryable: false };
+    if (res.status === 404) {
+      return {
+        data: { success: false, error: body?.error || "Channel not found" },
+        retryable: false,
+      };
+    }
+    return {
+      data: {
+        success: false,
+        error: body?.error || `Stream configuration request failed (${res.status})`,
+      },
+      retryable: true,
+    };
+  };
+
+  const first = await attempt();
+  if (first.data.success || !first.retryable) return first.data;
+
+  await new Promise((resolve) => setTimeout(resolve, CONFIG_RETRY_MS));
+
+  const second = await attempt();
+  // Still dropped: the caller's own catch already says "Network error fetching
+  // stream configuration", which is the truest thing to show.
+  if (second.thrown) throw second.thrown;
+  return second.data;
+}
+
 export default function WatchPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -243,8 +325,7 @@ export default function WatchPage() {
     setError(null);
 
     try {
-      const res = await fetch(`/api/channels/${channelId}`);
-      const data = await res.json();
+      const data = await fetchStreamConfig(channelId);
 
       // A newer channel switch has started since this request went out —
       // discard this response instead of letting it clobber the current screen.

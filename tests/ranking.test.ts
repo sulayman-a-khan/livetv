@@ -114,6 +114,35 @@ test("response times within one band keep the ladder where it was", () => {
   assert.deepEqual(ids(rankStreams([slow, fast])), ["fast", "slow"]);
 });
 
+test("buffer depth bands outrank a quicker one that lists three segments", () => {
+  // Somoy TV, measured 2026-10-24: the mirror answering in 249 ms listed 3
+  // segments of 4 s and starved the viewer into micro-buffering every 9 s
+  // (8 stalls in 100 s), while the 855 ms mirror listed 6 segments of 10 s and
+  // never stalled once in 329 s. Speed alone was picking the worse server.
+  const thin = link({ _id: "thin", priority: 1, latency: 249, lastCheck: { segmentCount: 3 } });
+  const deep = link({ _id: "deep", priority: 2, latency: 855, lastCheck: { segmentCount: 6 } });
+
+  assert.deepEqual(ids(rankStreams([thin, deep])), ["deep", "thin"]);
+  assert.equal(rankingShifted(thin, { ...thin, lastCheck: { segmentCount: 6 } }), true);
+
+  // Independent TV, same day: a 4-segment mirror at 435 ms did beat the 3-segment
+  // one it replaced — 6 stalls instead of 17 — but the 6-segment mirror behind it
+  // played clean, so depth is graded rather than one threshold. A recorded depth
+  // that only crosses the middle band cannot hold Server 1 off a deeper one, and
+  // one that stays inside its band does not move at all.
+  const shallow = link({ _id: "shallow", priority: 1, latency: 435, lastCheck: { segmentCount: 4 } });
+  assert.deepEqual(ids(rankStreams([shallow, deep])), ["deep", "shallow"]);
+  assert.equal(rankingShifted(shallow, { ...shallow, lastCheck: { segmentCount: 5 } }), false);
+
+  // With no recorded depth on either side the rule asks nothing of it: the tie
+  // falls through to latency exactly as it did before, so an unprobed ladder is
+  // left where it stands.
+  const quicker = link({ _id: "quicker", priority: 2, latency: 200 });
+  const slower = link({ _id: "slower", priority: 1, latency: 800 });
+  assert.deepEqual(ids(rankStreams([slower, quicker])), ["quicker", "slower"]);
+  assert.equal(rankingShifted(quicker, quicker), false);
+});
+
 test("links with nothing to separate them rank deterministically", () => {
   const a = link({ _id: "aaa" });
   const b = link({ _id: "bbb" });

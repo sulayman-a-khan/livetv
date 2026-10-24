@@ -48,6 +48,14 @@ const STREAM_FIELDS = "_id channelId url priority status latency failedAttempts"
  */
 const STREAM_GATE_FIELDS = " deliveryHidden deliveryMisses";
 
+/**
+ * Read for the ranking rule only, and stripped by `toPublicStream` on the way
+ * out: the segments a mirror's last check found its playlist listing are the
+ * buffer depth it can hand a viewer, so the ladder is ordered by that before it
+ * is ordered by response time.
+ */
+const STREAM_RANK_FIELDS = " lastCheck.segmentCount";
+
 /** The stored fields `isUsableViewerLink` reads. */
 type ViewerLinkFields = {
   status?: string;
@@ -160,7 +168,7 @@ export async function GET(req: NextRequest) {
             adminDisabled: { $ne: true },
           })
             .sort({ priority: 1, _id: 1 })
-            .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
+            .select(STREAM_FIELDS + STREAM_GATE_FIELDS + STREAM_RANK_FIELDS)
             .lean()
         : [];
 

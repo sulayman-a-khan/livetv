@@ -36,6 +36,14 @@ const STREAM_FIELDS = "_id url priority status latency failedAttempts";
 const STREAM_GATE_FIELDS = " deliveryHidden deliveryMisses";
 
 /**
+ * Read for the ranking rule only, and stripped by `projectStream` on the way out:
+ * the segments a mirror's last check found its playlist listing are the buffer
+ * depth it can hand a viewer, and the ladder is ordered by that before it is
+ * ordered by response time.
+ */
+const STREAM_RANK_FIELDS = " lastCheck.segmentCount";
+
+/**
  * Same field whitelist, applied to the in-memory store's rows. `rank` is the place
  * in the ladder this channel was just ranked into — players step through `streams`
  * by `priority`, so the published number has to be the one the ranking rule gave.
@@ -84,7 +92,7 @@ export async function GET(
           // list the player walks on failover.
           StreamLink.find({ channelId: id, adminDisabled: { $ne: true } })
             .sort({ priority: 1, _id: 1 })
-            .select(STREAM_FIELDS + STREAM_GATE_FIELDS)
+            .select(STREAM_FIELDS + STREAM_GATE_FIELDS + STREAM_RANK_FIELDS)
             .lean(),
         ]);
 

@@ -61,6 +61,12 @@ export interface RankableStream {
   deliveryHidden?: boolean;
   deliveryMisses?: number | null;
   adminDisabled?: boolean;
+  /**
+   * What the last health check recorded. Only `segmentCount` is read from it —
+   * the mirror's buffer depth — and the field stays `unknown` because the stored
+   * record is a free-form document, not a declared schema.
+   */
+  lastCheck?: unknown;
 }
 
 export interface MaintStream extends RankableStream {
@@ -107,7 +113,7 @@ export interface MaintenancePlan {
 /**
  * RULE 2 — The most reliable working server becomes Server 1.
  *
- * The order is decided by three questions, asked in this order:
+ * The order is decided by four questions, asked in this order:
  *
  *   1. Can a viewer be handed this link at all? `isUsableViewerLink` is the very
  *      gate the public catalogue uses, so a broken, retrying or "Not delivering"
@@ -116,9 +122,18 @@ export interface MaintenancePlan {
  *      alike, because both are served this order.
  *   2. Has it been failing? A link whose last check delivered media outranks one
  *      still carrying a failure streak, however quick the streaked link answers.
- *   3. How quick was it, roughly? Latency only separates links already tied on
- *      health, and only in bands — a mirror that happens to answer 40ms faster on
- *      one pass does not take Server 1 away from the one before it.
+ *   3. How much buffer does it carry? A live mirror's playlist is the only media
+ *      its viewer can fall back through, so the segments it keeps listed are its
+ *      headroom, ranked in bands of it — measured in listed segments, because
+ *      that is what the health pass records. This question comes before speed on
+ *      purpose: the mirrors that answer fastest are the ones listing the fewest
+ *      segments, and a 3-segment ladder starves a viewer into repeated
+ *      micro-buffering no matter how quick its playlist request was. Bands, not
+ *      raw counts, because a recorded depth moves by one between two passes and
+ *      that must not reshuffle a ladder on its own.
+ *   4. How quick was it, roughly? Latency only separates links already tied on
+ *      health and headroom, and only in bands — a mirror that happens to answer
+ *      40ms faster on one pass does not take Server 1 away from the one before it.
  *
  * Still tied, a link keeps the number it already has; a channel whose ladder is
  * unchanged is therefore reproduced unchanged, so re-ranking costs no writes and
@@ -128,6 +143,22 @@ export interface MaintenancePlan {
 
 /** Response times this far apart rank as equally quick. */
 const LATENCY_BAND_MS = 500;
+
+/**
+ * The two depths that separate one ladder from another, measured on this
+ * catalogue rather than assumed: a mirror's listed segments are what a viewer
+ * gets to buffer, and below the shallower of these two numbers a feed that loses
+ * one publish cycle drains the player and the picture stops.
+ *
+ * Six segments is where playback was observed to hold — a 6x10s mirror ran 329
+ * seconds without a single stall, and an 8-segment one 122 seconds with none.
+ * Four is where a mirror only beats the starving class: two 3-segment mirrors
+ * stalled 8 and 17 times in under three minutes, while the shallowest 4-segment
+ * mirror in the same channels stalled fewer times but still stalled. So four
+ * clears three, and never takes Server 1 from six.
+ */
+const CLEAN_LIVE_WINDOW_SEGMENTS = 6;
+const USABLE_LIVE_WINDOW_SEGMENTS = 4;
 
 /**
  * Lower wins. Usable links first (clean record, then one still streaked), then the
@@ -154,6 +185,20 @@ function latencyBand(s: RankableStream): number {
   return Math.floor(ms / LATENCY_BAND_MS);
 }
 
+/**
+ * How much buffer this mirror's last check found it listing, or `null` when no
+ * check recorded one — a link never probed, or a raw `.ts` feed that lists no
+ * playlist at all. Null is not a worse score: a link with nothing to say about
+ * its depth is simply not judged by this rule, the way an untimed link is not
+ * judged by the latency rule below.
+ */
+function liveDepthBand(s: RankableStream): number | null {
+  const listed = (s.lastCheck as { segmentCount?: unknown } | null | undefined)?.segmentCount;
+  if (typeof listed !== "number" || !Number.isFinite(listed) || listed <= 0) return null;
+  if (listed >= CLEAN_LIVE_WINDOW_SEGMENTS) return 0;
+  return listed >= USABLE_LIVE_WINDOW_SEGMENTS ? 1 : 2;
+}
+
 export function compareStreamRank(a: RankableStream, b: RankableStream): number {
   const tier = reliabilityTier(a) - reliabilityTier(b);
   if (tier !== 0) return tier;
@@ -161,6 +206,15 @@ export function compareStreamRank(a: RankableStream, b: RankableStream): number 
   const placeholder =
     Number(isPlaceholderStream(a.url || "")) - Number(isPlaceholderStream(b.url || ""));
   if (placeholder !== 0) return placeholder;
+
+  // Asked only of a pair that both have a recorded depth, so a mirror the checker
+  // has never counted cannot lose Server 1 for a reason it never demonstrated.
+  const depthA = liveDepthBand(a);
+  const depthB = liveDepthBand(b);
+  if (depthA !== null && depthB !== null) {
+    const depth = depthA - depthB;
+    if (depth !== 0) return depth;
+  }
 
   const band = latencyBand(a) - latencyBand(b);
   if (band !== 0) return band;
@@ -180,14 +234,15 @@ export function rankStreams<T extends RankableStream>(streams: T[]): T[] {
 }
 
 /**
- * Did a fresh verdict move where this link belongs? Only its tier and its speed
- * band are asked: a probe that leaves both alone cannot change the order, so a
- * health pass re-ranks just the channels it really affected instead of writing
- * priorities for every link it happened to look at.
+ * Did a fresh verdict move where this link belongs? Only its tier, its buffer
+ * depth and its speed band are asked: a probe that leaves all three alone cannot
+ * change the order, so a health pass re-ranks just the channels it really
+ * affected instead of writing priorities for every link it happened to look at.
  */
 export function rankingShifted(before: RankableStream, after: RankableStream): boolean {
   return (
     reliabilityTier(before) !== reliabilityTier(after) ||
+    liveDepthBand(before) !== liveDepthBand(after) ||
     latencyBand(before) !== latencyBand(after)
   );
 }

@@ -55,6 +55,11 @@ scratch_channels.json
 /data/prod-snapshot.json
 /data/store.snapshot.json
 
+# Runtime data for the premium tier only — its own file, so a local run of the
+# premium admin can never read or rewrite the catalogue store above. Holds
+# admin-supplied source URLs, so it stays out of the public repository too.
+/data/premium-store.json
+
 # Throwaway verification scripts
 /.tmp-verify
 

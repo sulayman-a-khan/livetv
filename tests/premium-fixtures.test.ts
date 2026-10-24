@@ -15,6 +15,7 @@ import {
   validateFixtureInput,
   validatePremiumChannelInput,
 } from "../lib/premiumFixtures";
+import { projectFixtures } from "../lib/fixtureBoard";
 
 const GOOD_CHANNEL = {
   name: "Example Sports HD",
@@ -139,4 +140,146 @@ test("a fixture is upcoming before kickoff, live until its length runs out", () 
 
   assert.equal(countdownMs(kickoff, before), 1000);
   assert.equal(countdownMs(kickoff, past), 0);
+});
+
+// --- the viewer projection (lib/fixtureBoard.ts) -------------------------------
+
+test("a card only appears for a match on a premium channel the admin switched on", () => {
+  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const base = {
+    _id: "fx_one",
+    sport: "football" as const,
+    teamA: "Team A",
+    teamB: "Team B",
+    teamALogo: "",
+    teamBLogo: "",
+    competition: "Test Cup",
+    startsAt: new Date("2026-10-25T14:00:00.000Z").toISOString(),
+    durationMinutes: 120,
+    premiumChannelId: "pc_one",
+    visible: true,
+    phase: "upcoming" as const,
+  };
+  const now = new Date("2026-10-25T12:00:00.000Z");
+
+  assert.equal(projectFixtures([base], [channel], now).length, 1);
+  // No linked channel, a channel that is not in the list, and a switched-off one
+  // all mean nobody can watch this match, so the card does not advertise it.
+  assert.equal(projectFixtures([{ ...base, premiumChannelId: null }], [channel], now).length, 0);
+  assert.equal(projectFixtures([base], [{ ...channel, active: false }], now).length, 0);
+  assert.equal(projectFixtures([base], [], now).length, 0);
+});
+
+test("unpublished, finished and far-future matches stay off the board", () => {
+  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const base = {
+    _id: "fx_one",
+    sport: "football" as const,
+    teamA: "Team A",
+    teamB: "Team B",
+    teamALogo: "",
+    teamBLogo: "",
+    competition: "",
+    startsAt: new Date("2026-10-25T14:00:00.000Z").toISOString(),
+    durationMinutes: 120,
+    premiumChannelId: "pc_one",
+    visible: true,
+    phase: "upcoming" as const,
+  };
+
+  assert.equal(projectFixtures([{ ...base, visible: false }], [channel], now).length, 0);
+  assert.equal(projectFixtures([{ ...base, phase: "finished" }], [channel], now).length, 0);
+  // Two weeks out is the admin's schedule, not today's board.
+  assert.equal(
+    projectFixtures(
+      [{ ...base, startsAt: new Date("2026-11-08T14:00:00.000Z").toISOString() }],
+      [channel],
+      now
+    ).length,
+    0
+  );
+  // 23 hours out still shows.
+  assert.equal(
+    projectFixtures(
+      [{ ...base, startsAt: new Date("2026-10-26T11:00:00.000Z").toISOString() }],
+      [channel],
+      now
+    ).length,
+    1
+  );
+});
+
+test("live matches lead the board, upcoming ones follow by kickoff, and three fill it", () => {
+  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const make = (id: string, startsAt: string, phase: "upcoming" | "live") => ({
+    _id: id,
+    sport: "cricket" as const,
+    teamA: `A${id}`,
+    teamB: `B${id}`,
+    teamALogo: "",
+    teamBLogo: "",
+    competition: "",
+    startsAt: new Date(startsAt).toISOString(),
+    durationMinutes: 180,
+    premiumChannelId: "pc_one",
+    visible: true,
+    phase,
+  });
+
+  const board = projectFixtures(
+    [
+      make("fx_c", "2026-10-25T18:00:00.000Z", "upcoming"),
+      make("fx_l", "2026-10-25T11:00:00.000Z", "live"),
+      make("fx_a", "2026-10-25T13:00:00.000Z", "upcoming"),
+      make("fx_b", "2026-10-25T15:00:00.000Z", "upcoming"),
+      make("fx_d", "2026-10-25T20:00:00.000Z", "upcoming"),
+    ],
+    [channel],
+    now
+  );
+
+  assert.deepEqual(
+    board.map((card) => `${card.id}:${card.phase}`),
+    ["fx_l:live", "fx_a:upcoming", "fx_b:upcoming"]
+  );
+});
+
+test("the projection names the channel but carries no source or header", () => {
+  const channel = {
+    _id: "pc_one",
+    name: "Example Sports HD",
+    category: "Sports",
+    logoUrl: "https://host.example/logo.png",
+    active: true,
+  };
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = projectFixtures(
+    [
+      {
+        _id: "fx_one",
+        sport: "football" as const,
+        teamA: "Team A",
+        teamB: "Team B",
+        teamALogo: "",
+        teamBLogo: "",
+        competition: "Test Cup",
+        startsAt: now.toISOString(),
+        durationMinutes: 120,
+        premiumChannelId: "pc_one",
+        visible: true,
+        phase: "live" as const,
+      },
+    ],
+    [channel],
+    now
+  );
+
+  assert.equal(card.channelName, "Example Sports HD");
+  assert.equal(card.channelLogo, "https://host.example/logo.png");
+  assert.equal(card.channelCategory, "Sports");
+  const leaked = Object.keys(card).filter((key) => /source|header|url/i.test(key));
+  // channelLogo is the only URL a card may carry; it is the picture, not the stream.
+  assert.deepEqual(leaked.filter((key) => key !== "channelLogo"), []);
 });

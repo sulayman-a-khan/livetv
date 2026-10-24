@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
+import FixtureBoard from "@/components/FixtureBoard";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
 import { getChannelLogo } from "@/lib/utils";
 import { RefreshCw, Tv, WifiOff } from "lucide-react";
@@ -96,15 +97,18 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#060b13] text-slate-100 flex flex-col">
       <Header />
 
-      {/* Promo banner — phones only, inside the same container as the card below */}
-      <div className="sm:hidden max-w-7xl w-full mx-auto px-4 pt-5">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/images/soluplay-banner-satellite.jpg"
-          alt="টিভি দেখার নতুন দুনিয়া"
-          className="block w-full h-auto rounded-2xl"
-        />
-      </div>
+      {/* Banner slot on every viewport: a published match card takes it, and the
+          phone-only promo art renders whenever the board has nothing to show */}
+      <FixtureBoard>
+        <div className="sm:hidden max-w-7xl w-full mx-auto px-4 pt-5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/soluplay-banner-satellite.jpg"
+            alt="টিভি দেখার নতুন দুনিয়া"
+            className="block w-full h-auto rounded-2xl"
+          />
+        </div>
+      </FixtureBoard>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8">
         <section className="rounded-2xl border border-slate-800/80 bg-[#0a1222] overflow-hidden animate-fade-in">

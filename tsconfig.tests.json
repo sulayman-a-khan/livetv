@@ -16,6 +16,7 @@
     "tests/**/*.ts",
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
+    "lib/fixtureBoard.ts",
     "lib/premiumFixtures.ts",
     "lib/streamHealth.ts",
     "lib/ssrfGuard.ts",

@@ -26,12 +26,18 @@
  *   npm run test:premium-box
  *   npm run test:premium-box -- --port=8497 --app=3112
  *   npm run test:premium-box -- --keep      # leave both up for a browser look, Ctrl-C to clean up
+ *   npm run test:premium-box -- --tunnel    # put a Cloudflare tunnel in front of the box first
+ *
+ * With `--tunnel` the box is reached at the ephemeral https address `cloudflared` assigns, so
+ * every gate below — admin push, sign, segment bytes, refusals — runs over the public edge rather
+ * than over loopback. That is the shape of a real deployment, latency and all.
  *
  * The box is read from the sibling checkout (or SOLUPLAY_PROXY_DIR) and must already be built.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -47,6 +53,9 @@ const PROXY_PORT = Number(opt.port ?? 8497);
 const APP_PORT = Number(opt.app ?? 3112);
 const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`;
 const FOREIGN_ORIGIN = "https://somebody-elses-site.test";
+// Where `cloudflared` lives differs by machine, so the run can name it.
+const CF_BIN = String(opt.cloudflared ?? "cloudflared");
+const TUNNEL_WAIT_MS = 45_000;
 // A harness-only key. It is not a secret: it exists so the admin routes can be driven without
 // borrowing the machine's real ADMIN_SECRET_KEY, which this script must never read or print.
 const HARNESS_ADMIN_KEY = "premium-box-e2e-admin-key-not-real";
@@ -184,7 +193,9 @@ const exchanges = [];
 async function grab(url, headers = {}) {
   const res = await fetch(url, { headers: clean(headers), signal: AbortSignal.timeout(25_000) });
   const body = new Uint8Array(await res.arrayBuffer());
-  const record = { url, status: res.status, body, text: Buffer.from(body).toString("latin1") };
+  // The headers stay on the record because the transport claims below — who answered this, and
+  // whether anything cached it — can only be read off the response, not off the body.
+  const record = { url, status: res.status, headers: res.headers, body, text: Buffer.from(body).toString("latin1") };
   exchanges.push(record);
   return record;
 }
@@ -197,6 +208,91 @@ let ADMIN_SECRETS = [];
 let BROWSER_SECRETS = [];
 function leaksIn(text, secrets = BROWSER_SECRETS) {
   return secrets.filter((secret) => typeof secret === "string" && secret && text.includes(secret));
+}
+
+/**
+ * `cloudflared`'s quick tunnel: an ephemeral https address in front of the box's loopback port.
+ * The address only exists once the edge has assigned one, which is why the box cannot be
+ * configured until this resolves — and why a named tunnel is what a deployment has to use.
+ */
+function startQuickTunnel(port) {
+  return new Promise((resolve, reject) => {
+    let log = "";
+    let settled = false;
+    const child = spawn(CF_BIN, ["tunnel", "--url", `http://127.0.0.1:${port}`, "--no-autoupdate"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const fail = (message) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      reject(new Error(`${message}\n${log.slice(-600)}`));
+    };
+    const onData = (chunk) => {
+      log += String(chunk);
+      const match = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(log);
+      if (!match || settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.stdout?.removeAllListeners("data");
+      child.stderr?.removeAllListeners("data");
+      resolve({ url: match[0], child });
+    };
+    const timer = setTimeout(() => fail(`no tunnel address after ${TUNNEL_WAIT_MS / 1000}s`), TUNNEL_WAIT_MS);
+    child.stdout?.on("data", onData);
+    child.stderr?.on("data", onData);
+    child.on("error", (error) => fail(`cloudflared could not be started (${error.name}). Install it or pass --cloudflared=<path>.`));
+    child.on("exit", (code) => fail(`cloudflared exited with ${String(code)} before assigning an address`));
+  });
+}
+
+/**
+ * Fail before the tunnel is up rather than after: a box that silently could not bind its port
+ * leaves a public address sitting in front of whatever *was* listening there, and every gate
+ * below would then be measuring a different run. `cloudflared` is pointed at a port number, not
+ * at a process, so the ports have to be provably free first.
+ */
+function portIsFree(port) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.listen(port, "127.0.0.1");
+  });
+}
+
+async function assertPortsFree(ports) {
+  const busy = [];
+  for (const port of ports) if (!(await portIsFree(port))) busy.push(port);
+  if (busy.length > 0) {
+    throw new Error(
+      `port(s) ${busy.join(", ")} already have something listening on 127.0.0.1 — a previous kept run? ` +
+        `Find it with \`netstat -ano | grep :<port>\` and kill that PID, or pass --port/--app to move this run`
+    );
+  }
+}
+
+/**
+ * A freshly assigned `trycloudflare.com` hostname is not routable the instant `cloudflared`
+ * prints it: the edge has to register the route, and a request that arrives first fails at the
+ * transport rather than at the box. Without this wait the very first admin push is a false
+ * "the stream box could not be reached".
+ */
+async function waitForTunnel(url) {
+  const deadline = Date.now() + TUNNEL_WAIT_MS;
+  let last = "no attempt made";
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(8_000) });
+      if (res.ok) return { ms: Date.now() - (deadline - TUNNEL_WAIT_MS) };
+      last = `status ${res.status}`;
+    } catch (error) {
+      last = `${error.name}: ${error.cause?.message ?? error.message}`;
+    }
+    await new Promise((sleep) => setTimeout(sleep, 1_500));
+  }
+  throw new Error(`the tunnel never became routable at ${url} within ${TUNNEL_WAIT_MS / 1000}s — last error: ${last}`);
 }
 
 async function main() {
@@ -215,6 +311,10 @@ async function main() {
   const storeBefore = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
 
   section("boot");
+  // Only the two addresses something else can be reached at are asserted. The fixture origin
+  // below deliberately walks to the next free port, because its address is only ever written
+  // into the source line this run creates.
+  await assertPortsFree([PROXY_PORT, APP_PORT]);
   const origin = createRawOrigin();
   // One above the box's port, and it never lands on the box's own port: a leak check that
   // compares addresses has to be able to tell them apart.
@@ -224,16 +324,31 @@ async function main() {
   ADMIN_SECRETS = [PATH_TOKEN, QUERY_TOKEN, WANT_UA, WANT_REFERER, sourceUrl];
   BROWSER_SECRETS = [...ADMIN_SECRETS, originHost];
 
+  let tunnel = null;
+  if (opt.tunnel) {
+    section("public transport");
+    tunnel = await startQuickTunnel(PROXY_PORT);
+    say(`  the box will be reached from outside at ${tunnel.url}`);
+  }
+
   const stack = await createLocalStack({
     port: PROXY_PORT,
     register: false,
     window: WINDOW,
     segmentMs: SEGMENT_MS,
+    // The address the box believes viewers come to it at. Signed URLs are built from this, so
+    // with a tunnel up the player is handed the public address and not the loopback one.
+    ...(tunnel ? { publicBase: tunnel.url } : {}),
     // The gate the site will actually run under, named here so the premium path is measured
     // against a gate that refuses rather than a wildcard that accepts everything.
     siteOrigins: APP_ORIGIN,
     siteGuardMode: "strict",
   });
+
+  if (tunnel) {
+    const ready = await waitForTunnel(tunnel.url);
+    say(`  the public edge answered the box in ${ready.ms} ms of trying`);
+  }
 
   const nextBin = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
   const child = spawn(
@@ -508,6 +623,47 @@ async function main() {
     const offBox = await getJson(`${site}/api/premium/${channelId}/play`, {});
     gate("the signed URL the site hands out is the box's address, never the origin's", !offBox.json.entryUrl?.includes(originHost), String(offBox.json.entryUrl).slice(0, 80));
 
+    /* ---------------- the same contract, over the public edge ---------------- */
+
+    if (tunnel) {
+      section("through the tunnel");
+      const health = await grab(`${tunnel.url}/healthz`, {});
+      const ray = health.headers.get("cf-ray");
+      gate("the box answers over https with Cloudflare in front", health.status === 200 && Boolean(ray), `status ${health.status}, cf-ray ${ray}`);
+      gate("and the site signed into that address, not into loopback", String(offBox.json.entryUrl).startsWith(`${tunnel.url}/`), String(offBox.json.entryUrl).slice(0, 70));
+
+      const edge = await grab(entryUrl, { origin: APP_ORIGIN });
+      const cached = String(edge.headers.get("cf-cache-status") ?? "absent");
+      gate("the edge hands out no cached copy of a signed playlist", edge.status === 200 && !/hit/i.test(cached), `cf-cache-status ${cached}`);
+      const edgeForeign = await grab(entryUrl, { origin: FOREIGN_ORIGIN });
+      gate("a refusal still travels intact through the edge", edgeForeign.status === 403 && edgeForeign.text.includes("origin_not_allowed"), `status ${edgeForeign.status}: ${edgeForeign.text.slice(0, 80)}`);
+
+      // Latency, not capacity: these fixture segments are 8 KB, so the number that comes out is
+      // the round trip plus the edge, and a rate computed from it would flatter or damn the
+      // link by accident. Capacity is what the browser leg measures with a real stream.
+      //
+      // The window is read again here rather than reusing `segmentUrls` from the loopback walk:
+      // a live window drops its oldest segment on every target duration, and this section starts
+      // seconds later, so a line from that walk can already be gone. A 410 for an evicted
+      // segment is the box answering correctly, and must not be filed as a transport failure.
+      const edgeManifest = await grab(entryUrl, { origin: APP_ORIGIN });
+      let edgeLines = playlistLines(edgeManifest.text);
+      if (edgeLines.some((line) => line.includes("master.m3u8"))) {
+        const level = await grab(new URL(edgeLines[0], entryUrl).href, { origin: APP_ORIGIN });
+        edgeLines = playlistLines(level.text);
+      }
+      gate("the window is still published over the public edge", edgeManifest.status === 200 && edgeLines.length === WINDOW, `${edgeLines.length} line(s) at status ${edgeManifest.status}`);
+      const times = [];
+      for (const url of edgeLines.map((line) => new URL(line, entryUrl).href)) {
+        const at = Date.now();
+        const res = await grab(url, { origin: APP_ORIGIN, range: `bytes=0-${SEGMENT_BYTES - 1}` });
+        times.push({ ms: Date.now() - at, bytes: res.body.length, status: res.status });
+      }
+      gate("every segment crossed the public edge whole", times.every((row) => (row.status === 200 || row.status === 206) && row.bytes === SEGMENT_BYTES), JSON.stringify(times));
+      const sorted = times.map((row) => row.ms).sort((a, b) => a - b);
+      say(`  ${times.length} segments over the tunnel: median ${sorted[Math.floor(sorted.length / 2)]} ms, slowest ${sorted[sorted.length - 1]} ms (8 KB each, so this is round trip, not bandwidth)`);
+    }
+
     /* ---------------- retract and delete ---------------- */
 
     // A kept run is meant to be looked at, so it leaves the channel, its source and its fixture
@@ -575,6 +731,9 @@ async function main() {
     if (childExit === null) child.kill();
     await stack.stop();
     await origin.stop();
+    // The edge keeps its own connection to the port, so it goes down last and by name: a stray
+    // quick tunnel left running would advertise a dead box to whoever found the address.
+    tunnel?.child.kill();
 
     const storeNow = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
     if (storeBefore === null) {

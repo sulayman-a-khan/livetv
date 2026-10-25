@@ -17,7 +17,11 @@
  *   5. the origin's own log proves the headers the admin typed reached it, and that the segment
  *      lines the source does not spell out were asked for with the source's credential;
  *   6. retracting takes the lane off the box and the row stops being playable; deleting a row
- *      that still has a lane takes that lane with it.
+ *      that still has a lane takes that lane with it;
+ *   7. readiness is the box's, not the row's: the board's `securedReady` follows the box's own
+ *      health answer, and stopping the box mid-run takes the play route to 503 and the card's
+ *      link away while the fixture keeps its teams and its channel name — then the box coming
+ *      back, with the line pushed to it again, is what puts them back.
  *
  * It writes to no production database: the first thing it does after the server answers is read
  * `dbMode` from the premium admin route, and it aborts before a single write unless that says
@@ -297,6 +301,24 @@ async function waitForTunnel(url) {
 }
 
 /**
+ * Polls until a condition reports itself done, and reports how long that took.
+ *
+ * A gate that only says "it worked" cannot tell a four-second blip from an outage that cleared
+ * at the far edge of the trust window, and those are different facts about the same run — so
+ * the wait is measured and its duration goes into the gate's own name.
+ */
+async function waitFor(check, timeoutMs, everyMs = 1_000) {
+  const started = Date.now();
+  let last = { done: false, detail: "no attempt made" };
+  while (Date.now() - started < timeoutMs) {
+    last = await check();
+    if (last.done) return { ok: true, ms: Date.now() - started, detail: last.detail };
+    await new Promise((sleep) => setTimeout(sleep, everyMs));
+  }
+  return { ok: false, ms: Date.now() - started, detail: last.detail };
+}
+
+/**
  * Where the stream box lives. An override wins; otherwise the suite layout is resolved relative to
  * this project, so no machine's directory names appear here. Both spellings of the sibling are
  * tried, and a directory that is not built is reported by the caller rather than guessed past.
@@ -349,7 +371,7 @@ async function main() {
     say(`  the box will be reached from outside at ${tunnel.url}`);
   }
 
-  const stack = await createLocalStack({
+  const stackOptions = {
     port: PROXY_PORT,
     register: false,
     window: WINDOW,
@@ -361,7 +383,10 @@ async function main() {
     // against a gate that refuses rather than a wildcard that accepts everything.
     siteOrigins: APP_ORIGIN,
     siteGuardMode: "strict",
-  });
+  };
+  // A `let`, because one section below stops the box on purpose and brings it back: that is the
+  // only way to measure a readiness gate against a real outage rather than a stubbed answer.
+  let stack = await createLocalStack(stackOptions);
 
   if (tunnel) {
     const ready = await waitForTunnel(tunnel.url);
@@ -681,6 +706,151 @@ async function main() {
       const sorted = times.map((row) => row.ms).sort((a, b) => a - b);
       say(`  ${times.length} segments over the tunnel: median ${sorted[Math.floor(sorted.length / 2)]} ms, slowest ${sorted[sorted.length - 1]} ms (8 KB each, so this is round trip, not bandwidth)`);
     }
+
+    /* ---------------- readiness: the box decides, not the row ---------------- */
+
+    section("whether the box is able to serve right now");
+
+    /**
+     * The same question the site asks, answered here from the box's own health body so the two
+     * readings can be compared. It is written independently of `lib/premiumReadiness.ts` on
+     * purpose: if the site's verdict and the box's report ever disagree, this is the gate that
+     * says which one lied.
+     */
+    const boxSays = async () => {
+      const health = await getJson(`${stack.base}/healthz`, {});
+      const vault = health.json.vault ?? {};
+      return {
+        status: health.res.status,
+        ok: health.json.ok === true,
+        appApi: health.json.appApi === true,
+        vaultReady: vault.ready,
+        resolvable: Number(vault.resolvable ?? 0),
+        ready:
+          health.res.status === 200 &&
+          health.json.ok === true &&
+          vault.ready === true &&
+          health.json.appApi === true &&
+          Number(vault.resolvable ?? 0) > 0,
+      };
+    };
+
+    const boxNow = await boxSays();
+    const readyBoard = await getJson(`${site}/api/fixtures`, {});
+    gate(
+      `the box says it can serve (${boxNow.resolvable} lane(s)) and the board agrees`,
+      boxNow.ready === true && readyBoard.json.securedReady === true,
+      JSON.stringify({ box: boxNow, securedReady: readyBoard.json.securedReady })
+    );
+    const readyPlay = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    gate("so a viewer asking now is given a URL", readyPlay.res.status === 200, `${readyPlay.res.status} ${readyPlay.json.error}`);
+
+    const boardCache = String(readyBoard.res.headers.get("cache-control") ?? "");
+    const maxAge = Number(/s-maxage=(\d+)/.exec(boardCache)?.[1] ?? Number.POSITIVE_INFINITY);
+    gate(
+      "a linked board is cached for no longer than its readiness answer stays true",
+      maxAge <= 15,
+      boardCache
+    );
+    gate(
+      "readiness reaches a viewer as one boolean, and nothing about the box",
+      typeof readyBoard.json.securedReady === "boolean" &&
+        !readyBoard.text.includes(stack.base) &&
+        !readyBoard.text.includes("healthz") &&
+        leaksIn(readyBoard.text).length === 0,
+      JSON.stringify({ base: stack.base, leaks: leaksIn(readyBoard.text) })
+    );
+
+    /* ---------------- the box goes away ---------------- */
+
+    // Every flag a client could be told about is still green at this moment: the channel is
+    // active, the row still carries its handle, the fixture is still published and live. So if
+    // the rail keeps linking after this, it was inferred from the row rather than measured on
+    // the box — which is the failure this section exists to catch.
+    section("the box goes down");
+    await stack.stop();
+
+    const offAir = await waitFor(async () => {
+      try {
+        const attempt = await getJson(`${site}/api/premium/${channelId}/play`, {});
+        return { done: attempt.res.status === 503, detail: `${attempt.res.status} ${attempt.json.error ?? ""}` };
+      } catch (error) {
+        return { done: false, detail: `${error.name}: ${error.message}` };
+      }
+    }, 90_000);
+    gate(`the play route fails closed once the box cannot answer (${offAir.ms} ms)`, offAir.ok, offAir.detail);
+
+    const deadPlay = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    gate(
+      "and says so as an outage, not as a dead URL handed to a player",
+      deadPlay.res.status === 503 &&
+        deadPlay.json.success === false &&
+        !deadPlay.json.entryUrl &&
+        String(deadPlay.res.headers.get("cache-control") ?? "").includes("no-store"),
+      `${deadPlay.res.status} ${JSON.stringify(deadPlay.json).slice(0, 120)}`
+    );
+
+    const deadBoard = await getJson(`${site}/api/fixtures`, {});
+    const deadCard = (deadBoard.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
+    gate(
+      "the board stops claiming readiness and stops being cacheable",
+      deadBoard.json.securedReady === false &&
+        String(deadBoard.res.headers.get("cache-control") ?? "").includes("no-store"),
+      `${deadBoard.json.securedReady} ${deadBoard.res.headers.get("cache-control")}`
+    );
+    gate(
+      "the match keeps its teams, its competition and its channel — only the link goes",
+      deadBoard.res.status === 200 &&
+        deadCard.teamA === "E2E United" &&
+        deadCard.competition === "Harness Cup" &&
+        deadCard.channelName === "E2E Premium One" &&
+        deadCard.watchPath === null,
+      JSON.stringify(deadCard)
+    );
+
+    const rowDuringOutage = (
+      ((await getJson(`${site}/api/admin/premium/channels`, admin)).json.premiumChannels ?? []).find(
+        (r) => r._id === channelId
+      ) ?? {}
+    );
+    gate(
+      "while it is hidden the row is still active with its handle — the box is the only thing that changed",
+      rowDuringOutage.active === true && rowDuringOutage.proxyChannelKey === expectedKey,
+      JSON.stringify({ active: rowDuringOutage.active, key: rowDuringOutage.proxyChannelKey })
+    );
+
+    /* ---------------- the box comes back ---------------- */
+
+    section("the box comes back");
+    stack = await createLocalStack(stackOptions);
+    // A fresh box holds nothing: the admin has to push the line again, exactly as they would
+    // after a real redeploy, before the lane exists to be signed.
+    const pushedAgain = await postJson(
+      `${site}/api/admin/premium/channels/${channelId}/push`,
+      { sourceUrl, userAgent: WANT_UA, referer: WANT_REFERER },
+      admin
+    );
+    gate("the new box takes the source", pushedAgain.res.status === 200 && pushedAgain.json.success === true, `${pushedAgain.res.status} ${JSON.stringify(pushedAgain.json).slice(0, 140)}`);
+
+    const backOn = await waitFor(async () => {
+      try {
+        const attempt = await getJson(`${site}/api/premium/${channelId}/play`, {});
+        return { done: attempt.res.status === 200, detail: `${attempt.res.status} ${attempt.json.error ?? ""}` };
+      } catch (error) {
+        return { done: false, detail: `${error.name}: ${error.message}` };
+      }
+    }, 90_000);
+    gate(`the rail returns only when the box answers again (${backOn.ms} ms)`, backOn.ok, backOn.detail);
+
+    const backBoard = await getJson(`${site}/api/fixtures`, {});
+    const backCard = (backBoard.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
+    gate(
+      "the card is a link again, and the box's own health answer agrees",
+      backBoard.json.securedReady === true &&
+        backCard.watchPath === `/premium/${channelId}` &&
+        (await boxSays()).ready === true,
+      JSON.stringify({ securedReady: backBoard.json.securedReady, watchPath: backCard.watchPath })
+    );
 
     /* ---------------- retract and delete ---------------- */
 

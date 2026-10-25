@@ -48,8 +48,21 @@ function TeamMark({ name, logo }: { name: string; logo: string }) {
   );
 }
 
-function FixtureCard({ fixture, now, hideOnPhone }: { fixture: PublicFixture; now: number; hideOnPhone: boolean }) {
+function FixtureCard({
+  fixture,
+  now,
+  hideOnPhone,
+  securedReady,
+}: {
+  fixture: PublicFixture;
+  now: number;
+  hideOnPhone: boolean;
+  securedReady: boolean;
+}) {
   const live = fixture.phase === "live";
+  // A live match whose stream the box cannot deliver says so in the line that would
+  // otherwise promise it. The card stays, the watch does not.
+  const offAir = live && !securedReady;
 
   const card = (
     <article
@@ -85,19 +98,21 @@ function FixtureCard({ fixture, now, hideOnPhone }: { fixture: PublicFixture; no
 
       <p
         className={`text-[11px] font-bold ${
-          live ? "text-emerald-400" : "text-white"
+          offAir ? "text-slate-400" : live ? "text-emerald-400" : "text-white"
         } truncate`}
       >
-        {live
-          ? `▶ Live on ${fixture.channelName}`
-          : countdownText(new Date(fixture.startsAt).getTime() - now)}
+        {offAir
+          ? "এই চ্যানেলটি এখন অফ-এয়ার।"
+          : live
+            ? `▶ Live on ${fixture.channelName}`
+            : countdownText(new Date(fixture.startsAt).getTime() - now)}
       </p>
     </article>
   );
 
-  // A card whose channel has no source on the stream box stays a poster, not a promise: the
-  // projection hands back `watchPath: null` for exactly that case, so a tap never opens a
-  // player that has nothing to load.
+  // A card with nothing behind it stays a poster, not a promise: the projection hands back
+  // `watchPath: null` when the channel has no source on the box, and when the box was not ready
+  // to serve one, so a tap never opens a player that has nothing to load.
   if (!fixture.watchPath) return card;
 
   return (
@@ -121,24 +136,40 @@ function FixtureCard({ fixture, now, hideOnPhone }: { fixture: PublicFixture; no
  */
 export default function FixtureBoard({ children }: { children: ReactNode }) {
   const [fixtures, setFixtures] = useState<PublicFixture[]>([]);
+  // Nothing is offered as watchable until the server has said the box is ready: a board read
+  // that does not answer the question is answered as a no, here as it is on the route.
+  const [securedReady, setSecuredReady] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let active = true;
 
-    (async () => {
+    const load = async () => {
       try {
         const res = await fetch("/api/fixtures", { cache: "no-store" });
         const data = await res.json();
         if (!active || !res.ok || data?.success !== true) return;
         setFixtures(Array.isArray(data.fixtures) ? data.fixtures : []);
+        setSecuredReady(data.securedReady === true);
       } catch {
         // No board this visit; the slot keeps its banner.
       }
-    })();
+    };
+
+    load();
+
+    // The readiness a card was drawn with belongs to the second it was read. Asking again when
+    // the tab comes back — rather than on a timer, which would charge every open homepage its
+    // own poll — takes the link off a live card during an outage and puts it back once the box
+    // has answered for itself again.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       active = false;
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -160,6 +191,7 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
             fixture={fixture}
             now={now}
             hideOnPhone={index > 0}
+            securedReady={securedReady}
           />
         ))}
       </div>

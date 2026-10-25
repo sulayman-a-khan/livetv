@@ -23,6 +23,7 @@
     "lib/fixtureBoard.ts",
     "lib/premiumFixtures.ts",
     "lib/premiumLocalStore.ts",
+    "lib/premiumReadiness.ts",
     "lib/premiumStore.ts",
     "lib/streamHealth.ts",
     "lib/ssrfGuard.ts",

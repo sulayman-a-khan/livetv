@@ -61,9 +61,11 @@ export interface PublicFixture {
   channelLogo: string;
   channelCategory: string;
   /**
-   * Where a tap goes, or null when the channel behind the card has no source on the stream box
-   * yet. A card that would open a dead player stays a card, not a link — the admin pushing the
-   * line is what makes a match watchable, and nothing else.
+   * Where a tap goes, or null when this card has nothing to watch: either the channel behind it
+   * has no source on the stream box, or the box was not ready when the board was built. A card
+   * that would open a dead player stays a card, not a link — and the metadata it carries stays
+   * on the board either way, because a match being played is not the same fact as a stream
+   * being able to deliver it.
    */
   watchPath: string | null;
 }
@@ -75,11 +77,19 @@ export interface PublicFixture {
  * A card is dropped when it is unpublished, when it has finished, when its
  * kickoff is more than a day away, or when the premium channel behind it is
  * missing or switched off — a card must not advertise a match nobody can watch.
+ *
+ * `securedReady` is the box's own readiness verdict, measured server-side by
+ * `lib/premiumReadiness.ts`. It decides what a card may *offer*, not what it may say:
+ * the teams, the competition and the clock are the fixture's metadata and stay on the
+ * board through an outage, while a tap that would open a player needs the box to have
+ * answered that it can resolve a lane. Nothing here infers readiness from `active` or
+ * from a row having a handle — an intention is not a stream.
  */
 export function projectFixtures(
   fixtures: BoardFixture[],
   channels: BoardChannel[],
-  now: Date
+  now: Date,
+  securedReady: boolean
 ): PublicFixture[] {
   const byId = new Map(channels.map((channel) => [channel._id, channel]));
   const cutoff = now.getTime() + UPCOMING_WINDOW_MS;
@@ -114,6 +124,7 @@ export function projectFixtures(
     channelName: channel.name,
     channelLogo: channel.logoUrl,
     channelCategory: channel.category,
-    watchPath: channel.proxyChannelKey ? `/premium/${channel._id}` : null,
+    watchPath:
+      securedReady && channel.proxyChannelKey ? `/premium/${channel._id}` : null,
   }));
 }

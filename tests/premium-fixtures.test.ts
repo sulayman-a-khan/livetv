@@ -16,7 +16,23 @@ import {
   validatePremiumChannelInput,
   validatePremiumSourcePush,
 } from "../lib/premiumFixtures";
-import { projectFixtures } from "../lib/fixtureBoard";
+import {
+  projectFixtures,
+  type BoardChannel,
+  type BoardFixture,
+  type PublicFixture,
+} from "../lib/fixtureBoard";
+
+/**
+ * The projection now also asks what the stream box said about itself before it offers a watch
+ * link. These tests are about which cards appear, so they answer "ready" — the gate's own
+ * behaviour is the test that closes this file.
+ */
+const READY_BOARD = (
+  fixtures: BoardFixture[],
+  channels: BoardChannel[],
+  now: Date
+): PublicFixture[] => projectFixtures(fixtures, channels, now, true);
 
 const GOOD_CHANNEL = {
   name: "Example Sports HD",
@@ -207,12 +223,12 @@ test("a card only appears for a match on a premium channel the admin switched on
   };
   const now = new Date("2026-10-25T12:00:00.000Z");
 
-  assert.equal(projectFixtures([base], [channel], now).length, 1);
+  assert.equal(READY_BOARD([base], [channel], now).length, 1);
   // No linked channel, a channel that is not in the list, and a switched-off one
   // all mean nobody can watch this match, so the card does not advertise it.
-  assert.equal(projectFixtures([{ ...base, premiumChannelId: null }], [channel], now).length, 0);
-  assert.equal(projectFixtures([base], [{ ...channel, active: false }], now).length, 0);
-  assert.equal(projectFixtures([base], [], now).length, 0);
+  assert.equal(READY_BOARD([{ ...base, premiumChannelId: null }], [channel], now).length, 0);
+  assert.equal(READY_BOARD([base], [{ ...channel, active: false }], now).length, 0);
+  assert.equal(READY_BOARD([base], [], now).length, 0);
 });
 
 test("unpublished, finished and far-future matches stay off the board", () => {
@@ -240,11 +256,11 @@ test("unpublished, finished and far-future matches stay off the board", () => {
     phase: "upcoming" as const,
   };
 
-  assert.equal(projectFixtures([{ ...base, visible: false }], [channel], now).length, 0);
-  assert.equal(projectFixtures([{ ...base, phase: "finished" }], [channel], now).length, 0);
+  assert.equal(READY_BOARD([{ ...base, visible: false }], [channel], now).length, 0);
+  assert.equal(READY_BOARD([{ ...base, phase: "finished" }], [channel], now).length, 0);
   // Two weeks out is the admin's schedule, not today's board.
   assert.equal(
-    projectFixtures(
+    READY_BOARD(
       [{ ...base, startsAt: new Date("2026-11-08T14:00:00.000Z").toISOString() }],
       [channel],
       now
@@ -253,7 +269,7 @@ test("unpublished, finished and far-future matches stay off the board", () => {
   );
   // 23 hours out still shows.
   assert.equal(
-    projectFixtures(
+    READY_BOARD(
       [{ ...base, startsAt: new Date("2026-10-26T11:00:00.000Z").toISOString() }],
       [channel],
       now
@@ -287,7 +303,7 @@ test("live matches lead the board, upcoming ones follow by kickoff, and three fi
     phase,
   });
 
-  const board = projectFixtures(
+  const board = READY_BOARD(
     [
       make("fx_c", "2026-10-25T18:00:00.000Z", "upcoming"),
       make("fx_l", "2026-10-25T11:00:00.000Z", "live"),
@@ -315,7 +331,7 @@ test("the projection names the channel but carries no source or header", () => {
     proxyChannelKey: "prem-one",
   };
   const now = new Date("2026-10-25T12:00:00.000Z");
-  const [card] = projectFixtures(
+  const [card] = READY_BOARD(
     [
       {
         _id: "fx_one",
@@ -353,7 +369,7 @@ test("the projection names the channel but carries no source or header", () => {
 
 test("a channel with nothing on the box still makes a card, just not a link", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
-  const [card] = projectFixtures(
+  const [card] = READY_BOARD(
     [
       {
         _id: "fx_one",
@@ -386,3 +402,81 @@ test("a channel with nothing on the box still makes a card, just not a link", ()
   // Tapping it would open a player with nothing to play, so the card stays a card.
   assert.equal(card.watchPath, null);
 });
+
+// --- the readiness gate (the box's own verdict, not a row's intentions) ---------
+
+const GATED_FIXTURE = {
+  _id: "fx_one",
+  sport: "football" as const,
+  teamA: "Mohammedan",
+  teamB: "Bashundhara",
+  teamALogo: "",
+  teamBLogo: "",
+  competition: "BPL",
+  startsAt: new Date("2026-10-25T11:00:00.000Z").toISOString(),
+  durationMinutes: 120,
+  premiumChannelId: "pc_one",
+  visible: true,
+  phase: "live" as const,
+};
+
+const PUSHED_CHANNEL = {
+  _id: "pc_one",
+  name: "Example Sports HD",
+  category: "Sports",
+  logoUrl: "",
+  active: true,
+  proxyChannelKey: "prem-one",
+};
+
+test("a watch link needs the box to say it is ready, not merely a row that means to have one", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+
+  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, true);
+  // Both ways the gate can say no — the box reporting itself down, and nobody having heard from
+  // it at all — reach the projection as `false`, because a board that cannot promise a stream
+  // must not link one.
+  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, false);
+
+  assert.equal(ready[0].watchPath, "/premium/pc_one");
+  // A row that has a handle is an intention the admin had, not a stream the box can deliver.
+  assert.equal(notReady[0].watchPath, null);
+});
+
+test("an outage takes the watch away and leaves the match on the board", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, true)[0];
+  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, false)[0];
+
+  // Same card, same metadata, same channel named on it: only the offer of a stream differs.
+  assert.equal(notReady.id, ready.id);
+  assert.equal(notReady.teamA, ready.teamA);
+  assert.equal(notReady.teamB, ready.teamB);
+  assert.equal(notReady.competition, ready.competition);
+  assert.equal(notReady.startsAt, ready.startsAt);
+  assert.equal(notReady.phase, ready.phase);
+  assert.equal(notReady.channelName, ready.channelName);
+  assert.equal(notReady.channelCategory, ready.channelCategory);
+
+  const differing = (Object.keys(ready) as (keyof PublicFixture)[]).filter(
+    (key) => JSON.stringify(ready[key]) !== JSON.stringify(notReady[key])
+  );
+  assert.deepEqual(differing, ["watchPath"]);
+});
+
+test("readiness is the same answer for every card, and a card that was never pushed stays unlinked", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const board = projectFixtures(
+    [GATED_FIXTURE, { ...GATED_FIXTURE, _id: "fx_two", premiumChannelId: "pc_two" }],
+    [PUSHED_CHANNEL, { ...PUSHED_CHANNEL, _id: "pc_two", proxyChannelKey: "" }],
+    now,
+    false
+  );
+
+  assert.equal(board.length, 2);
+  assert.deepEqual(
+    board.map((card) => card.watchPath),
+    [null, null]
+  );
+});
+

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPublicPremiumChannel } from "@/lib/premiumStore";
 import { signPremiumEntry } from "@/lib/premiumProxy";
+import { isPremiumReady, readPremiumReadiness } from "@/lib/premiumReadiness";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,17 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json(
         { success: false, error: "This channel has no stream on the box yet" },
         { status: 409 }
+      );
+    }
+
+    // The row says a source was pushed; only the box says whether it can serve it. Asking is
+    // free for the box — its liveness answer reads process state and opens no upstream
+    // session — and an answer this route does not have is treated as a no, because a signed
+    // URL handed out during an outage is a spinner on a viewer's screen and a wasted tap.
+    if (!isPremiumReady(await readPremiumReadiness())) {
+      return NextResponse.json(
+        { success: false, error: "This stream is off air right now" },
+        { status: 503, headers: { "cache-control": "no-store" } }
       );
     }
 

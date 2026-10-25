@@ -32,7 +32,8 @@
  * every gate below — admin push, sign, segment bytes, refusals — runs over the public edge rather
  * than over loopback. That is the shape of a real deployment, latency and all.
  *
- * The box is read from the sibling checkout (or SOLUPLAY_PROXY_DIR) and must already be built.
+ * The box is read from the sibling checkout named `ProxyServer` (or SOLUPLAY_PROXY_DIR) and must
+ * already be built there.
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -295,14 +296,28 @@ async function waitForTunnel(url) {
   throw new Error(`the tunnel never became routable at ${url} within ${TUNNEL_WAIT_MS / 1000}s — last error: ${last}`);
 }
 
+/**
+ * Where the stream box lives. An override wins; otherwise the suite layout is resolved relative to
+ * this project, so no machine's directory names appear here. Both spellings of the sibling are
+ * tried, and a directory that is not built is reported by the caller rather than guessed past.
+ */
+function findProxyDir() {
+  const explicit = opt.proxy ?? process.env.SOLUPLAY_PROXY_DIR;
+  if (explicit) return path.resolve(explicit);
+  const candidates = [
+    path.join(ROOT, "..", "ProxyServer"),
+    path.join(ROOT, "..", "soluplay-stream-proxy"),
+  ];
+  const built = candidates.find((dir) => fs.existsSync(path.join(dir, "dist", "server.js")));
+  return path.resolve(built ?? candidates[0]);
+}
+
 async function main() {
-  const proxyDir = path.resolve(
-    opt.proxy ?? process.env.SOLUPLAY_PROXY_DIR ?? path.join(ROOT, "..", "soluplay-stream-proxy")
-  );
+  const proxyDir = findProxyDir();
   const stackPath = path.join(proxyDir, "scripts", "local-stack.mjs");
   if (!fs.existsSync(path.join(proxyDir, "dist", "server.js"))) {
     throw new Error(
-      `the stream box is not built at ${proxyDir} — run \`npm run build\` there, then re-run this`
+      `the stream box is not built at ${proxyDir} — run \`npm run build\` there, or point SOLUPLAY_PROXY_DIR at the checkout, then re-run this`
     );
   }
   const { createLocalStack } = await import(pathToFileURL(stackPath).href);
@@ -311,6 +326,9 @@ async function main() {
   const storeBefore = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
 
   section("boot");
+  // Which checkout the run resolved on its own, so a pass says where the box was and a
+  // refusal to find it is not left to be guessed at.
+  say(`  the stream box is the checkout at ${proxyDir}`);
   // Only the two addresses something else can be reached at are asserted. The fixture origin
   // below deliberately walks to the next free port, because its address is only ever written
   // into the source line this run creates.

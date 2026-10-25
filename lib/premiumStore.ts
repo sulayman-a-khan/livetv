@@ -1,8 +1,9 @@
 /**
  * The storing half of the premium tier: every read and write of a premium channel
- * or a fixture goes through here, and each function answers from MongoDB when it
- * is reachable and from the tier's own local store file when it is not, so the
- * admin panel behaves identically on a developer machine and in production.
+ * or a fixture goes through here, and each read answers from MongoDB when it is
+ * reachable and from the tier's own local store file when it is not, so the admin
+ * panel behaves identically on a developer machine and in production. A write is
+ * held to a stricter rule than a read — see `requirePersistingStore`.
  *
  * Nothing in this file is read by the Direct HLS catalogue, its ranking pass or its
  * maintenance sweep — those keep their own collections and their own local store
@@ -10,7 +11,7 @@
  */
 
 import mongoose from "mongoose";
-import { connectToDatabase } from "./db";
+import { connectToDatabase, mustUseDatabase } from "./db";
 import {
   premiumLocalStore,
   type LocalFixture,
@@ -64,6 +65,30 @@ export interface FixtureRecord {
 function bySortOrder(a: PremiumChannelRecord, b: PremiumChannelRecord): number {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
   return a.name.localeCompare(b.name);
+}
+
+/**
+ * Refuse a premium write that has nowhere to persist.
+ *
+ * This tier's local store is developer data: on a deployment there is no
+ * `data/premium-store.json` to fall back to, and the filesystem cannot be written
+ * to, so an accepted create would be answered with a fresh id and then lost when
+ * the lambda cooled down — the panel would show a row that no viewer's request can
+ * ever read back, and an accepted delete would report a row gone that is still on
+ * air. Off a deployment the same fallback is the entire point of running locally,
+ * so only a deployment is required to have a database (see `mustUseDatabase`).
+ *
+ * Reads are deliberately not guarded: a list that answers from an empty local tier
+ * advertises nothing, and the admin routes already report which store they read
+ * from (`dbMode`). A 503 there would turn a database blip into a blank panel with
+ * less evidence, not more.
+ *
+ * The thrown `status` is what every one of these routes' own `fail()` already maps
+ * into its response, so the refusal arrives as a 503 carrying this sentence.
+ */
+function requirePersistingStore(conn: typeof mongoose | null, action: string): void {
+  if (conn || !mustUseDatabase()) return;
+  throw Object.assign(new Error(`Database unavailable — ${action}`), { status: 503 });
 }
 
 function toPremiumRecord(row: {
@@ -154,6 +179,7 @@ export async function createPremiumChannel(
   input: PremiumChannelInput
 ): Promise<PremiumChannelRecord> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     const created = await PremiumChannelModel.create({
       name: input.name,
@@ -197,6 +223,7 @@ export async function setPremiumProxy(
   patch: { proxyChannelKey: string; proxyPushedAt: Date | null }
 ): Promise<PremiumChannelRecord | null> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return null;
     const updated = await PremiumChannelModel.findByIdAndUpdate(id, patch, { new: true }).lean();
@@ -258,6 +285,7 @@ export async function updatePremiumChannel(
   patch: Partial<PremiumChannelInput>
 ): Promise<PremiumChannelRecord | null> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     // An id shaped like a local store's is not a MongoDB row, and handing it to
     // the driver would throw a cast error instead of answering "not found".
@@ -271,6 +299,7 @@ export async function updatePremiumChannel(
 
 export async function deletePremiumChannel(id: string): Promise<boolean> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was deleted");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return false;
     const result = await PremiumChannelModel.deleteOne({ _id: id });
@@ -288,9 +317,14 @@ function byKickoff(a: FixtureRecord, b: FixtureRecord): number {
  * Does a premium channel with this id exist? A fixture may only be tied to a
  * channel the admin has actually entered, or the card would advertise a match
  * nobody can watch.
+ *
+ * Guarded like a write even though it reads: it is reached only from the two
+ * fixture writes, and "Linked channel is not in the premium list" is a wrong
+ * diagnosis when the truth is that nothing could be read at all.
  */
 export async function premiumChannelExists(id: string): Promise<boolean> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "the premium list could not be checked");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return false;
     const found = await PremiumChannelModel.findById(id).select("_id").lean();
@@ -312,6 +346,7 @@ export async function listFixtures(): Promise<FixtureRecord[]> {
 export async function createFixture(input: FixtureInput): Promise<FixtureRecord> {
   const now = new Date();
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     const created = await FixtureModel.create({
       sport: input.sport,
@@ -353,6 +388,7 @@ export async function updateFixture(
 ): Promise<FixtureRecord | null> {
   const now = new Date();
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return null;
     const updated = await FixtureModel.findByIdAndUpdate(id, patch, { new: true }).lean();
@@ -364,6 +400,7 @@ export async function updateFixture(
 
 export async function deleteFixture(id: string): Promise<boolean> {
   const conn = await connectToDatabase();
+  requirePersistingStore(conn, "nothing was deleted");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return false;
     const result = await FixtureModel.deleteOne({ _id: id });

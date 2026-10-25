@@ -10,14 +10,20 @@
     "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": [
     "tests/**/*.ts",
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
+    "lib/db.ts",
     "lib/fixtureBoard.ts",
     "lib/premiumFixtures.ts",
+    "lib/premiumLocalStore.ts",
+    "lib/premiumStore.ts",
     "lib/streamHealth.ts",
     "lib/ssrfGuard.ts",
     "lib/safeFetch.ts"

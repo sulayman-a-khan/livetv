@@ -21,8 +21,10 @@ function fail(error: any, fallback: string) {
 
 /**
  * GET /api/admin/premium/channels
- * The whole premium list, source URLs included, for the admin panel only. A
- * viewer-facing route is a separate projection that omits them.
+ * The whole premium list for the admin panel only: every row, including the handle each one's
+ * source sits under on the stream box and when it was pushed. Nothing written any more carries a
+ * source line of its own — the box's vault holds that — and a viewer-facing route is a separate
+ * projection again.
  */
 export async function GET(req: NextRequest) {
   try {
@@ -42,8 +44,9 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/admin/premium/channels
- * Adds one channel from whatever URL the admin supplies. The app places no
- * condition on the shape of that URL beyond it being http(s).
+ * Add a channel to the rail. It carries no stream: the source line is pushed to the stream box
+ * by `.../channels/[id]/push`, which keeps only the handle here. A channel created before that
+ * push exists simply has nothing to play yet, and the board shows it as such.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -61,11 +64,10 @@ export async function POST(req: NextRequest) {
       name: value.name!,
       category: value.category ?? "Premium",
       logoUrl: value.logoUrl ?? "",
-      sourceUrl: value.sourceUrl!,
-      headers: value.headers ?? { userAgent: "", referer: "" },
       active: value.active !== false,
       sortOrder: value.sortOrder ?? 99,
       note: value.note ?? "",
+      proxyChannelKey: value.proxyChannelKey ?? "",
     });
 
     return NextResponse.json({ success: true, channel });

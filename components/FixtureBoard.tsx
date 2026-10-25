@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode, useEffect, useState } from "react";
+import Link from "next/link";
 import type { PublicFixture } from "@/lib/fixtureBoard";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -50,9 +51,9 @@ function TeamMark({ name, logo }: { name: string; logo: string }) {
 function FixtureCard({ fixture, now, hideOnPhone }: { fixture: PublicFixture; now: number; hideOnPhone: boolean }) {
   const live = fixture.phase === "live";
 
-  return (
+  const card = (
     <article
-      className={`rounded-2xl border border-slate-800/80 bg-[#0a1222] p-3 flex-col gap-2.5 ${
+      className={`rounded-2xl border border-slate-800/80 bg-[#0a1222] p-3 flex-col gap-2.5 w-full ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
@@ -88,10 +89,24 @@ function FixtureCard({ fixture, now, hideOnPhone }: { fixture: PublicFixture; no
         } truncate`}
       >
         {live
-          ? `Live on ${fixture.channelName}`
+          ? `▶ Live on ${fixture.channelName}`
           : countdownText(new Date(fixture.startsAt).getTime() - now)}
       </p>
     </article>
+  );
+
+  // A card whose channel has no source on the stream box stays a poster, not a promise: the
+  // projection hands back `watchPath: null` for exactly that case, so a tap never opens a
+  // player that has nothing to load.
+  if (!fixture.watchPath) return card;
+
+  return (
+    <Link
+      href={fixture.watchPath}
+      className={`block text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
+    >
+      {card}
+    </Link>
   );
 }
 

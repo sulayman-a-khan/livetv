@@ -1,0 +1,594 @@
+/**
+ * Phase 3 end-to-end: the premium tier's push → sign → play handshake, against the real box.
+ *
+ * Nothing here is a mock of the proxy. The whole shipped proxy is booted in-process on the
+ * local stack, `next start` runs the built site as a child process, and every claim is measured
+ * through HTTP the way a viewer and the admin panel actually reach it:
+ *
+ *   1. the admin gate still refuses a wrong key, and a premium row can be created with no
+ *      stream on it at all;
+ *   2. pushing a source writes the handle and nothing else — the row's own `sourceUrl` and
+ *      header columns stay empty, which is the decision this phase exists to keep;
+ *   3. a viewer's board links a card to `/premium/<id>` only once the channel has a handle, and
+ *      the board's JSON names no token, no origin and no upstream header;
+ *   4. `/api/premium/<id>/play` answers with a box-signed, expiring URL on the box's own address,
+ *      that URL plays through the site gate, its segments carry their bytes, and a foreign or
+ *      absent origin is refused;
+ *   5. the origin's own log proves the headers the admin typed reached it, and that the segment
+ *      lines the source does not spell out were asked for with the source's credential;
+ *   6. retracting takes the lane off the box and the row stops being playable; deleting a row
+ *      that still has a lane takes that lane with it.
+ *
+ * It writes to no production database: the first thing it does after the server answers is read
+ * `dbMode` from the premium admin route, and it aborts before a single write unless that says
+ * `local`. The tier's local store file is restored byte for byte afterwards.
+ *
+ *   npm run test:premium-box
+ *   npm run test:premium-box -- --port=8497 --app=3112
+ *   npm run test:premium-box -- --keep      # leave both up for a browser look, Ctrl-C to clean up
+ *
+ * The box is read from the sibling checkout (or SOLUPLAY_PROXY_DIR) and must already be built.
+ */
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const ROOT = path.resolve(fileURLToPath(import.meta.url), "..", "..");
+
+const opt = {};
+for (const arg of process.argv.slice(2)) {
+  const match = /^--([^=]+)(?:=(.*))?$/.exec(arg);
+  if (match) opt[match[1]] = match[2] === undefined ? true : match[2];
+}
+
+const PROXY_PORT = Number(opt.port ?? 8497);
+const APP_PORT = Number(opt.app ?? 3112);
+const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`;
+const FOREIGN_ORIGIN = "https://somebody-elses-site.test";
+// A harness-only key. It is not a secret: it exists so the admin routes can be driven without
+// borrowing the machine's real ADMIN_SECRET_KEY, which this script must never read or print.
+const HARNESS_ADMIN_KEY = "premium-box-e2e-admin-key-not-real";
+
+const SEGMENT_MS = 2000;
+const WINDOW = 4;
+const SEGMENT_BYTES = 8192;
+const BASE_SEQ = 900;
+
+// The source's two secrets, in the two places real premium lines keep them.
+const PATH_TOKEN = "e2ePath7";
+const QUERY_TOKEN = "e2eQuery3";
+const WANT_UA = "SoluPlayPremiumE2E/1.0 (test lane)";
+const WANT_REFERER = "https://origin-desk.test/";
+
+const gates = [];
+function gate(name, ok, detail = "") {
+  gates.push({ name, ok });
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}${ok || !detail ? "" : ` — ${detail}`}`);
+}
+const section = (title) => console.log(`\n${title}`);
+const say = (line) => console.log(line);
+
+/**
+ * The origin: one manifest URL whose path and query both carry secrets, which answers 403
+ * unless the request arrives with the headers it demands, and which remembers every request so
+ * the claims about what reached *it* come from its log rather than from ours.
+ */
+function createRawOrigin() {
+  const startedAt = Date.now();
+  const seen = [];
+  const dir = "premium";
+  let inFlight = 0;
+  let peak = 0;
+  const edge = () => BASE_SEQ + Math.floor((Date.now() - startedAt) / SEGMENT_MS);
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://origin.invalid");
+    const match = /^\/secure\/([^/]+)\/(index\.m3u8|seg-(\d+)\.ts)$/.exec(url.pathname);
+    const file = match?.[2] ?? "";
+    const kind = match ? (file === "index.m3u8" ? "manifest" : "segment") : "other";
+    const query = url.searchParams.get("token") ?? "";
+    const note = (ok, why = "") =>
+      seen.push({ ok, why, kind, dir, ua: req.headers["user-agent"] ?? "", referer: req.headers["referer"] ?? "", query, path: url.pathname });
+
+    if (!match) {
+      note(false, "no such route");
+      res.writeHead(404, { "content-type": "text/plain" });
+      res.end("nope");
+      return;
+    }
+    if (match[1] !== PATH_TOKEN || query !== QUERY_TOKEN) {
+      note(false, "credential");
+      res.writeHead(401, { "content-type": "text/plain" });
+      res.end("bad token");
+      return;
+    }
+    if (req.headers["user-agent"] !== WANT_UA) {
+      note(false, "user-agent");
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("who are you");
+      return;
+    }
+    if (kind === "manifest" && req.headers["referer"] !== WANT_REFERER) {
+      note(false, "referer");
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("where did you come from");
+      return;
+    }
+
+    inFlight += 1;
+    if (inFlight > peak) peak = inFlight;
+    const finish = (status, body, type) => {
+      inFlight -= 1;
+      note(true);
+      res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+      res.end(body);
+    };
+    if (kind === "manifest") {
+      const first = edge() - WINDOW + 1;
+      const lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:2", `#EXT-X-MEDIA-SEQUENCE:${first}`];
+      for (let seq = first; seq <= edge(); seq += 1) {
+        lines.push(`#EXTINF:${(SEGMENT_MS / 1000).toFixed(3)},`, `seg-${seq}.ts`);
+      }
+      finish(200, `${lines.join("\n")}\n`, "application/vnd.apple.mpegurl");
+      return;
+    }
+    finish(200, Buffer.alloc(SEGMENT_BYTES, Number(match[3]) % 256), "video/mp2t");
+  });
+
+  return {
+    seen,
+    countOf: (whichKind) => seen.filter((row) => row.ok && row.kind === whichKind).length,
+    /** Every read that reached this origin, with the header or credential each carried. */
+    log: () => seen.map((row) => `${row.ok ? "ok" : `refused(${row.why})`} ${row.kind} ${row.path} ua=${row.ua === WANT_UA ? "wanted" : JSON.stringify(row.ua)} ref=${row.referer === WANT_REFERER ? "wanted" : "-"} q=${row.query === QUERY_TOKEN ? "wanted" : JSON.stringify(row.query)}`),
+    start: async (preferredPort) => {
+      for (let port = preferredPort; port < preferredPort + 10; port++) {
+        try {
+          await new Promise((resolve, reject) => {
+            const listening = () => {
+              server.off("error", reject);
+              resolve();
+            };
+            server.once("error", reject);
+            server.listen(port, "127.0.0.1", listening);
+          });
+          return `http://127.0.0.1:${server.address().port}`;
+        } catch {
+          // Another process holds this port: try the next one.
+        }
+      }
+      throw new Error(`no port available between ${preferredPort} and ${preferredPort + 9}`);
+    },
+    stop: async () => {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    },
+  };
+}
+
+const playlistLines = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+
+// The box republishes each segment under its own path, keeping the sequence number the origin
+// named it with — which is what makes a served segment tellable from an empty one.
+const seqOf = (pathname) => Number(/\/(\d+)\.ts(?:\?|$)/.exec(pathname)?.[1] ?? -1);
+
+const clean = (headers) =>
+  Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined && value !== null));
+
+const exchanges = [];
+async function grab(url, headers = {}) {
+  const res = await fetch(url, { headers: clean(headers), signal: AbortSignal.timeout(25_000) });
+  const body = new Uint8Array(await res.arrayBuffer());
+  const record = { url, status: res.status, body, text: Buffer.from(body).toString("latin1") };
+  exchanges.push(record);
+  return record;
+}
+
+/** A response to the admin's own browser must not carry any of these. */
+let ADMIN_SECRETS = [];
+// The origin's address is not a credential — the box's vault stores it in the clear precisely so
+// an operator can read it — but a *viewer* must never learn which server a premium channel is
+// pulled from, so anything a viewer could have read is held to the stricter list.
+let BROWSER_SECRETS = [];
+function leaksIn(text, secrets = BROWSER_SECRETS) {
+  return secrets.filter((secret) => typeof secret === "string" && secret && text.includes(secret));
+}
+
+async function main() {
+  const proxyDir = path.resolve(
+    opt.proxy ?? process.env.SOLUPLAY_PROXY_DIR ?? path.join(ROOT, "..", "soluplay-stream-proxy")
+  );
+  const stackPath = path.join(proxyDir, "scripts", "local-stack.mjs");
+  if (!fs.existsSync(path.join(proxyDir, "dist", "server.js"))) {
+    throw new Error(
+      `the stream box is not built at ${proxyDir} — run \`npm run build\` there, then re-run this`
+    );
+  }
+  const { createLocalStack } = await import(pathToFileURL(stackPath).href);
+
+  const storeFile = path.join(ROOT, "data", "premium-store.json");
+  const storeBefore = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
+
+  section("boot");
+  const origin = createRawOrigin();
+  // One above the box's port, and it never lands on the box's own port: a leak check that
+  // compares addresses has to be able to tell them apart.
+  const originBase = await origin.start(PROXY_PORT + 1);
+  const originHost = originBase.slice("http://".length);
+  const sourceUrl = `${originBase}/secure/${PATH_TOKEN}/index.m3u8?token=${QUERY_TOKEN}`;
+  ADMIN_SECRETS = [PATH_TOKEN, QUERY_TOKEN, WANT_UA, WANT_REFERER, sourceUrl];
+  BROWSER_SECRETS = [...ADMIN_SECRETS, originHost];
+
+  const stack = await createLocalStack({
+    port: PROXY_PORT,
+    register: false,
+    window: WINDOW,
+    segmentMs: SEGMENT_MS,
+    // The gate the site will actually run under, named here so the premium path is measured
+    // against a gate that refuses rather than a wildcard that accepts everything.
+    siteOrigins: APP_ORIGIN,
+    siteGuardMode: "strict",
+  });
+
+  const nextBin = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
+  const child = spawn(
+    process.execPath,
+    [nextBin, "start", "-H", "127.0.0.1", "-p", String(APP_PORT)],
+    {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        NEXT_TELEMETRY_DISABLED: "1",
+        // Blank, so the tier falls back to its own local store. `next start` also reads
+        // .env.local, and dotenv never overwrites a variable that is already defined.
+        MONGODB_URI: "",
+        ADMIN_SECRET_KEY: HARNESS_ADMIN_KEY,
+        PROXY_BASE_URL: stack.base,
+        PROXY_ADMIN_TOKEN: stack.adminToken,
+        PROXY_APP_TOKEN: stack.appToken,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  const serverLog = [];
+  child.stdout?.on("data", (chunk) => serverLog.push(String(chunk)));
+  child.stderr?.on("data", (chunk) => serverLog.push(String(chunk)));
+  let childExit = null;
+  child.on("exit", (code, signal) => {
+    childExit = signal ?? code;
+  });
+
+  const site = `${APP_ORIGIN}`;
+  const admin = { "x-admin-secret": HARNESS_ADMIN_KEY };
+  const getJson = async (url, headers) => {
+    const res = await fetch(url, { headers: clean(headers ?? {}), cache: "no-store", signal: AbortSignal.timeout(25_000) });
+    const text = await res.text();
+    let json = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = { raw: text };
+    }
+    return { res, json, text };
+  };
+  const postJson = async (url, body, headers) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: clean({ ...(headers ?? {}), "content-type": "application/json" }),
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(25_000),
+    });
+    const text = await res.text();
+    let json = {};
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      json = { raw: text };
+    }
+    return { res, json, text };
+  };
+
+  // Declared out here because a kept run prints the page it left behind for the browser to open.
+  let channelId = "";
+
+  try {
+    // Wait for the site to answer at all: `next start` is not ready the moment it is spawned.
+    let ready = false;
+    for (let attempt = 0; attempt < 120 && !ready; attempt++) {
+      if (childExit !== null) throw new Error(`the site exited before it was ready (${childExit})`);
+      try {
+        const probe = await getJson(`${site}/api/admin/premium/channels`, {});
+        if (probe.res.status === 401) ready = true;
+      } catch {
+        // Not listening yet.
+      }
+      if (!ready) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    gate("the built site answers on its own port", ready);
+    if (!ready) throw new Error("the site never came up, so nothing below can be measured");
+
+    /* ---------------- the never-touch-production gate ---------------- */
+
+    const first = await getJson(`${site}/api/admin/premium/channels`, admin);
+    gate("this run is on the tier's local store, not a real database", first.json.dbMode === "local", `dbMode ${first.json.dbMode}`);
+    if (first.json.dbMode !== "local") {
+      throw new Error("refusing to write: the site connected to a real database");
+    }
+
+    /* ---------------- the admin gate ---------------- */
+
+    section("the admin gate");
+    const wrongKey = await getJson(`${site}/api/admin/premium/channels`, { "x-admin-secret": "wrong-key" });
+    gate("a wrong admin key is refused", wrongKey.res.status === 401, `status ${wrongKey.res.status}`);
+    const noKey = await getJson(`${site}/api/admin/premium/channels`, {});
+    gate("and so is no key at all", noKey.res.status === 401, `status ${noKey.res.status}`);
+
+    /* ---------------- a row with nothing on the box ---------------- */
+
+    section("a premium row starts as a name, not a stream");
+    const created = await fetch(`${site}/api/admin/premium/channels`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ name: "E2E Premium One", category: "Sports", sortOrder: 7, note: "harness row" }),
+      cache: "no-store",
+    });
+    const createdJson = await created.json();
+    channelId = String(createdJson.channel?._id ?? "");
+    gate("the row is created with no box handle", created.status === 200 && createdJson.success === true && channelId !== "" && createdJson.channel.proxyChannelKey === "", `${created.status} ${channelId}`);
+    if (!channelId) throw new Error("no row id, so the rest cannot be measured");
+    const expectedKey = `prem-${channelId.toLowerCase().replace(/[^a-z0-9_-]/g, "-")}`.slice(0, 64);
+
+    const beforePush = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    gate("a viewer cannot ask for a stream the box has never been given", beforePush.res.status === 409, `${beforePush.res.status} ${beforePush.json.error}`);
+
+    const pageBefore = await grab(`${site}/premium/${channelId}`);
+    gate("the premium watch page renders before there is anything to play", pageBefore.status === 200 && pageBefore.text.includes("Premium"), `status ${pageBefore.status}`);
+
+    /* ---------------- the push ---------------- */
+
+    section("pushing a source to the box");
+    const badPush = await fetch(`${site}/api/admin/premium/channels/${channelId}/push`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ sourceUrl: "ftp://host/index.m3u8" }),
+      cache: "no-store",
+    });
+    const badPushJson = await badPush.json();
+    gate("a line that is not an http(s) URL never reaches the box", badPush.status === 400 && /Source URL/.test(String(badPushJson.error)), `${badPush.status} ${badPushJson.error}`);
+
+    const pushed = await fetch(`${site}/api/admin/premium/channels/${channelId}/push`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ sourceUrl, userAgent: WANT_UA, referer: WANT_REFERER }),
+      cache: "no-store",
+    });
+    const pushedJson = await pushed.json();
+    const pushText = JSON.stringify(pushedJson);
+    gate("the box takes the source and the row keeps its handle", pushed.status === 200 && pushedJson.success === true && pushedJson.channelKey === expectedKey, `${pushed.status} ${pushText.slice(0, 160)}`);
+    gate("and a timestamp the admin can see", typeof pushedJson.pushedAt === "string" && !Number.isNaN(Date.parse(pushedJson.pushedAt)), String(pushedJson.pushedAt));
+    gate("nothing the push answers carries the line or its headers", leaksIn(pushText).length === 0, JSON.stringify(leaksIn(pushText)));
+
+    const rowsAfterPush = await getJson(`${site}/api/admin/premium/channels`, admin);
+    const row = (rowsAfterPush.json.premiumChannels ?? []).find((r) => r._id === channelId) ?? {};
+    gate("this database keeps no copy of the source line", row.sourceUrl === "" && row.headers?.userAgent === "" && row.headers?.referer === "", JSON.stringify({ sourceUrl: row.sourceUrl, headers: row.headers }));
+    gate("and it does keep the handle and when it travelled", row.proxyChannelKey === expectedKey && typeof row.proxyPushedAt === "string", JSON.stringify({ key: row.proxyChannelKey, at: row.proxyPushedAt }));
+
+    const boxChannels = await getJson(`${stack.base}/admin/channels`, { authorization: `Bearer ${stack.adminToken}` });
+    const boxRow = (boxChannels.json.channels ?? []).find((c) => c.channelKey === expectedKey);
+    gate("the box lists the channel it was filed under", boxRow?.kind === "hls" && boxRow?.streamId === "", JSON.stringify(boxRow ?? boxChannels.json).slice(0, 200));
+    const boxProviders = await getJson(`${stack.base}/admin/providers`, { authorization: `Bearer ${stack.adminToken}` });
+    const providerRow = (boxProviders.json.providers ?? []).find((p) => p.providerId === expectedKey);
+    gate("the vault marks the lane as one that carries its own headers", providerRow?.kind === "hls" && providerRow?.ownHeaders === true, JSON.stringify(providerRow ?? {}).slice(0, 200));
+    const boxListings = JSON.stringify(boxProviders.json) + JSON.stringify(boxChannels.json);
+    gate("and neither listing prints the credential or the headers", leaksIn(boxListings, ADMIN_SECRETS).length === 0, JSON.stringify(leaksIn(boxListings, ADMIN_SECRETS)));
+
+    const repushed = await fetch(`${site}/api/admin/premium/channels/${channelId}/push`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ sourceUrl, userAgent: WANT_UA, referer: WANT_REFERER }),
+      cache: "no-store",
+    });
+    const repushedJson = await repushed.json();
+    gate("pushing the same channel again updates rather than fails", repushed.status === 200 && repushedJson.success === true, `${repushed.status} ${JSON.stringify(repushedJson).slice(0, 160)}`);
+
+    /* ---------------- the board ---------------- */
+
+    section("what a viewer is allowed to see");
+    const fixtureRes = await fetch(`${site}/api/admin/fixtures`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({
+        sport: "football",
+        teamA: "E2E United",
+        teamB: "E2e City",
+        competition: "Harness Cup",
+        startsAt: new Date(Date.now() - 60_000).toISOString(),
+        durationMinutes: 120,
+        premiumChannelId: channelId,
+      }),
+      cache: "no-store",
+    });
+    const fixtureJson = await fixtureRes.json();
+    const fixtureId = String(fixtureJson.fixture?._id ?? "");
+    gate("a live match can be entered against that channel", fixtureRes.status === 200 && fixtureId !== "", `${fixtureRes.status}`);
+    const publishRes = await fetch(`${site}/api/admin/fixtures/${fixtureId}`, {
+      method: "PATCH",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ visible: true }),
+      cache: "no-store",
+    });
+    gate("and published on its own switch", publishRes.status === 200 && (await publishRes.json()).fixture?.visible === true);
+
+    const board = await getJson(`${site}/api/fixtures`, {});
+    const card = (board.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
+    gate("the card appears with a link to the premium watch page", card.watchPath === `/premium/${channelId}`, JSON.stringify({ watchPath: card.watchPath }));
+    gate("the card names the channel but no server", leaksIn(board.text).length === 0, JSON.stringify(leaksIn(board.text)));
+
+    /* ---------------- sign and play ---------------- */
+
+    section("the handshake and playback");
+    const play = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    const entryUrl = String(play.json.entryUrl ?? "");
+    const entry = new URL(entryUrl);
+    gate("the site signs nothing itself — the box's answer is the URL", play.res.status === 200 && entryUrl.startsWith(`${stack.base}/`) && entry.searchParams.has("t"), `${play.res.status} ${entryUrl.slice(0, 80)}`);
+    gate("and it expires", Number(play.json.expiresAt) > Date.now(), String(play.json.expiresAt));
+    gate("the play response carries no credential of its own", leaksIn(play.text).length === 0, JSON.stringify(leaksIn(play.text)));
+    gate("no-store on a signed URL", (play.res.headers.get("cache-control") ?? "").includes("no-store"), String(play.res.headers.get("cache-control")));
+    if (!entryUrl) throw new Error("no entry URL, so playback cannot be measured");
+
+    const signedToken = entry.searchParams.get("t") ?? "";
+    const watchPage = await grab(`${site}/premium/${channelId}`);
+    gate(
+      "the watch page HTML arrives with no signed URL in it — the player asks for one",
+      watchPage.status === 200 &&
+        signedToken.length > 0 &&
+        !watchPage.text.includes(signedToken) &&
+        !watchPage.text.includes("/live/") &&
+        leaksIn(watchPage.text).length === 0,
+      JSON.stringify({ status: watchPage.status, leaks: leaksIn(watchPage.text) })
+    );
+
+    const manifest = await grab(entryUrl, { origin: APP_ORIGIN, referer: `${APP_ORIGIN}/premium/${channelId}` });
+    gate("the viewer's player can open it through the site gate", manifest.status === 200 && manifest.text.includes("#EXTM3U"), `status ${manifest.status}: ${manifest.text.slice(0, 200)}`);
+    if (manifest.status !== 200) {
+      // Whatever the box said, the two places it could have gone wrong are the origin's log of
+      // what it was asked for and its own health answer.
+      say(`  note: origin log — ${origin.log().slice(-8).join("  |  ") || "(the origin was never reached)"}`);
+      const health = await getJson(`${stack.base}/healthz`, {});
+      say(`  note: /healthz — ${JSON.stringify(health.json).slice(0, 400)}`);
+      const boxChannel = await getJson(`${stack.base}/admin/channels`, { authorization: `Bearer ${stack.adminToken}` });
+      say(`  note: box channels — ${JSON.stringify(boxChannel.json.channels ?? []).slice(0, 400)}`);
+    }
+    let lines = playlistLines(manifest.text);
+    if (lines.some((line) => line.includes("master.m3u8"))) {
+      const level = await grab(new URL(lines[0], entryUrl).href, { origin: APP_ORIGIN });
+      lines = playlistLines(level.text);
+      gate("and a master resolves to the held window", lines.length === WINDOW, `${lines.length} line(s)`);
+    }
+    gate("the published playlist names no origin and no token", leaksIn(manifest.text).length === 0, JSON.stringify(leaksIn(manifest.text)));
+
+    const segmentUrls = lines.map((line) => new URL(line, entryUrl).href);
+    const segments = [];
+    for (const url of segmentUrls) {
+      segments.push(await grab(url, { origin: APP_ORIGIN, range: `bytes=0-${SEGMENT_BYTES - 1}` }));
+    }
+    gate("every published segment plays with its own bytes", segments.every((res, index) => (res.status === 200 || res.status === 206) && res.body[0] === ((seqOf(new URL(segmentUrls[index]).pathname) % 256 + 256) % 256) && res.body.length === SEGMENT_BYTES), segments.map((res, index) => `${seqOf(new URL(segmentUrls[index]).pathname)}: ${res.status}/${res.body.length}B first=${res.body[0]} ${res.status >= 400 ? res.text.slice(0, 80) : ""}`).join(" | "));
+    gate("and none of them leaks the source", leaksIn(segments.map((res) => res.text).join("")).length === 0);
+
+    // Measured after a viewer has read the lane, because that is when an operator would ask.
+    const probe = await postJson(`${stack.base}/admin/channels/${expectedKey}/probe`, {}, { authorization: `Bearer ${stack.adminToken}` });
+    gate("the operator can still see which source the lane reads", probe.res.status === 200 && probe.json.ok === true && /<- hls \S+\/\*\*\*\/index\.m3u8/.test(String(probe.json.window?.source ?? "")), `${probe.res.status} via ${probe.json.via}: ${JSON.stringify(probe.json).slice(0, 220)}`);
+    gate("and its report prints no credential", leaksIn(JSON.stringify(probe.json), ADMIN_SECRETS).length === 0, JSON.stringify(leaksIn(JSON.stringify(probe.json), ADMIN_SECRETS)));
+
+    const foreign = await grab(entryUrl, { origin: FOREIGN_ORIGIN });
+    gate("an off-site embed of the premium entry is refused", foreign.status === 403 && foreign.text.includes("origin_not_allowed"), `status ${foreign.status}`);
+    const bare = await grab(entryUrl, {});
+    gate("a request that claims no site at all is refused too", bare.status === 403, `status ${bare.status}`);
+    const unsigned = await grab(`${stack.base}${entry.pathname}`, { origin: APP_ORIGIN });
+    gate("the entry path without its token is refused", unsigned.status === 403 && /token_/.test(unsigned.text), `status ${unsigned.status}`);
+    const tampered = await grab(`${stack.base}${entry.pathname}${entry.search.replace(/t=[^&]*/, "t=00000000")}`, { origin: APP_ORIGIN });
+    gate("and a tampered token is refused", tampered.status === 403, `status ${tampered.status}`);
+
+    /* ---------------- what actually reached the origin ---------------- */
+
+    section("the origin's own log");
+    const reads = origin.seen.filter((row) => row.ok);
+    gate("the admin's User-Agent is the one the source is read with", reads.length > 0 && reads.every((row) => row.ua === WANT_UA), `${origin.seen.filter((row) => !row.ok && row.why === "user-agent").length} refusal(s) for a wrong agent`);
+    gate("so is the Referer", reads.filter((row) => row.kind === "manifest").every((row) => row.referer === WANT_REFERER), `${reads.filter((row) => row.kind === "manifest").length} manifest read(s)`);
+    gate("a relative segment line is asked for with the source's credential", origin.seen.filter((row) => row.kind === "segment" && row.ok).length > 0 && origin.seen.filter((row) => row.kind === "segment" && row.ok).every((row) => row.query === QUERY_TOKEN && row.path === `/secure/${PATH_TOKEN}/${row.path.split("/").pop()}`), JSON.stringify([...new Set(origin.seen.map((row) => `${row.path}?${row.query}`))]));
+    gate("and one lane never meant two connections to the source", origin.countOf("segment") > 0, `${origin.countOf("manifest")} manifest read(s), ${origin.countOf("segment")} segment read(s)`);
+
+    const offBox = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    gate("the signed URL the site hands out is the box's address, never the origin's", !offBox.json.entryUrl?.includes(originHost), String(offBox.json.entryUrl).slice(0, 80));
+
+    /* ---------------- retract and delete ---------------- */
+
+    // A kept run is meant to be looked at, so it leaves the channel, its source and its fixture
+    // in place; the retract/delete half of the contract is measured by the default run.
+    if (!opt.keep) {
+      section("taking the source back off the box");
+    const retracted = await fetch(`${site}/api/admin/premium/channels/${channelId}/push`, {
+      method: "DELETE",
+      headers: admin,
+      cache: "no-store",
+    });
+    const retractJson = await retracted.json();
+    gate("the row survives with its handle cleared", retracted.status === 200 && retractJson.success === true && retractJson.channelKey === "", `${retracted.status} ${JSON.stringify(retractJson).slice(0, 120)}`);
+    const afterRetract = await getJson(`${site}/api/admin/premium/channels`, admin);
+    const retractedRow = (afterRetract.json.premiumChannels ?? []).find((r) => r._id === channelId) ?? {};
+    gate("the box lane is gone, so nothing is left serving it", retractedRow.proxyChannelKey === "" && retractedRow.proxyPushedAt === null, JSON.stringify({ key: retractedRow.proxyChannelKey, at: retractedRow.proxyPushedAt }));
+    const boxAfterRetract = await getJson(`${stack.base}/admin/channels`, { authorization: `Bearer ${stack.adminToken}` });
+    gate("the box agrees it is gone", (boxAfterRetract.json.channels ?? []).every((c) => c.channelKey !== expectedKey), JSON.stringify((boxAfterRetract.json.channels ?? []).map((c) => c.channelKey)));
+    const playAfterRetract = await getJson(`${site}/api/premium/${channelId}/play`, {});
+    gate("and the viewer is told there is no stream, not given a dead URL", playAfterRetract.res.status === 409, `${playAfterRetract.res.status} ${playAfterRetract.json.error}`);
+    const boardAfterRetract = await getJson(`${site}/api/fixtures`, {});
+    const cardAfterRetract = (boardAfterRetract.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
+    gate("the card that is no longer watchable stops being a link", cardAfterRetract.watchPath === null, JSON.stringify({ watchPath: cardAfterRetract.watchPath }));
+
+    /* ---------------- a row deleted while it still has a lane ---------------- */
+
+    section("deleting a row that still has a source");
+    await fetch(`${site}/api/admin/premium/channels/${channelId}/push`, {
+      method: "POST",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ sourceUrl, userAgent: WANT_UA, referer: WANT_REFERER }),
+      cache: "no-store",
+    });
+    const deleted = await fetch(`${site}/api/admin/premium/channels/${channelId}`, { method: "DELETE", headers: admin, cache: "no-store" });
+    gate("the delete goes through", deleted.status === 200 && (await deleted.json()).success === true, `${deleted.status}`);
+    const boxAfterDelete = await getJson(`${stack.base}/admin/channels`, { authorization: `Bearer ${stack.adminToken}` });
+    const providersAfterDelete = await getJson(`${stack.base}/admin/providers`, { authorization: `Bearer ${stack.adminToken}` });
+    gate("and it took the box's channel and its credential with it", (boxAfterDelete.json.channels ?? []).every((c) => c.channelKey !== expectedKey) && (providersAfterDelete.json.providers ?? []).every((p) => p.providerId !== expectedKey), JSON.stringify({ channels: (boxAfterDelete.json.channels ?? []).map((c) => c.channelKey), providers: (providersAfterDelete.json.providers ?? []).map((p) => p.providerId) }));
+    }
+
+    /* ---------------- the tier never touched the Direct HLS catalogue ---------------- */
+
+    section("isolation");
+    const catalogue = await getJson(`${site}/api/channels`, {});
+    const catalogueText = JSON.stringify(catalogue.json);
+    gate("the premium run left the Direct HLS catalogue as it found it", catalogue.res.status === 200 && !catalogueText.includes(expectedKey) && !catalogueText.includes(PATH_TOKEN), `${catalogue.res.status}`);
+    gate("and no premium answer in this run named the origin", leaksIn(exchanges.map((row) => row.url).join(" ")).length === 0, JSON.stringify(leaksIn(exchanges.map((row) => row.url).join(" "))));
+  } catch (error) {
+    gate("the run completed", false, error instanceof Error ? error.stack ?? error.message : String(error));
+    if (serverLog.length > 0) say(`--- site output (last 20 lines) ---\n${serverLog.join("").split(/\r?\n/).slice(-20).join("\n")}`);
+  } finally {
+    if (opt.keep) {
+      say(`\nkeeping both up:  site ${site}   box ${stack.base}`);
+      if (channelId) {
+        say(`  homepage with the fixture card: ${site}/`);
+        say(`  premium watch page:             ${site}/premium/${channelId}`);
+      }
+      say("Ctrl-C (or a kill) to clean up.");
+      await new Promise((resolve) => {
+        process.once("SIGINT", resolve);
+        process.once("SIGTERM", resolve);
+      });
+    }
+
+    if (childExit === null) child.kill();
+    await stack.stop();
+    await origin.stop();
+
+    const storeNow = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
+    if (storeBefore === null) {
+      if (storeNow !== null) fs.rmSync(storeFile);
+      gate("the tier's local store file is back to not existing", !fs.existsSync(storeFile), storeFile);
+    } else {
+      fs.writeFileSync(storeFile, storeBefore);
+      gate("the tier's local store file is restored byte for byte", Buffer.compare(fs.readFileSync(storeFile), storeBefore) === 0, storeFile);
+    }
+
+    const failed = gates.filter((row) => !row.ok).length;
+    say(`\n${gates.length - failed} passed, ${failed} failed`);
+    process.exitCode = failed ? 1 : 0;
+  }
+}
+
+await main();

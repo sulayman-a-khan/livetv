@@ -14,25 +14,27 @@ import {
   fixturePhase,
   validateFixtureInput,
   validatePremiumChannelInput,
+  validatePremiumSourcePush,
 } from "../lib/premiumFixtures";
 import { projectFixtures } from "../lib/fixtureBoard";
 
 const GOOD_CHANNEL = {
   name: "Example Sports HD",
-  sourceUrl: "https://host.example/live/one/index.m3u8",
+  proxyChannelKey: "prem-example-sports",
 };
 
-test("a premium channel needs a name and an http(s) source", () => {
-  assert.deepEqual(validatePremiumChannelInput({}, true).errors, [
-    "Channel name is required",
-    "Source URL is required",
-  ]);
+test("a premium channel needs a name, and its box handle must be a lane name", () => {
+  assert.deepEqual(validatePremiumChannelInput({}, true).errors, ["Channel name is required"]);
 
-  const wrongScheme = validatePremiumChannelInput(
-    { name: "X", sourceUrl: "ftp://host/one.m3u8" },
+  // A handle is the only thing a row keeps about where the stream comes from, so it has to
+  // be spellable by the box: a space or a slash would be refused there over an unrelated field.
+  const badKey = validatePremiumChannelInput(
+    { name: "X", proxyChannelKey: "Prem Example/sports" },
     true
   );
-  assert.deepEqual(wrongScheme.errors, ["Source URL must be a valid http(s) URL"]);
+  assert.deepEqual(badKey.errors, [
+    "Stream box handle must be 2-64 characters of letters, digits, - or _",
+  ]);
 
   const good = validatePremiumChannelInput(GOOD_CHANNEL, true);
   assert.deepEqual(good.errors, []);
@@ -41,17 +43,27 @@ test("a premium channel needs a name and an http(s) source", () => {
   assert.equal(good.value.category, "Premium");
   assert.equal(good.value.active, true);
   assert.equal(good.value.sortOrder, 99);
-  assert.deepEqual(good.value.headers, { userAgent: "", referer: "" });
+  assert.equal(good.value.proxyChannelKey, "prem-example-sports");
+
+  const noKey = validatePremiumChannelInput({ name: "X" }, true);
+  assert.deepEqual(noKey.errors, []);
+  assert.equal(noKey.value.proxyChannelKey, "");
+
+  // Entered in any case, stored in the box's own.
+  assert.equal(
+    validatePremiumChannelInput({ proxyChannelKey: "Prem-MixEd1" }, false).value.proxyChannelKey,
+    "prem-mixed1"
+  );
 });
 
 test("a patch only validates the keys that were sent", () => {
-  // A single switch flip is the commonest write and must never re-ask for the URL.
+  // A single switch flip is the commonest write and must never re-ask for the name.
   const toggle = validatePremiumChannelInput({ active: false }, false);
   assert.deepEqual(toggle.errors, []);
   assert.deepEqual(toggle.value, { active: false });
 
   // With `creating` the same body is rejected, so a create cannot arrive half-empty.
-  assert.equal(validatePremiumChannelInput({ active: false }, true).errors.length, 2);
+  assert.equal(validatePremiumChannelInput({ active: false }, true).errors.length, 1);
 });
 
 test("a rail position outside the form's own range is refused", () => {
@@ -60,20 +72,46 @@ test("a rail position outside the form's own range is refused", () => {
   assert.equal(validatePremiumChannelInput({ sortOrder: 3 }, false).value.sortOrder, 3);
 });
 
-test("headers are read as a pair and a bad referer is named as such", () => {
-  const patch = validatePremiumChannelInput(
-    { headers: { userAgent: "Mozilla/5.0", referer: "not a url" } },
-    false
+test("a push to the box carries one manifest URL and at most two headers", () => {
+  assert.deepEqual(validatePremiumSourcePush({}).errors, ["Source URL is required"]);
+  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "ftp://host/one.m3u8" }).errors, [
+    "Source URL must be a valid http(s) URL",
+  ]);
+  assert.deepEqual(
+    validatePremiumSourcePush({ sourceUrl: `https://host/${"x".repeat(2100)}` }).errors,
+    ["Source URL must be a valid http(s) URL"]
   );
-  assert.deepEqual(patch.errors, ["Referer must be a valid http(s) URL"]);
 
-  const ok = validatePremiumChannelInput(
-    { headers: { userAgent: "Mozilla/5.0", referer: "https://partner.example" } },
-    false
-  );
-  assert.deepEqual(ok.value.headers, {
+  const ok = validatePremiumSourcePush({
+    sourceUrl: "https://host/live/one/index.m3u8?token=abc",
     userAgent: "Mozilla/5.0",
     referer: "https://partner.example",
+  });
+  assert.deepEqual(ok.errors, []);
+  // All three keys are always answered, so the route that pushes never has to guess at
+  // an absent header.
+  assert.deepEqual(ok.value, {
+    sourceUrl: "https://host/live/one/index.m3u8?token=abc",
+    userAgent: "Mozilla/5.0",
+    referer: "https://partner.example",
+  });
+
+  // A header value with a line break in it is a second header by the time it reaches the
+  // origin, so it is refused here rather than arriving as an unexplained transport error.
+  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", userAgent: "A\r\nX-Injected: 1" }).errors, [
+    "User-Agent must not contain a line break",
+  ]);
+  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", referer: "/relative" }).errors, [
+    "Referer must be an absolute URL, or empty",
+  ]);
+  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", referer: "ftp://h" }).errors, [
+    "Referer must be an http(s) URL",
+  ]);
+  // No headers at all is the normal case: the source needs nothing of its own.
+  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8" }).value, {
+    sourceUrl: "https://h/a.m3u8",
+    userAgent: "",
+    referer: "",
   });
 });
 
@@ -145,7 +183,14 @@ test("a fixture is upcoming before kickoff, live until its length runs out", () 
 // --- the viewer projection (lib/fixtureBoard.ts) -------------------------------
 
 test("a card only appears for a match on a premium channel the admin switched on", () => {
-  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const channel = {
+    _id: "pc_one",
+    name: "Example Sports HD",
+    category: "Sports",
+    logoUrl: "",
+    active: true,
+    proxyChannelKey: "prem-one",
+  };
   const base = {
     _id: "fx_one",
     sport: "football" as const,
@@ -171,7 +216,14 @@ test("a card only appears for a match on a premium channel the admin switched on
 });
 
 test("unpublished, finished and far-future matches stay off the board", () => {
-  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const channel = {
+    _id: "pc_one",
+    name: "Example Sports HD",
+    category: "Sports",
+    logoUrl: "",
+    active: true,
+    proxyChannelKey: "prem-one",
+  };
   const now = new Date("2026-10-25T12:00:00.000Z");
   const base = {
     _id: "fx_one",
@@ -211,7 +263,14 @@ test("unpublished, finished and far-future matches stay off the board", () => {
 });
 
 test("live matches lead the board, upcoming ones follow by kickoff, and three fill it", () => {
-  const channel = { _id: "pc_one", name: "Example Sports HD", category: "Sports", logoUrl: "", active: true };
+  const channel = {
+    _id: "pc_one",
+    name: "Example Sports HD",
+    category: "Sports",
+    logoUrl: "",
+    active: true,
+    proxyChannelKey: "prem-one",
+  };
   const now = new Date("2026-10-25T12:00:00.000Z");
   const make = (id: string, startsAt: string, phase: "upcoming" | "live") => ({
     _id: id,
@@ -253,6 +312,7 @@ test("the projection names the channel but carries no source or header", () => {
     category: "Sports",
     logoUrl: "https://host.example/logo.png",
     active: true,
+    proxyChannelKey: "prem-one",
   };
   const now = new Date("2026-10-25T12:00:00.000Z");
   const [card] = projectFixtures(
@@ -279,7 +339,50 @@ test("the projection names the channel but carries no source or header", () => {
   assert.equal(card.channelName, "Example Sports HD");
   assert.equal(card.channelLogo, "https://host.example/logo.png");
   assert.equal(card.channelCategory, "Sports");
-  const leaked = Object.keys(card).filter((key) => /source|header|url/i.test(key));
-  // channelLogo is the only URL a card may carry; it is the picture, not the stream.
-  assert.deepEqual(leaked.filter((key) => key !== "channelLogo"), []);
+  // The card's own address on this site, so a tap can reach the premium watch route.
+  assert.equal(card.watchPath, "/premium/pc_one");
+  const leaked = Object.keys(card).filter((key) => /source|header|token|stream|proxy/i.test(key));
+  assert.deepEqual(leaked, []);
+  // The only absolute URL a card may carry is the picture; nothing on it names a server
+  // a viewer could ask for a stream from.
+  const urls = Object.values(card).filter(
+    (value) => typeof value === "string" && /^https?:\/\//i.test(value)
+  );
+  assert.deepEqual(urls, ["https://host.example/logo.png"]);
+});
+
+test("a channel with nothing on the box still makes a card, just not a link", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = projectFixtures(
+    [
+      {
+        _id: "fx_one",
+        sport: "football" as const,
+        teamA: "Team A",
+        teamB: "Team B",
+        teamALogo: "",
+        teamBLogo: "",
+        competition: "",
+        startsAt: now.toISOString(),
+        durationMinutes: 120,
+        premiumChannelId: "pc_one",
+        visible: true,
+        phase: "live" as const,
+      },
+    ],
+    [
+      {
+        _id: "pc_one",
+        name: "Example Sports HD",
+        category: "Sports",
+        logoUrl: "",
+        active: true,
+        proxyChannelKey: "",
+      },
+    ],
+    now
+  );
+
+  // Tapping it would open a player with nothing to play, so the card stays a card.
+  assert.equal(card.watchPath, null);
 });

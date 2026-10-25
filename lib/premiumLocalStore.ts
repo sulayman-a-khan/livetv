@@ -20,6 +20,12 @@ export interface LocalPremiumChannel {
   /** Admin-supplied line. Never published to a viewer-facing route. */
   sourceUrl: string;
   headers: { userAgent: string; referer: string };
+  /**
+   * The handle this channel's source is registered under on the proxy box. Optional in the
+   * type because a store file written before the box existed has no such field on its rows.
+   */
+  proxyChannelKey?: string;
+  proxyPushedAt?: Date | null;
   active: boolean;
   sortOrder: number;
   note: string;
@@ -81,6 +87,8 @@ function ensureLoaded() {
           userAgent: text(c?.headers?.userAgent),
           referer: text(c?.headers?.referer),
         },
+        proxyChannelKey: text(c?.proxyChannelKey),
+        proxyPushedAt: c?.proxyPushedAt ? new Date(c.proxyPushedAt) : null,
         active: c?.active !== false,
         sortOrder: typeof c?.sortOrder === "number" ? c.sortOrder : 99,
         note: text(c?.note),

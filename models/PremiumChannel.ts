@@ -11,13 +11,22 @@ export interface IPremiumChannel extends Document {
   category: string;
   logoUrl: string;
   /**
-   * The line the admin pasted. Served only to an authenticated admin response —
-   * a viewer is given an entry point that the delivery layer signs later, so this
-   * value must never reach a public route.
+   * Legacy: the line an admin pasted before the box held the credentials. It is no longer
+   * written and never read for playback, but rows that already carry one are left exactly as
+   * they are. A viewer-facing route must never use this field.
    */
   sourceUrl: string;
   /** Per-source request headers, because these feeds check them individually. */
   headers: { userAgent: string; referer: string };
+  /**
+   * The handle this channel's stream is registered under on the proxy box, which is where
+   * the real source lives. This row deliberately keeps no URL: a leak of this database —
+   * or of any route that reads it — then carries nothing watchable. Empty means the admin
+   * has not pushed a source yet, and a viewer is told so instead of being handed a dead player.
+   */
+  proxyChannelKey: string;
+  /** When the source was last pushed to the box, so a panel run leaves visible evidence. */
+  proxyPushedAt: Date | null;
   /** Admin switch: an inactive channel is hidden from the rail. */
   active: boolean;
   /** Rail position. The admin's own order, like a pinned channel's. */
@@ -40,8 +49,10 @@ const PremiumChannelSchema = new Schema<IPremiumChannel>(
     name: { type: String, required: true, trim: true },
     category: { type: String, default: "Premium", trim: true },
     logoUrl: { type: String, default: "", trim: true },
-    sourceUrl: { type: String, required: true, trim: true },
+    sourceUrl: { type: String, default: "", trim: true },
     headers: { type: PremiumChannelHeadersSchema, default: () => ({}) },
+    proxyChannelKey: { type: String, default: "", trim: true, index: true },
+    proxyPushedAt: { type: Date, default: null },
     active: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 99 },
     note: { type: String, default: "", trim: true },

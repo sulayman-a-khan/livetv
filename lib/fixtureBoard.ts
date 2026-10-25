@@ -32,13 +32,18 @@ export interface BoardFixture {
   phase: FixturePhase;
 }
 
-/** The channel fields a card may name; `sourceUrl` is deliberately absent. */
+/**
+ * The channel fields a card may name. `sourceUrl` is deliberately absent, and
+ * `proxyChannelKey` is only a handle: it names nothing a viewer could use without
+ * the box signing a URL for it.
+ */
 export interface BoardChannel {
   _id: string;
   name: string;
   category: string;
   logoUrl: string;
   active: boolean;
+  proxyChannelKey: string;
 }
 
 export interface PublicFixture {
@@ -55,6 +60,12 @@ export interface PublicFixture {
   channelName: string;
   channelLogo: string;
   channelCategory: string;
+  /**
+   * Where a tap goes, or null when the channel behind the card has no source on the stream box
+   * yet. A card that would open a dead player stays a card, not a link — the admin pushing the
+   * line is what makes a match watchable, and nothing else.
+   */
+  watchPath: string | null;
 }
 
 /**
@@ -103,5 +114,6 @@ export function projectFixtures(
     channelName: channel.name,
     channelLogo: channel.logoUrl,
     channelCategory: channel.category,
+    watchPath: channel.proxyChannelKey ? `/premium/${channel._id}` : null,
   }));
 }

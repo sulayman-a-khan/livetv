@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
-import { deletePremiumChannel, updatePremiumChannel } from "@/lib/premiumStore";
+import {
+  deletePremiumChannel,
+  listPremiumChannels,
+  updatePremiumChannel,
+} from "@/lib/premiumStore";
 import { validatePremiumChannelInput } from "@/lib/premiumFixtures";
+import { proxyConfigProblem, retractPremiumSource } from "@/lib/premiumProxy";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +53,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
  * DELETE /api/admin/premium/channels/[id]
  * Removes the channel. Fixtures that pointed at it survive with the link cleared,
  * because deleting a match is the admin's decision alone.
+ *
+ * A row that still has a lane on the stream box takes that lane with it. This happens here
+ * rather than in the panel so it cannot be bypassed by anything that deletes a row directly:
+ * an orphan lane is a live premium stream with a credential in it that no screen points at.
  */
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -58,13 +67,37 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       );
     }
 
+    const row = (await listPremiumChannels()).find((channel) => channel._id === params.id);
+    if (row?.proxyChannelKey) {
+      const problem = proxyConfigProblem();
+      if (problem) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `${problem}, so "${row.proxyChannelKey}" could not be taken off the box first. Clear this row's handle to delete it without that.`,
+          },
+          { status: 503 }
+        );
+      }
+      const retracted = await retractPremiumSource(row.proxyChannelKey);
+      if (!retracted.ok) {
+        // Keep the row: it is the only thing that remembers which handle to remove.
+        return NextResponse.json(
+          { success: false, error: `the source was not removed, so nothing was deleted: ${retracted.error}` },
+          { status: 502 }
+        );
+      }
+    }
+
     const removed = await deletePremiumChannel(params.id);
     if (!removed) {
       return NextResponse.json({ success: false, error: "Premium channel not found" }, { status: 404 });
     }
     return NextResponse.json({
       success: true,
-      message: "Premium channel deleted. Fixtures were left in place.",
+      message: row?.proxyChannelKey
+        ? `Premium channel deleted, and its source was taken off the box. Fixtures were left in place.`
+        : "Premium channel deleted. Fixtures were left in place.",
     });
   } catch (error: any) {
     return fail(error, "Failed to delete premium channel");

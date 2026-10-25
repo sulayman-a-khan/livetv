@@ -16,11 +16,26 @@ export interface PremiumChannelInput {
   name: string;
   category: string;
   logoUrl: string;
-  sourceUrl: string;
-  headers: { userAgent: string; referer: string };
   active: boolean;
   sortOrder: number;
   note: string;
+  /**
+   * The handle this channel's source is registered under on the proxy box. It is the only
+   * thing this row keeps about where the stream comes from, and it is empty until the admin
+   * pushes a source.
+   */
+  proxyChannelKey: string;
+}
+
+/**
+ * The body of a push to the box: the line itself, and the headers it demands.
+ * Validated on the way out and never stored — the vault on the box is the source of truth,
+ * so a copy in this database would only be a second place for the credential to leak from.
+ */
+export interface PremiumSourceInput {
+  sourceUrl: string;
+  userAgent: string;
+  referer: string;
 }
 
 export interface FixtureInput {
@@ -120,12 +135,15 @@ export function validatePremiumChannelInput(
     if (name) value.name = name;
   }
 
-  if (creating || has("sourceUrl")) {
-    const url = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
-    if (!url) errors.push("Source URL is required");
-    else if (!isHttpUrl(url) || url.length > 2048)
-      errors.push("Source URL must be a valid http(s) URL");
-    else value.sourceUrl = url;
+  if (creating || has("proxyChannelKey")) {
+    // The handle is usually the one `lib/premiumProxy.ts` derives and a push writes back, but
+    // an admin who registered his lane on the box by hand may enter it here, so it is a field
+    // of the row like any other. The proxy's own key rule is `[a-z0-9_-]`, and a key that
+    // breaks it would be refused there with a message about an unrelated field.
+    const key = toText(body.proxyChannelKey, "Stream box handle", errors, { max: 64 }).toLowerCase();
+    if (key && !/^[a-z0-9_-]{2,64}$/.test(key)) {
+      errors.push("Stream box handle must be 2-64 characters of letters, digits, - or _");
+    } else value.proxyChannelKey = key;
   }
 
   if (creating || has("category")) {
@@ -141,14 +159,6 @@ export function validatePremiumChannelInput(
     value.logoUrl = logo;
   }
 
-  if (creating || has("headers")) {
-    const raw = (body.headers ?? {}) as Record<string, unknown>;
-    value.headers = {
-      userAgent: toText(raw.userAgent, "User-Agent", errors, { max: 300 }),
-      referer: toOptionalUrl(raw.referer, "Referer", errors),
-    };
-  }
-
   if (creating || has("active")) value.active = toBool(body.active, true);
   if (creating || has("note")) {
     value.note = toText(body.note, "Note", errors, { max: 200 });
@@ -158,6 +168,43 @@ export function validatePremiumChannelInput(
   }
 
   return { value, errors };
+}
+
+/**
+ * What a push to the stream box must carry: one manifest URL, and at most the two headers
+ * that source demands. A line that is not an http(s) URL could not be played by anything, and
+ * a header value containing a line break would be joined onto the wire as a second header,
+ * so neither reaches the box.
+ */
+export function validatePremiumSourcePush(
+  body: Record<string, unknown>
+): { value: PremiumSourceInput; errors: string[] } {
+  const sourceUrl = typeof body.sourceUrl === "string" ? body.sourceUrl.trim() : "";
+  const errors: string[] = [];
+  if (!sourceUrl) errors.push("Source URL is required");
+  else if (!isHttpUrl(sourceUrl) || sourceUrl.length > 2048)
+    errors.push("Source URL must be a valid http(s) URL");
+
+  const userAgent = toText(body.userAgent, "User-Agent", errors, { max: 300 });
+  if (/[\r\n]/.test(userAgent)) errors.push("User-Agent must not contain a line break");
+
+  const refererRaw = body.referer;
+  const referer = typeof refererRaw === "string" ? refererRaw.trim() : "";
+  if (/[\r\n]/.test(referer)) errors.push("Referer must not contain a line break");
+  if (referer) {
+    try {
+      const url = new URL(referer);
+      if (url.protocol !== "https:" && url.protocol !== "http:")
+        errors.push("Referer must be an http(s) URL");
+    } catch {
+      errors.push("Referer must be an absolute URL, or empty");
+    }
+  }
+
+  return {
+    value: { sourceUrl, userAgent, referer },
+    errors,
+  };
 }
 
 /** Kickoff accepts a date-time, a plain date, or epoch milliseconds. */

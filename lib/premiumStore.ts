@@ -25,9 +25,16 @@ export interface PremiumChannelRecord {
   name: string;
   category: string;
   logoUrl: string;
-  /** Admin-only. Routes that serve a viewer must not use this record type. */
+  /**
+   * Legacy, admin-only, and never read for playback: new rows carry an empty one and the
+   * stream itself lives in the box's vault under `proxyChannelKey`.
+   */
   sourceUrl: string;
   headers: { userAgent: string; referer: string };
+  /** The handle this channel's source is registered under on the proxy box, or "". */
+  proxyChannelKey: string;
+  /** When a source was last pushed to the box, so a panel run leaves visible evidence. */
+  proxyPushedAt: string | null;
   active: boolean;
   sortOrder: number;
   note: string;
@@ -66,6 +73,8 @@ function toPremiumRecord(row: {
   logoUrl?: string;
   sourceUrl?: string;
   headers?: { userAgent?: string; referer?: string };
+  proxyChannelKey?: string;
+  proxyPushedAt?: Date | null;
   active?: boolean;
   sortOrder?: number;
   note?: string;
@@ -79,6 +88,8 @@ function toPremiumRecord(row: {
     logoUrl: row.logoUrl || "",
     sourceUrl: row.sourceUrl || "",
     headers: { userAgent: row.headers?.userAgent || "", referer: row.headers?.referer || "" },
+    proxyChannelKey: row.proxyChannelKey || "",
+    proxyPushedAt: row.proxyPushedAt ? new Date(row.proxyPushedAt).toISOString() : null,
     active: row.active !== false,
     sortOrder: typeof row.sortOrder === "number" ? row.sortOrder : 99,
     note: row.note || "",
@@ -134,6 +145,11 @@ export async function listPremiumChannels(): Promise<PremiumChannelRecord[]> {
   return premiumLocalStore.listChannels().map(toPremiumRecord).sort(bySortOrder);
 }
 
+/**
+ * Add a row. No source URL is written: a premium channel starts as a name and a place on the
+ * rail, and its stream arrives only when the admin pushes a line to the box (`setPremiumProxy`).
+ * A row created before this split keeps whatever `sourceUrl` it already had, untouched.
+ */
 export async function createPremiumChannel(
   input: PremiumChannelInput
 ): Promise<PremiumChannelRecord> {
@@ -143,8 +159,7 @@ export async function createPremiumChannel(
       name: input.name,
       category: input.category,
       logoUrl: input.logoUrl,
-      sourceUrl: input.sourceUrl,
-      headers: input.headers,
+      proxyChannelKey: input.proxyChannelKey,
       active: input.active,
       sortOrder: input.sortOrder,
       note: input.note,
@@ -158,8 +173,10 @@ export async function createPremiumChannel(
     name: input.name,
     category: input.category,
     logoUrl: input.logoUrl,
-    sourceUrl: input.sourceUrl,
-    headers: { ...input.headers },
+    sourceUrl: "",
+    headers: { userAgent: "", referer: "" },
+    proxyChannelKey: input.proxyChannelKey,
+    proxyPushedAt: null,
     active: input.active,
     sortOrder: input.sortOrder,
     note: input.note,
@@ -168,6 +185,71 @@ export async function createPremiumChannel(
   };
   premiumLocalStore.addChannel(record);
   return toPremiumRecord(record);
+}
+
+/**
+ * Record what a push to the stream box did. `pushedAt` is this server's clock at the moment the
+ * box accepted, so a row can show when its source last travelled; the box does not report one.
+ * An empty handle is how a retraction is stored.
+ */
+export async function setPremiumProxy(
+  id: string,
+  patch: { proxyChannelKey: string; proxyPushedAt: Date | null }
+): Promise<PremiumChannelRecord | null> {
+  const conn = await connectToDatabase();
+  if (conn) {
+    if (!mongoose.isValidObjectId(id)) return null;
+    const updated = await PremiumChannelModel.findByIdAndUpdate(id, patch, { new: true }).lean();
+    return updated ? toPremiumRecord(updated) : null;
+  }
+  const updated = premiumLocalStore.updateChannel(id, patch);
+  return updated ? toPremiumRecord(updated) : null;
+}
+
+/**
+ * What a viewer-facing route is allowed to know about one premium channel. This is a separate
+ * shape rather than `PremiumChannelRecord` on purpose: the record carries the legacy source
+ * line, and a route that is answering a browser must not have that field within reach at all.
+ */
+export interface PublicPremiumChannel {
+  _id: string;
+  name: string;
+  category: string;
+  logoUrl: string;
+  active: boolean;
+  proxyChannelKey: string;
+}
+
+/** One row by id, projected. Returns null when no channel carries that id. */
+export async function getPublicPremiumChannel(id: string): Promise<PublicPremiumChannel | null> {
+  const conn = await connectToDatabase();
+  if (conn) {
+    if (!mongoose.isValidObjectId(id)) return null;
+    const found = await PremiumChannelModel.findById(id)
+      .select("name category logoUrl active proxyChannelKey")
+      .lean();
+    return found ? toPublicPremium(found) : null;
+  }
+  const local = premiumLocalStore.getChannel(id);
+  return local ? toPublicPremium(local) : null;
+}
+
+function toPublicPremium(row: {
+  _id: unknown;
+  name?: string;
+  category?: string;
+  logoUrl?: string;
+  active?: boolean;
+  proxyChannelKey?: string;
+}): PublicPremiumChannel {
+  return {
+    _id: String(row._id),
+    name: row.name || "",
+    category: row.category || "Premium",
+    logoUrl: row.logoUrl || "",
+    active: row.active !== false,
+    proxyChannelKey: row.proxyChannelKey || "",
+  };
 }
 
 /** Returns null when no channel carries that id. */

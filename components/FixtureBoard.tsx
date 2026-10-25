@@ -1,8 +1,9 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { PublicFixture } from "@/lib/fixtureBoard";
+import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
+import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -48,21 +49,36 @@ function TeamMark({ name, logo }: { name: string; logo: string }) {
   );
 }
 
+/**
+ * What a live match with nothing to open says.
+ *
+ * Every choice on such a card is a secured one — a direct channel is always offered, since it
+ * plays from its own origin — so the board can name the reason the box or the row gave instead
+ * of a bare "no channels". When the choices disagree about why, the shared answer is the honest
+ * one.
+ */
+function noOfferText(choices: FixtureChoice[]): string {
+  const states = new Set(choices.map((choice) => choice.state));
+  return states.size === 1 ? unavailableText(choices[0].state) : "এখন দেখার জন্য কোনো চ্যানেল নেই।";
+}
+
 function FixtureCard({
   fixture,
   now,
   hideOnPhone,
-  securedReady,
+  onChoose,
 }: {
   fixture: PublicFixture;
   now: number;
   hideOnPhone: boolean;
-  securedReady: boolean;
+  onChoose: (id: string) => void;
 }) {
   const live = fixture.phase === "live";
-  // A live match whose stream the box cannot deliver says so in the line that would
-  // otherwise promise it. The card stays, the watch does not.
-  const offAir = live && !securedReady;
+  const offers = offersOf(fixture.choices);
+  // The card's own line names the channel a tap would reach, so the first offer is the one worth
+  // printing — the same answer `watchPath` was built from, not a field carried alongside it.
+  const named = offers[0] ?? fixture.choices[0];
+  const extra = offers.length > 1 ? ` +${offers.length - 1}` : "";
 
   const card = (
     <article
@@ -98,31 +114,47 @@ function FixtureCard({
 
       <p
         className={`text-[11px] font-bold ${
-          offAir ? "text-slate-400" : live ? "text-emerald-400" : "text-white"
+          live ? (offers.length > 0 ? "text-emerald-400" : "text-slate-400") : "text-white"
         } truncate`}
       >
-        {offAir
-          ? "এই চ্যানেলটি এখন অফ-এয়ার।"
-          : live
-            ? `▶ Live on ${fixture.channelName}`
-            : countdownText(new Date(fixture.startsAt).getTime() - now)}
+        {live
+          ? offers.length > 0
+            ? `▶ Live on ${named.name}${extra}`
+            : noOfferText(fixture.choices)
+          : countdownText(new Date(fixture.startsAt).getTime() - now)}
       </p>
     </article>
   );
 
-  // A card with nothing behind it stays a poster, not a promise: the projection hands back
-  // `watchPath: null` when the channel has no source on the box, and when the box was not ready
-  // to serve one, so a tap never opens a player that has nothing to load.
-  if (!fixture.watchPath) return card;
+  // Three cards wear the same face and do three different things, decided by the projection rather
+  // than guessed here: one thing to offer means a tap can go straight to it, several mean the
+  // viewer has to pick, and nothing means the card stays a poster — the match is still on the
+  // board, the watch is not.
+  if (fixture.watchPath) {
+    return (
+      <Link
+        href={fixture.watchPath}
+        className={`block text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
+      >
+        {card}
+      </Link>
+    );
+  }
 
-  return (
-    <Link
-      href={fixture.watchPath}
-      className={`block text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
-    >
-      {card}
-    </Link>
-  );
+  if (offers.length > 1) {
+    return (
+      <button
+        type="button"
+        onClick={() => onChoose(fixture.id)}
+        aria-haspopup="dialog"
+        className={`text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
+      >
+        {card}
+      </button>
+    );
+  }
+
+  return card;
 }
 
 /**
@@ -133,13 +165,19 @@ function FixtureCard({
  * children it is given — the promo banner — render exactly as they did before this
  * component existed. A read that fails keeps the promo banner too, so a slow
  * lookup never blanks the homepage.
+ *
+ * A card that can be watched on several channels opens `FixtureChannelDialog` instead of playing
+ * one of them by luck, and which of the two a card is comes from the projection, not from the
+ * markup.
  */
 export default function FixtureBoard({ children }: { children: ReactNode }) {
   const [fixtures, setFixtures] = useState<PublicFixture[]>([]);
-  // Nothing is offered as watchable until the server has said the box is ready: a board read
-  // that does not answer the question is answered as a no, here as it is on the route.
-  const [securedReady, setSecuredReady] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // The one card whose chooser is open, by id rather than by copied payload: a board read that
+  // arrives while the dialog is up refreshes the reasons inside it instead of leaving a stale list
+  // on screen.
+  const [choosingId, setChoosingId] = useState<string | null>(null);
+  const closeChooser = useCallback(() => setChoosingId(null), []);
 
   useEffect(() => {
     let active = true;
@@ -150,7 +188,6 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
         const data = await res.json();
         if (!active || !res.ok || data?.success !== true) return;
         setFixtures(Array.isArray(data.fixtures) ? data.fixtures : []);
-        setSecuredReady(data.securedReady === true);
       } catch {
         // No board this visit; the slot keeps its banner.
       }
@@ -182,6 +219,10 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
 
   if (fixtures.length === 0) return <>{children}</>;
 
+  const choosing = choosingId
+    ? fixtures.find((fixture) => fixture.id === choosingId) ?? null
+    : null;
+
   return (
     <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-5">
       <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -191,10 +232,11 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
             fixture={fixture}
             now={now}
             hideOnPhone={index > 0}
-            securedReady={securedReady}
+            onChoose={setChoosingId}
           />
         ))}
       </div>
+      {choosing ? <FixtureChannelDialog fixture={choosing} onClose={closeChooser} /> : null}
     </div>
   );
 }

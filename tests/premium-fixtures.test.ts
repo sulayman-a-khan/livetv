@@ -17,8 +17,10 @@ import {
   validatePremiumSourcePush,
 } from "../lib/premiumFixtures";
 import {
+  offersOf,
   projectFixtures,
   type BoardChannel,
+  type BoardDirectChannel,
   type BoardFixture,
   type PublicFixture,
 } from "../lib/fixtureBoard";
@@ -31,12 +33,21 @@ import {
 const READY_BOARD = (
   fixtures: BoardFixture[],
   channels: BoardChannel[],
-  now: Date
-): PublicFixture[] => projectFixtures(fixtures, channels, now, true);
+  now: Date,
+  directChannels: BoardDirectChannel[] = []
+): PublicFixture[] => projectFixtures(fixtures, channels, directChannels, now, true);
 
 /** A linked channel, spelled the way a stored row spells it. */
 const secured = (channelId: string) => ({ channelId, sourceType: "secured" as const });
 const direct = (channelId: string) => ({ channelId, sourceType: "direct" as const });
+
+/** One pinned channel of the direct catalogue, as the board is allowed to see it. */
+const DIRECT_ONE: BoardDirectChannel = {
+  _id: "6ab5c72de29c995275489e5c",
+  name: "Star Sports 1 HD",
+  category: "Sports",
+  logoUrl: "",
+};
 
 const GOOD_CHANNEL = {
   name: "Example Sports HD",
@@ -303,7 +314,7 @@ test("a fixture is upcoming before kickoff, live until its length runs out", () 
 
 // --- the viewer projection (lib/fixtureBoard.ts) -------------------------------
 
-test("a card only appears for a match on a premium channel the admin switched on", () => {
+test("a card appears for a match the board can name a channel for", () => {
   const channel = {
     _id: "pc_one",
     name: "Example Sports HD",
@@ -329,11 +340,18 @@ test("a card only appears for a match on a premium channel the admin switched on
   const now = new Date("2026-10-25T12:00:00.000Z");
 
   assert.equal(READY_BOARD([base], [channel], now).length, 1);
-  // No linked channel, a channel that is not in the list, and a switched-off one
-  // all mean nobody can watch this match, so the card does not advertise it.
+  // No linked channel, and a channel that is not in either list, mean the board has nobody to
+  // name on this card — so it does not advertise the match.
   assert.equal(READY_BOARD([{ ...base, channels: [] }], [channel], now).length, 0);
-  assert.equal(READY_BOARD([base], [{ ...channel, active: false }], now).length, 0);
   assert.equal(READY_BOARD([base], [], now).length, 0);
+
+  // A channel the admin switched off is a different thing from an absent one: the match is still
+  // scheduled, and the card says which channel is not carrying it rather than pretending the
+  // fixture never existed. This is the change that let several channels share one card.
+  const switchedOff = READY_BOARD([base], [{ ...channel, active: false }], now)[0];
+  assert.equal(switchedOff.choices[0].state, "off-air");
+  assert.equal(switchedOff.watchPath, null);
+  assert.equal(offersOf(switchedOff.choices).length, 0);
 });
 
 test("unpublished, finished and far-future matches stay off the board", () => {
@@ -426,7 +444,7 @@ test("live matches lead the board, upcoming ones follow by kickoff, and three fi
   );
 });
 
-test("the projection names the channel but carries no source or header", () => {
+test("the projection names the channels but carries no source or header", () => {
   const channel = {
     _id: "pc_one",
     name: "Example Sports HD",
@@ -448,28 +466,65 @@ test("the projection names the channel but carries no source or header", () => {
         competition: "Test Cup",
         startsAt: now.toISOString(),
         durationMinutes: 120,
-        channels: [secured("pc_one")],
+        channels: [secured("pc_one"), direct(DIRECT_ONE._id)],
         visible: true,
         phase: "live" as const,
       },
     ],
     [channel],
-    now
+    now,
+    [DIRECT_ONE]
   );
 
-  assert.equal(card.channelName, "Example Sports HD");
-  assert.equal(card.channelLogo, "https://host.example/logo.png");
-  assert.equal(card.channelCategory, "Sports");
-  // The card's own address on this site, so a tap can reach the premium watch route.
-  assert.equal(card.watchPath, "/premium/pc_one");
-  const leaked = Object.keys(card).filter((key) => /source|header|token|stream|proxy/i.test(key));
-  assert.deepEqual(leaked, []);
-  // The only absolute URL a card may carry is the picture; nothing on it names a server
-  // a viewer could ask for a stream from.
-  const urls = Object.values(card).filter(
-    (value) => typeof value === "string" && /^https?:\/\//i.test(value)
+  assert.equal(card.choices.length, 2);
+  assert.equal(card.choices[0].name, "Example Sports HD");
+  assert.equal(card.choices[0].logoUrl, "https://host.example/logo.png");
+  assert.equal(card.choices[0].category, "Sports");
+  assert.equal(card.choices[1].name, DIRECT_ONE.name);
+
+  // A card is exactly these keys and nothing else, which is the real guarantee: a whitelist leaves
+  // no room for a line, a header or a token to ride out on a card, where a name-shaped blacklist
+  // would have to guess at every new field. `sourceType` is on the list because a tap has to know
+  // which tier's route it is taking.
+  const CARD_KEYS = [
+    "choices",
+    "competition",
+    "durationMinutes",
+    "id",
+    "phase",
+    "sport",
+    "startsAt",
+    "teamA",
+    "teamALogo",
+    "teamB",
+    "teamBLogo",
+    "watchPath",
+  ];
+  const CHOICE_KEYS = [
+    "category",
+    "channelId",
+    "logoUrl",
+    "name",
+    "sourceType",
+    "state",
+    "watchPath",
+  ];
+  assert.deepEqual(Object.keys(card).sort(), CARD_KEYS);
+  assert.deepEqual(
+    [...new Set(card.choices.flatMap((choice) => Object.keys(choice)))].sort(),
+    CHOICE_KEYS
   );
-  assert.deepEqual(urls, ["https://host.example/logo.png"]);
+
+  // A card's addresses are this site's own playback routes and nothing else — no host a viewer
+  // could ask for a stream from, and no route other than the two tiers already answer on.
+  const paths = card.choices.map((choice) => choice.watchPath);
+  assert.deepEqual(paths, ["/premium/pc_one", `/watch/${DIRECT_ONE._id}`]);
+  assert.deepEqual(
+    paths.filter((path) => path !== null && !/^\/(premium|watch)\//.test(path)),
+    []
+  );
+  const absolute = JSON.stringify(card).match(/https?:\/\/[^"]*/g) ?? [];
+  assert.deepEqual(absolute, ["https://host.example/logo.png"]);
 });
 
 test("a channel with nothing on the box still makes a card, just not a link", () => {
@@ -504,7 +559,10 @@ test("a channel with nothing on the box still makes a card, just not a link", ()
     now
   );
 
-  // Tapping it would open a player with nothing to play, so the card stays a card.
+  // Tapping it would open a player with nothing to play, so the card stays a card — and says
+  // which channel has no source rather than leaving the viewer to find out.
+  assert.equal(card.choices[0].state, "not-pushed");
+  assert.equal(card.choices[0].watchPath, null);
   assert.equal(card.watchPath, null);
 });
 
@@ -537,21 +595,22 @@ const PUSHED_CHANNEL = {
 test("a watch link needs the box to say it is ready, not merely a row that means to have one", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
 
-  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, true);
+  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], [], now, true);
   // Both ways the gate can say no — the box reporting itself down, and nobody having heard from
   // it at all — reach the projection as `false`, because a board that cannot promise a stream
   // must not link one.
-  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, false);
+  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], [], now, false);
 
   assert.equal(ready[0].watchPath, "/premium/pc_one");
   // A row that has a handle is an intention the admin had, not a stream the box can deliver.
   assert.equal(notReady[0].watchPath, null);
+  assert.equal(notReady[0].choices[0].state, "box-offline");
 });
 
 test("an outage takes the watch away and leaves the match on the board", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
-  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, true)[0];
-  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], now, false)[0];
+  const ready = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], [], now, true)[0];
+  const notReady = projectFixtures([GATED_FIXTURE], [PUSHED_CHANNEL], [], now, false)[0];
 
   // Same card, same metadata, same channel named on it: only the offer of a stream differs.
   assert.equal(notReady.id, ready.id);
@@ -560,13 +619,15 @@ test("an outage takes the watch away and leaves the match on the board", () => {
   assert.equal(notReady.competition, ready.competition);
   assert.equal(notReady.startsAt, ready.startsAt);
   assert.equal(notReady.phase, ready.phase);
-  assert.equal(notReady.channelName, ready.channelName);
-  assert.equal(notReady.channelCategory, ready.channelCategory);
+  assert.equal(notReady.choices[0].name, ready.choices[0].name);
+  assert.equal(notReady.choices[0].category, ready.choices[0].category);
 
   const differing = (Object.keys(ready) as (keyof PublicFixture)[]).filter(
     (key) => JSON.stringify(ready[key]) !== JSON.stringify(notReady[key])
   );
-  assert.deepEqual(differing, ["watchPath"]);
+  // `choices` and `watchPath` are the same fact stated twice, so an outage moves the offer and
+  // nothing else.
+  assert.deepEqual(differing, ["choices", "watchPath"]);
 });
 
 test("readiness is the same answer for every card, and a card that was never pushed stays unlinked", () => {
@@ -574,6 +635,7 @@ test("readiness is the same answer for every card, and a card that was never pus
   const board = projectFixtures(
     [GATED_FIXTURE, { ...GATED_FIXTURE, _id: "fx_two", channels: [secured("pc_two")] }],
     [PUSHED_CHANNEL, { ...PUSHED_CHANNEL, _id: "pc_two", proxyChannelKey: "" }],
+    [],
     now,
     false
   );
@@ -583,36 +645,160 @@ test("readiness is the same answer for every card, and a card that was never pus
     board.map((card) => card.watchPath),
     [null, null]
   );
+  // The row that has no source is told apart from the box that is not answering, even though both
+  // are unopenable and both arrive in the same read: a viewer should not be pointed at a box that
+  // is fine, and an admin should not chase an outage that is not happening.
+  assert.deepEqual(
+    board.map((card) => card.choices[0].state),
+    ["box-offline", "not-pushed"]
+  );
 });
 
-// --- mixed references (what a card may now name) --------------------------------
+// --- the chooser (what a card does with more than one channel) ------------------
 
-test("a direct reference joins the card without changing what the card links to", () => {
+/** A live card naming one secured channel and one direct one, the way the admin panel saves it. */
+const MIXED_FIXTURE = {
+  ...GATED_FIXTURE,
+  _id: "fx_mixed",
+  channels: [secured("pc_one"), direct(DIRECT_ONE._id)],
+};
+
+/** Two secured channels both ready to play, so the viewer is the one who decides. */
+const TWO_SECURED = {
+  ...GATED_FIXTURE,
+  _id: "fx_two_secure",
+  channels: [secured("pc_one"), secured("pc_two")],
+};
+
+const SECOND_PUSHED = { ...PUSHED_CHANNEL, _id: "pc_two", name: "Example Sports Two" };
+
+test("one channel to offer means a tap goes straight to it", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
-  const mixed = {
-    ...GATED_FIXTURE,
-    channels: [direct("6ab5c72de29c995275489e5c"), secured("pc_one")],
-  };
+  const [card] = READY_BOARD([MIXED_FIXTURE], [PUSHED_CHANNEL], now, [DIRECT_ONE]);
 
-  const board = projectFixtures([mixed], [PUSHED_CHANNEL], now, true);
+  // Both channels are ready here, so the card has to ask — the direct-only case below is what a
+  // single offer looks like.
+  assert.equal(card.watchPath, null);
+  assert.equal(offersOf(card.choices).length, 2);
+
+  const [directOnly] = READY_BOARD(
+    [{ ...MIXED_FIXTURE, channels: [direct(DIRECT_ONE._id)] }],
+    [],
+    now,
+    [DIRECT_ONE]
+  );
+  assert.equal(directOnly.watchPath, `/watch/${DIRECT_ONE._id}`);
+  assert.equal(directOnly.choices.length, 1);
+});
+
+test("a card that names only direct channels is on the board and opens the existing watch page", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const board = READY_BOARD(
+    [{ ...GATED_FIXTURE, _id: "fx_direct", channels: [direct(DIRECT_ONE._id)] }],
+    [],
+    now,
+    [DIRECT_ONE]
+  );
+
+  // The interim this phase replaces: until a card could offer its direct choices the board dropped
+  // a match that named nothing but them. Now it names the channel and links the route the direct
+  // tier has always answered on — the same `/watch/<id>` a tile in the grid uses, so nothing about
+  // how a direct stream is picked, ranked or played is decided here.
   assert.equal(board.length, 1);
-  // The card still answers with the secured row this tier knows how to sign for, and it finds it
-  // by asking the list which entry is secured — not by taking whatever comes first.
-  assert.equal(board[0].watchPath, "/premium/pc_one");
-  assert.equal(board[0].channelName, PUSHED_CHANNEL.name);
+  assert.equal(board[0].watchPath, `/watch/${DIRECT_ONE._id}`);
+  assert.equal(board[0].choices[0].sourceType, "direct");
+  assert.equal(board[0].choices[0].state, "ready");
 });
 
-test("a card that names only direct channels offers nothing this board knows how to open", () => {
+test("the choices keep the order the admin picked them in, and say which tier each came from", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
-  const directOnly = {
+  const [card] = READY_BOARD(
+    [{ ...MIXED_FIXTURE, channels: [direct(DIRECT_ONE._id), secured("pc_one"), secured("pc_two")] }],
+    [PUSHED_CHANNEL, SECOND_PUSHED],
+    now,
+    [DIRECT_ONE]
+  );
+
+  assert.deepEqual(
+    card.choices.map((choice) => `${choice.sourceType}:${choice.name}`),
+    [`direct:${DIRECT_ONE.name}`, "secured:Example Sports HD", "secured:Example Sports Two"]
+  );
+});
+
+test("a secured outage leaves the direct choice usable and explains the secured one", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = projectFixtures([MIXED_FIXTURE], [PUSHED_CHANNEL], [DIRECT_ONE], now, false);
+
+  assert.equal(card.choices.length, 2);
+  const directChoice = card.choices.find((choice) => choice.sourceType === "direct")!;
+  const securedChoice = card.choices.find((choice) => choice.sourceType === "secured")!;
+
+  // The gate holds for the half it is about: nothing on this card claims the box can serve.
+  assert.equal(securedChoice.watchPath, null);
+  assert.equal(securedChoice.state, "box-offline");
+  // And it reaches no further than that: a direct channel plays from its own origin, so the box
+  // being unable to answer takes nothing away from it.
+  assert.equal(directChoice.watchPath, `/watch/${DIRECT_ONE._id}`);
+  assert.equal(directChoice.state, "ready");
+  // One usable choice is one offer, so the card taps straight through to it instead of opening a
+  // dialog whose other row would refuse.
+  assert.equal(card.watchPath, `/watch/${DIRECT_ONE._id}`);
+});
+
+test("a card is a link exactly when it has one thing to offer", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const cases = [
+    { fixture: { ...GATED_FIXTURE, channels: [secured("pc_one")] }, channels: [PUSHED_CHANNEL], direct: [], securedReady: true },
+    { fixture: MIXED_FIXTURE, channels: [PUSHED_CHANNEL], direct: [DIRECT_ONE], securedReady: true },
+    { fixture: TWO_SECURED, channels: [PUSHED_CHANNEL, SECOND_PUSHED], direct: [], securedReady: true },
+    { fixture: MIXED_FIXTURE, channels: [PUSHED_CHANNEL], direct: [DIRECT_ONE], securedReady: false },
+    { fixture: TWO_SECURED, channels: [PUSHED_CHANNEL, SECOND_PUSHED], direct: [], securedReady: false },
+    { fixture: { ...GATED_FIXTURE, channels: [secured("pc_one")] }, channels: [{ ...PUSHED_CHANNEL, active: false }], direct: [], securedReady: true },
+  ];
+
+  for (const testCase of cases) {
+    const [card] = projectFixtures(
+      [testCase.fixture],
+      testCase.channels,
+      testCase.direct,
+      now,
+      testCase.securedReady
+    );
+    const offers = offersOf(card.choices).length;
+    // The invariant the card's markup branches on, so "is this a link, a picker or a poster?" is
+    // answered in one place rather than twice.
+    assert.equal(
+      card.watchPath,
+      offers === 1 ? offersOf(card.choices)[0].watchPath : null,
+      JSON.stringify({ offers, paths: card.choices.map((c) => c.watchPath) })
+    );
+  }
+});
+
+test("a reference whose channel is gone names nothing and cannot take the card down with it", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const halfStale = {
     ...GATED_FIXTURE,
-    _id: "fx_direct",
-    channels: [direct("6ab5c72de29c995275489e5c")],
+    channels: [secured("pc_deleted"), direct(DIRECT_ONE._id)],
   };
 
-  // Pinned as the interim it is: the viewer-facing half of a mixed card — offering a direct
-  // choice at all, and saying so when a link is stale — is what the chooser and the stale-reference
-  // phases build, and this is the behaviour they change deliberately.
-  assert.equal(projectFixtures([directOnly], [PUSHED_CHANNEL], now, true).length, 0);
+  // One dead link on a card that has a live one: the live choice is still offered, and the dead
+  // reference is not turned into a row named by an id. Saying which reference went stale, and
+  // giving the viewer a way to see that, is the unavailable-reference phase.
+  const [card] = READY_BOARD([halfStale], [PUSHED_CHANNEL], now, [DIRECT_ONE]);
+  assert.equal(card.choices.length, 1);
+  assert.equal(card.choices[0].sourceType, "direct");
+  assert.equal(card.watchPath, `/watch/${DIRECT_ONE._id}`);
+
+  // Every reference dead, and there is no channel left for the board to put its name on.
+  assert.equal(
+    READY_BOARD(
+      [{ ...GATED_FIXTURE, channels: [secured("pc_deleted"), direct("6ab5c72de29c995275489e5c")] }],
+      [],
+      now,
+      []
+    ).length,
+    0
+  );
 });
 

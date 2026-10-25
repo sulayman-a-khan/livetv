@@ -24,7 +24,10 @@
  *      back, with the line pushed to it again, is what puts them back.
  *   8. a card's linked channels are checked as a list of id-plus-source references: the editor is
  *      offered both tiers, an edit replaces the whole list, and a reference that is unknown,
- *      malformed, or carrying anything beyond an id and a source is refused without being stored.
+ *      malformed, or carrying anything beyond an id and a source is refused without being stored;
+ *   9. a card that names channels from both tiers offers them as choices, each with the route its
+ *      own tier already answers on — one offer taps straight through, two ask the viewer, and the
+ *      box going away takes only the secured choice off the offer while the direct one stays.
  *
  * It writes to no production database: the first thing it does after the server answers is read
  * `dbMode` from the premium admin route, and it aborts before a single write unless that says
@@ -678,19 +681,61 @@ async function main() {
     gate("the card the edit left behind is still readable, with its schedule intact", storedMixed.teamA === "Mixed United" && storedMixed.competition === "Harness Cup" && refText(storedMixed.channels) === `direct:${directRef.channelId}`, JSON.stringify({ teamA: storedMixed.teamA, channels: storedMixed.channels }));
     gate("and reading the board back never prints a source line for any card", leaksIn(JSON.stringify(storedCards)).length === 0, JSON.stringify(leaksIn(JSON.stringify(storedCards))));
 
-    // Interim, and deliberately asserted as such: until Phase 2 gives a card a chooser, the board
-    // can only open a secured channel, so a card naming nothing but direct channels is dropped
-    // rather than shown. Phase 3 replaces this gate with the unavailable-state contract.
-    const directOnlyBoard = await getJson(`${site}/api/fixtures`, {});
+    // Phase 2's contract, measured on the same card the writes just left: a match that names
+    // channels from both tiers offers every one of them and lets the viewer pick, while a match
+    // with one thing to offer still taps straight through. It is published here because until now
+    // this run only ever put one channel on a card.
+    const chooserRefs = [
+      { channelId, sourceType: "secured" },
+      { channelId: directRef.channelId, sourceType: "direct" },
+    ];
+    const chooserEdit = await fetch(`${site}/api/admin/fixtures/${mixedId}`, {
+      method: "PATCH",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ channels: chooserRefs, visible: true }),
+      cache: "no-store",
+    });
     gate(
-      "until the Phase 2 chooser exists, a direct-only card is the one case the board drops",
-      (directOnlyBoard.json.fixtures ?? []).every((row) => row.id !== mixedId) &&
-        (directOnlyBoard.json.fixtures ?? []).some((row) => row.id === fixtureId),
-      JSON.stringify((directOnlyBoard.json.fixtures ?? []).map((row) => row.id))
+      "both channels go back on the card and it is published",
+      chooserEdit.status === 200 &&
+        refText((await chooserEdit.json()).fixture?.channels) ===
+          `secured:${channelId},direct:${directRef.channelId}`,
+      `${chooserEdit.status}`
     );
 
-    const dropped = await fetch(`${site}/api/admin/fixtures/${mixedId}`, { method: "DELETE", headers: admin, cache: "no-store" });
-    gate("and this run's extra card is taken off the board again", dropped.status === 200 && (await dropped.json()).success === true, `${dropped.status}`);
+    const chooserBoard = await getJson(`${site}/api/fixtures`, {});
+    const chooserCard = (chooserBoard.json.fixtures ?? []).find((row) => row.id === mixedId) ?? {};
+    gate(
+      "a card with two channels to offer is on the board and is not one link",
+      (chooserBoard.json.fixtures ?? []).length >= 2 &&
+        chooserCard.watchPath === null &&
+        (chooserCard.choices ?? []).length === 2,
+      JSON.stringify({ watchPath: chooserCard.watchPath, choices: chooserCard.choices })
+    );
+    const choicePaths = (chooserCard.choices ?? []).map((choice) => choice.watchPath);
+    gate(
+      "each choice names the tier it came from and the route that tier already answers on",
+      choicePaths.includes(`/premium/${channelId}`) &&
+        choicePaths.includes(`/watch/${directRef.channelId}`) &&
+        (chooserCard.choices ?? []).every((choice) =>
+          /^\/(premium|watch)\//.test(String(choice.watchPath ?? ""))
+        ),
+      JSON.stringify(choicePaths)
+    );
+    gate(
+      "every choice on it is offered, because the box is up and both rows are ready",
+      (chooserCard.choices ?? []).every((choice) => choice.state === "ready"),
+      JSON.stringify((chooserCard.choices ?? []).map((choice) => choice.state))
+    );
+    gate(
+      "and a chooser's payload names channels only: no line, no header, no token, no host",
+      leaksIn(chooserBoard.text).length === 0 &&
+        !chooserBoard.text.includes(stack.base),
+      JSON.stringify(leaksIn(chooserBoard.text))
+    );
+
+    // The card stays published for the rest of the run, so the outage below is measured against a
+    // card that has a direct channel on it as well as a secured one.
 
     /* ---------------- sign and play ---------------- */
 
@@ -906,9 +951,24 @@ async function main() {
       deadBoard.res.status === 200 &&
         deadCard.teamA === "E2E United" &&
         deadCard.competition === "Harness Cup" &&
-        deadCard.channelName === "E2E Premium One" &&
+        (deadCard.choices ?? []).length === 1 &&
+        deadCard.choices?.[0]?.name === "E2E Premium One" &&
+        deadCard.choices?.[0]?.state === "box-offline" &&
         deadCard.watchPath === null,
       JSON.stringify(deadCard)
+    );
+
+    const deadChooser = (deadBoard.json.fixtures ?? []).find((f) => f.id === mixedId) ?? {};
+    const deadDirect = (deadChooser.choices ?? []).find((c) => c.sourceType === "direct") ?? {};
+    const deadSecured = (deadChooser.choices ?? []).find((c) => c.sourceType === "secured") ?? {};
+    gate(
+      "the box going down reaches only the choices that come from the box",
+      deadChooser.watchPath === `/watch/${directRef.channelId}` &&
+        deadDirect.state === "ready" &&
+        deadDirect.watchPath === `/watch/${directRef.channelId}` &&
+        deadSecured.state === "box-offline" &&
+        deadSecured.watchPath === null,
+      JSON.stringify({ watchPath: deadChooser.watchPath, direct: deadDirect, secured: deadSecured })
     );
 
     const rowDuringOutage = (
@@ -955,6 +1015,14 @@ async function main() {
       JSON.stringify({ securedReady: backBoard.json.securedReady, watchPath: backCard.watchPath })
     );
 
+    const backChooser = (backBoard.json.fixtures ?? []).find((f) => f.id === mixedId) ?? {};
+    gate(
+      "the chooser comes back too: two ready channels, so the card asks instead of picking",
+      (backChooser.choices ?? []).every((choice) => choice.state === "ready") &&
+        backChooser.watchPath === null,
+      JSON.stringify({ watchPath: backChooser.watchPath, choices: backChooser.choices })
+    );
+
     /* ---------------- retract and delete ---------------- */
 
     // A kept run is meant to be looked at, so it leaves the channel, its source and its fixture
@@ -978,6 +1046,20 @@ async function main() {
     const boardAfterRetract = await getJson(`${site}/api/fixtures`, {});
     const cardAfterRetract = (boardAfterRetract.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
     gate("the card that is no longer watchable stops being a link", cardAfterRetract.watchPath === null, JSON.stringify({ watchPath: cardAfterRetract.watchPath }));
+
+    const chooserAfterRetract = (boardAfterRetract.json.fixtures ?? []).find((f) => f.id === mixedId) ?? {};
+    const retractedChoice = (chooserAfterRetract.choices ?? []).find((c) => c.sourceType === "secured") ?? {};
+    const directChoice = (chooserAfterRetract.choices ?? []).find((c) => c.sourceType === "direct") ?? {};
+    gate(
+      "the same card with a direct channel on it still offers that one, and calls the unpushed channel unpushed rather than offline",
+      retractedChoice.state === "not-pushed" &&
+        directChoice.state === "ready" &&
+        chooserAfterRetract.watchPath === `/watch/${directRef.channelId}`,
+      JSON.stringify({ watchPath: chooserAfterRetract.watchPath, retracted: retractedChoice.state, direct: directChoice.state })
+    );
+
+    const dropped = await fetch(`${site}/api/admin/fixtures/${mixedId}`, { method: "DELETE", headers: admin, cache: "no-store" });
+    gate("this run's chooser card is taken off the board again", dropped.status === 200 && (await dropped.json()).success === true, `${dropped.status}`);
 
     /* ---------------- a row deleted while it still has a lane ---------------- */
 

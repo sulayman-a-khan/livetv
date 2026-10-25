@@ -12,6 +12,40 @@ export type FixtureSport = (typeof FIXTURE_SPORTS)[number];
 export const FIXTURE_PHASES = ["upcoming", "live", "finished"] as const;
 export type FixturePhase = (typeof FIXTURE_PHASES)[number];
 
+/**
+ * Which of the two tiers a linked channel belongs to. A card says this on purpose rather
+ * than trusting a row to be findable in one list or the other: the same 24-character id
+ * shape means a catalogue channel in one tier and could mean anything in the other, and a
+ * tap has to know which playback route — and which authorization flow — it belongs to.
+ */
+export const FIXTURE_SOURCE_TYPES = ["direct", "secured"] as const;
+export type FixtureSourceType = (typeof FIXTURE_SOURCE_TYPES)[number];
+
+/**
+ * One channel a match can be watched on. `channelId` is the row's own id and nothing else:
+ * a reference may not carry a URL, a header, a token or any other key, because a fixture row
+ * is readable by the public board and by anyone who can open the admin panel's list.
+ */
+export interface FixtureChannelRef {
+  channelId: string;
+  sourceType: FixtureSourceType;
+}
+
+/** The only keys a reference may arrive with. Anything else is refused, not stripped. */
+const FIXTURE_REF_KEYS = ["channelId", "sourceType"];
+
+/**
+ * A card is drawn on a phone, so the choices it can offer are capped at what one screen
+ * holds. A larger number would be a data-entry mistake rather than a schedule.
+ */
+export const MAX_FIXTURE_CHANNELS = 8;
+
+/** What the direct catalogue names its rows by, in MongoDB and in its local mirror alike. */
+const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
+
+/** A row id from either tier: no spaces, no punctuation a URL could be hiding in. */
+const CHANNEL_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 export interface PremiumChannelInput {
   name: string;
   category: string;
@@ -47,7 +81,8 @@ export interface FixtureInput {
   competition: string;
   startsAt: Date;
   durationMinutes: number;
-  premiumChannelId: string | null;
+  /** Every channel this match can be watched on, in the order the admin picked them. */
+  channels: FixtureChannelRef[];
   visible: boolean;
 }
 
@@ -221,6 +256,70 @@ function toStartDate(raw: unknown, errors: string[]): Date | null {
   return date;
 }
 
+/**
+ * The channels a match is tied to, read from a payload that may have come from anywhere.
+ *
+ * A reference is only ever an id plus the tier it belongs to. Keys beyond those two are
+ * refused rather than ignored, because the one thing this list must never end up holding is
+ * a source line, a header or a token — and a fixture row is what the public board reads.
+ */
+function toChannelRefs(raw: unknown, label: string, errors: string[]): FixtureChannelRef[] {
+  if (!Array.isArray(raw)) {
+    errors.push(`${label} must be a list of channels`);
+    return [];
+  }
+  if (raw.length > MAX_FIXTURE_CHANNELS) {
+    errors.push(`${label} can hold at most ${MAX_FIXTURE_CHANNELS} channels`);
+    return [];
+  }
+
+  const refs: FixtureChannelRef[] = [];
+  const seen = new Set<string>();
+
+  raw.forEach((entry, index) => {
+    const at = `${label} ${index + 1}`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`${at} must name a channel id and a source`);
+      return;
+    }
+    const ref = entry as Record<string, unknown>;
+    const extra = Object.keys(ref).filter((key) => !FIXTURE_REF_KEYS.includes(key));
+    if (extra.length > 0) {
+      errors.push(`${at} carries ${extra.join(", ")} — a linked channel stores only an id and a source`);
+      return;
+    }
+
+    const sourceRaw = typeof ref.sourceType === "string" ? ref.sourceType.trim().toLowerCase() : "";
+    if (!(FIXTURE_SOURCE_TYPES as readonly string[]).includes(sourceRaw)) {
+      errors.push(`${at} source must be one of: ${FIXTURE_SOURCE_TYPES.join(", ")}`);
+      return;
+    }
+    const sourceType = sourceRaw as FixtureSourceType;
+
+    const idRaw = typeof ref.channelId === "string" ? ref.channelId.trim() : "";
+    if (!CHANNEL_ID_PATTERN.test(idRaw)) {
+      errors.push(`${at} id is not valid`);
+      return;
+    }
+    // The direct catalogue's ids are ObjectIds, in production and in the local mirror that
+    // was exported from it. Anything looser would be a card pointing at nothing.
+    if (sourceType === "direct" && !OBJECT_ID_PATTERN.test(idRaw)) {
+      errors.push(`${at} id must be a 24-character catalogue channel id`);
+      return;
+    }
+
+    const key = `${sourceType}:${idRaw}`;
+    if (seen.has(key)) {
+      errors.push(`${at} is listed twice`);
+      return;
+    }
+    seen.add(key);
+    refs.push({ channelId: idRaw, sourceType });
+  });
+
+  return refs;
+}
+
 export function validateFixtureInput(
   body: Record<string, unknown>,
   creating: boolean
@@ -262,18 +361,22 @@ export function validateFixtureInput(
     value.durationMinutes = toIntInRange(body.durationMinutes, 120, 1, 720, "Match length", errors);
   }
 
-  if (creating || has("premiumChannelId")) {
-    const raw = body.premiumChannelId;
-    const id = typeof raw === "string" ? raw.trim() : "";
-    const none = raw === null || raw === undefined || id === "";
-    // "No linked channel" arrives as the form's empty option, as null, or as
-    // whitespace from a hand-made request. All three store as null so a later read
-    // never has to tell them apart; a value that is not a string at all is refused
-    // rather than quietly unlinking a match.
-    if (none) value.premiumChannelId = null;
-    else if (typeof raw !== "string" || id.length > 64)
-      errors.push("Linked channel is not valid");
-    else value.premiumChannelId = id;
+  if (creating || has("channels")) {
+    // An absent field on a create is "no channel chosen yet" — the way the single-field version
+    // of this card stored null — while a field that is present and is not a list is a malformed
+    // payload. An empty list is the same answer stated outright.
+    value.channels =
+      creating && body.channels === undefined
+        ? []
+        : toChannelRefs(body.channels, "Linked channel", errors);
+  }
+
+  // The single-channel field this tier shipped with is gone from the write path on purpose:
+  // a request that still sends it would otherwise store a second, vaguer answer to "where is
+  // this match watched", and rows that predate the list are read through the projection
+  // instead (`toFixtureRecord` in `lib/premiumStore.ts`).
+  if (has("premiumChannelId")) {
+    errors.push("Linked channel is now sent as a channels list with a source for each entry");
   }
 
   if (creating || has("visible")) value.visible = toBool(body.visible, false);

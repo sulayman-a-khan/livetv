@@ -22,6 +22,9 @@
  *      health answer, and stopping the box mid-run takes the play route to 503 and the card's
  *      link away while the fixture keeps its teams and its channel name — then the box coming
  *      back, with the line pushed to it again, is what puts them back.
+ *   8. a card's linked channels are checked as a list of id-plus-source references: the editor is
+ *      offered both tiers, an edit replaces the whole list, and a reference that is unknown,
+ *      malformed, or carrying anything beyond an id and a source is refused without being stored.
  *
  * It writes to no production database: the first thing it does after the server answers is read
  * `dbMode` from the premium admin route, and it aborts before a single write unless that says
@@ -40,6 +43,7 @@
  * already be built there.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -346,6 +350,13 @@ async function main() {
 
   const storeFile = path.join(ROOT, "data", "premium-store.json");
   const storeBefore = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
+  // The Direct HLS catalogue's own file, fingerprinted rather than read: this run links fixture
+  // cards at channels from it, and the only proof that a link is a name rather than an edit is
+  // that the file is the same bytes when the run ends as it was before the first write.
+  const catalogueFile = path.join(ROOT, "data", "store.json");
+  const fingerprint = (file) =>
+    fs.existsSync(file) ? createHash("sha256").update(fs.readFileSync(file)).digest("hex") : "<no such file>";
+  const catalogueBefore = fingerprint(catalogueFile);
 
   section("boot");
   // Which checkout the run resolved on its own, so a pass says where the box was and a
@@ -559,18 +570,20 @@ async function main() {
     /* ---------------- the board ---------------- */
 
     section("what a viewer is allowed to see");
+    // The match every gate below enters, so a card's teams stay the ones the outage section
+    // reads back off the board.
+    const fixtureBase = {
+      sport: "football",
+      teamA: "E2E United",
+      teamB: "E2e City",
+      competition: "Harness Cup",
+      startsAt: new Date(Date.now() - 60_000).toISOString(),
+      durationMinutes: 120,
+    };
     const fixtureRes = await fetch(`${site}/api/admin/fixtures`, {
       method: "POST",
       headers: { ...admin, "content-type": "application/json" },
-      body: JSON.stringify({
-        sport: "football",
-        teamA: "E2E United",
-        teamB: "E2e City",
-        competition: "Harness Cup",
-        startsAt: new Date(Date.now() - 60_000).toISOString(),
-        durationMinutes: 120,
-        premiumChannelId: channelId,
-      }),
+      body: JSON.stringify({ ...fixtureBase, channels: [{ channelId, sourceType: "secured" }] }),
       cache: "no-store",
     });
     const fixtureJson = await fixtureRes.json();
@@ -588,6 +601,96 @@ async function main() {
     const card = (board.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
     gate("the card appears with a link to the premium watch page", card.watchPath === `/premium/${channelId}`, JSON.stringify({ watchPath: card.watchPath }));
     gate("the card names the channel but no server", leaksIn(board.text).length === 0, JSON.stringify(leaksIn(board.text)));
+
+    /* ---------------- a card's linked channels ---------------- */
+
+    // Phase 1's own contract, measured over HTTP: an editor is offered channels from both tiers,
+    // a card stores each of them as an id plus the tier it came from, and a reference that is
+    // malformed, unknown or carrying more than those two keys is refused without being stored.
+    section("linking channels from both tiers");
+    const refText = (list) => (list ?? []).map((ref) => `${ref.sourceType}:${ref.channelId}`).join(",");
+    const OPTION_KEYS = ["category", "channelId", "logoUrl", "name", "sourceType"];
+
+    const sources = await getJson(`${site}/api/admin/fixtures/sources`, admin);
+    const directOptions = sources.json.direct ?? [];
+    const securedOptions = sources.json.secured ?? [];
+    gate(
+      "the editor is offered channels from both tiers",
+      sources.res.status === 200 &&
+        sources.json.success === true &&
+        directOptions.length > 0 &&
+        securedOptions.some((option) => option.channelId === channelId),
+      `${sources.res.status} — ${directOptions.length} direct, ${securedOptions.length} secured`
+    );
+    const optionKeys = [...new Set([...directOptions, ...securedOptions].flatMap((option) => Object.keys(option)))];
+    gate(
+      "and an option is only ever an id, a source, a name, a category and a logo",
+      optionKeys.length > 0 && optionKeys.every((key) => OPTION_KEYS.includes(key)),
+      JSON.stringify(optionKeys)
+    );
+    gate("the offer carries no source line, no header and no token", leaksIn(sources.text).length === 0, JSON.stringify(leaksIn(sources.text)));
+    const noKeySources = await getJson(`${site}/api/admin/fixtures/sources`, {});
+    gate("and it is not a channel list the public can read", noKeySources.res.status === 401, `${noKeySources.res.status}`);
+
+    const directRef = directOptions[0] ?? {};
+    const mixed = await postJson(
+      `${site}/api/admin/fixtures`,
+      { ...fixtureBase, teamA: "Mixed United", teamB: "Mixed City", channels: [{ channelId, sourceType: "secured" }, { channelId: directRef.channelId, sourceType: "direct" }] },
+      admin
+    );
+    const mixedId = String(mixed.json.fixture?._id ?? "");
+    const mixedRefs = refText(mixed.json.fixture?.channels);
+    gate("a card can hold a secured channel and a direct channel at once", mixed.res.status === 200 && mixedRefs.split(",").length === 2, `${mixed.res.status} ${mixedRefs}`);
+    gate("and it keeps both, in the order they were picked, each with its own source", mixedRefs === `secured:${channelId},direct:${directRef.channelId}`, mixedRefs);
+
+    const cardsBefore = (await getJson(`${site}/api/admin/fixtures`, admin)).json.count;
+    const REFUSALS = [
+      ["a source the tier does not know", { channels: [{ channelId, sourceType: "premium" }] }, /Linked channel 1 source must be one of: direct, secured/],
+      ["a reference that also carries a source line", { channels: [{ channelId, sourceType: "secured", sourceUrl }] }, /Linked channel 1 carries sourceUrl — a linked channel stores only an id and a source/],
+      ["a direct id that is not a catalogue id", { channels: [{ channelId: "prem-e2e-not-a-catalogue-id", sourceType: "direct" }] }, /Linked channel 1 id must be a 24-character catalogue channel id/],
+      ["the single-channel field this tier used to store", { premiumChannelId: channelId }, /Linked channel is now sent as a channels list with a source for each entry/],
+      ["a secured channel nobody entered", { channels: [{ channelId: "pc-never-entered", sourceType: "secured" }] }, /Linked channel pc-never-entered is not a channel in the secured list/],
+      ["a well-formed direct id that is not on the catalogue", { channels: [{ channelId: "0123456789abcdef01234567", sourceType: "direct" }] }, /Linked channel 0123456789abcdef01234567 is not a channel on the direct catalogue/],
+    ];
+    const refusals = [];
+    for (const [name, extra, expect] of REFUSALS) {
+      const attempt = await postJson(`${site}/api/admin/fixtures`, { ...fixtureBase, teamA: "Refused", teamB: "United", ...extra }, admin);
+      const error = String(attempt.json.error ?? "");
+      refusals.push({ name, status: attempt.res.status, matched: expect.test(error), error });
+    }
+    gate("six bad references are all refused", refusals.every((row) => row.status === 400), JSON.stringify(refusals.map((row) => `${row.name}=${row.status}`)));
+    gate("and each names the reference and says what was wrong with it", refusals.every((row) => row.matched), JSON.stringify(refusals.filter((row) => !row.matched)));
+    gate("a refusal never echoes the line it refused", leaksIn(refusals.map((row) => row.error).join(" "), ADMIN_SECRETS).length === 0, JSON.stringify(leaksIn(refusals.map((row) => row.error).join(" "), ADMIN_SECRETS)));
+    const cardsAfterRefusals = (await getJson(`${site}/api/admin/fixtures`, admin)).json.count;
+    gate("none of those writes stored a card", cardsAfterRefusals === cardsBefore, `${cardsBefore} → ${cardsAfterRefusals}`);
+
+    const reLinked = await fetch(`${site}/api/admin/fixtures/${mixedId}`, {
+      method: "PATCH",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ channels: [{ channelId: directRef.channelId, sourceType: "direct" }] }),
+      cache: "no-store",
+    });
+    const reLinkedJson = await reLinked.json();
+    gate("an edit replaces the card's whole list rather than merging into it", reLinked.status === 200 && refText(reLinkedJson.fixture?.channels) === `direct:${directRef.channelId}`, `${reLinked.status} ${refText(reLinkedJson.fixture?.channels)}`);
+
+    const storedCards = (await getJson(`${site}/api/admin/fixtures`, admin)).json.fixtures ?? [];
+    const storedMixed = storedCards.find((row) => row._id === mixedId) ?? {};
+    gate("the card the edit left behind is still readable, with its schedule intact", storedMixed.teamA === "Mixed United" && storedMixed.competition === "Harness Cup" && refText(storedMixed.channels) === `direct:${directRef.channelId}`, JSON.stringify({ teamA: storedMixed.teamA, channels: storedMixed.channels }));
+    gate("and reading the board back never prints a source line for any card", leaksIn(JSON.stringify(storedCards)).length === 0, JSON.stringify(leaksIn(JSON.stringify(storedCards))));
+
+    // Interim, and deliberately asserted as such: until Phase 2 gives a card a chooser, the board
+    // can only open a secured channel, so a card naming nothing but direct channels is dropped
+    // rather than shown. Phase 3 replaces this gate with the unavailable-state contract.
+    const directOnlyBoard = await getJson(`${site}/api/fixtures`, {});
+    gate(
+      "until the Phase 2 chooser exists, a direct-only card is the one case the board drops",
+      (directOnlyBoard.json.fixtures ?? []).every((row) => row.id !== mixedId) &&
+        (directOnlyBoard.json.fixtures ?? []).some((row) => row.id === fixtureId),
+      JSON.stringify((directOnlyBoard.json.fixtures ?? []).map((row) => row.id))
+    );
+
+    const dropped = await fetch(`${site}/api/admin/fixtures/${mixedId}`, { method: "DELETE", headers: admin, cache: "no-store" });
+    gate("and this run's extra card is taken off the board again", dropped.status === 200 && (await dropped.json()).success === true, `${dropped.status}`);
 
     /* ---------------- sign and play ---------------- */
 
@@ -899,6 +1002,11 @@ async function main() {
     const catalogueText = JSON.stringify(catalogue.json);
     gate("the premium run left the Direct HLS catalogue as it found it", catalogue.res.status === 200 && !catalogueText.includes(expectedKey) && !catalogueText.includes(PATH_TOKEN), `${catalogue.res.status}`);
     gate("and no premium answer in this run named the origin", leaksIn(exchanges.map((row) => row.url).join(" ")).length === 0, JSON.stringify(leaksIn(exchanges.map((row) => row.url).join(" "))));
+    gate(
+      "the Direct HLS catalogue's own file is the same bytes it started as",
+      fingerprint(catalogueFile) === catalogueBefore,
+      `${catalogueBefore.slice(0, 16)} → ${fingerprint(catalogueFile).slice(0, 16)}`
+    );
   } catch (error) {
     gate("the run completed", false, error instanceof Error ? error.stack ?? error.message : String(error));
     if (serverLog.length > 0) say(`--- site output (last 20 lines) ---\n${serverLog.join("").split(/\r?\n/).slice(-20).join("\n")}`);

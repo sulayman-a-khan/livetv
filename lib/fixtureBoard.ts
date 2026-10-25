@@ -8,7 +8,7 @@
  * on the admin record, and this module is the only path a viewer takes.
  */
 
-import type { FixturePhase, FixtureSport } from "./premiumFixtures";
+import type { FixtureChannelRef, FixturePhase, FixtureSport } from "./premiumFixtures";
 
 /** Kickoffs further out than this are the admin's schedule, not today's board. */
 const UPCOMING_WINDOW_MS = 24 * 60 * 60_000;
@@ -27,7 +27,8 @@ export interface BoardFixture {
   competition: string;
   startsAt: string;
   durationMinutes: number;
-  premiumChannelId: string | null;
+  /** Every channel the admin linked, each naming the tier it comes from. */
+  channels: FixtureChannelRef[];
   visible: boolean;
   phase: FixturePhase;
 }
@@ -97,7 +98,11 @@ export function projectFixtures(
   const shown = fixtures
     .filter((fixture) => fixture.visible && fixture.phase !== "finished")
     .map((fixture) => {
-      const channel = fixture.premiumChannelId ? byId.get(fixture.premiumChannelId) : undefined;
+      // The card still links to one channel until Phase 2 gives it a chooser: the first secured
+      // reference is the row the single-field version of this card named, so nothing about what
+      // reaches a viewer changes here.
+      const secured = fixture.channels.find((ref) => ref.sourceType === "secured");
+      const channel = secured ? byId.get(secured.channelId) : undefined;
       if (!channel || !channel.active) return null;
       const startsAt = new Date(fixture.startsAt).getTime();
       if (fixture.phase === "upcoming" && startsAt > cutoff) return null;

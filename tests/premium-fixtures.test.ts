@@ -34,6 +34,10 @@ const READY_BOARD = (
   now: Date
 ): PublicFixture[] => projectFixtures(fixtures, channels, now, true);
 
+/** A linked channel, spelled the way a stored row spells it. */
+const secured = (channelId: string) => ({ channelId, sourceType: "secured" as const });
+const direct = (channelId: string) => ({ channelId, sourceType: "direct" as const });
+
 const GOOD_CHANNEL = {
   name: "Example Sports HD",
   proxyChannelKey: "prem-example-sports",
@@ -162,18 +166,119 @@ test("a fixture is football or cricket, needs both teams and a real kickoff", ()
   // the failure this feature has to avoid, so publishing is always deliberate.
   assert.equal(good.value.visible, false);
   assert.equal(good.value.durationMinutes, 120);
-  assert.equal(good.value.premiumChannelId, null);
+  assert.deepEqual(good.value.channels, []);
 });
 
-test("an unlinked fixture is spelled as empty and stored as null", () => {
-  assert.equal(validateFixtureInput({ premiumChannelId: "" }, false).value.premiumChannelId, null);
-  assert.equal(validateFixtureInput({ premiumChannelId: null }, false).value.premiumChannelId, null);
-  assert.equal(
-    validateFixtureInput({ premiumChannelId: "6ab5c72de29c995275489e5c" }, false).value
-      .premiumChannelId,
-    "6ab5c72de29c995275489e5c"
+/** The first error a payload produced, which is what the admin reads on screen. */
+const firstError = (body: Record<string, unknown>) =>
+  validateFixtureInput({ ...GOOD_FIXTURE, channels: body.channels }, true).errors;
+
+test("a card can be linked to one channel, several, or channels from both tiers", () => {
+  const directOnly = validateFixtureInput(
+    { channels: [direct("6ab5c72de29c995275489e5c")] },
+    false
   );
-  assert.deepEqual(validateFixtureInput({ premiumChannelId: "   " }, false).errors, []);
+  assert.deepEqual(directOnly.errors, []);
+  assert.deepEqual(directOnly.value.channels, [
+    { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct" },
+  ]);
+
+  const securedOnly = validateFixtureInput({ channels: [secured("pc_one")] }, false);
+  assert.deepEqual(securedOnly.errors, []);
+
+  const mixed = validateFixtureInput({
+    channels: [direct("6ab5c72de29c995275489e5c"), secured("pc_one"), secured("pc_two")],
+  }, false);
+  assert.deepEqual(mixed.errors, []);
+  // Order is the admin's, not the store's: the card offers the choices in the order they were
+  // picked, so the projection must not sort them into a canonical shape.
+  assert.deepEqual(mixed.value.channels, [
+    { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct" },
+    { channelId: "pc_one", sourceType: "secured" },
+    { channelId: "pc_two", sourceType: "secured" },
+  ]);
+
+  // Nothing linked at all is an answer, not a missing field: a match can be entered with its
+  // schedule and its channel chosen later.
+  const none = validateFixtureInput({ channels: [] }, false);
+  assert.deepEqual(none.errors, []);
+  assert.deepEqual(none.value.channels, []);
+});
+
+test("a reference that is not an id plus a known source is refused", () => {
+  // The tier is what tells a tap which playback route and which authorization flow it belongs
+  // to, so a card cannot be allowed to guess it.
+  assert.deepEqual(firstError({ channels: [{ channelId: "pc_one", sourceType: "premium" }] }), [
+    "Linked channel 1 source must be one of: direct, secured",
+  ]);
+  assert.deepEqual(firstError({ channels: [{ channelId: "pc_one" }] }), [
+    "Linked channel 1 source must be one of: direct, secured",
+  ]);
+  assert.deepEqual(firstError({ channels: ["pc_one"] }), [
+    "Linked channel 1 must name a channel id and a source",
+  ]);
+
+  // An id is an id: no spaces, no path, no URL dressed as one.
+  assert.deepEqual(firstError({ channels: [{ channelId: "https://host/a.m3u8", sourceType: "secured" }] }), [
+    "Linked channel 1 id is not valid",
+  ]);
+  assert.deepEqual(firstError({ channels: [{ channelId: "pc one", sourceType: "secured" }] }), [
+    "Linked channel 1 id is not valid",
+  ]);
+  assert.deepEqual(firstError({ channels: [{ channelId: "", sourceType: "secured" }] }), [
+    "Linked channel 1 id is not valid",
+  ]);
+
+  // Direct catalogue rows are ObjectId-keyed in production and in the local mirror alike, so
+  // anything looser would name a channel that cannot exist.
+  assert.deepEqual(
+    firstError({ channels: [{ channelId: "ch_spotlight", sourceType: "direct" }] }),
+    ["Linked channel 1 id must be a 24-character catalogue channel id"]
+  );
+
+  // The list is a list, and short enough to choose from.
+  assert.deepEqual(firstError({ channels: "pc_one" }), ["Linked channel must be a list of channels"]);
+  assert.deepEqual(
+    firstError({ channels: Array.from({ length: 9 }, (_, i) => secured(`pc_${i}`)) }),
+    ["Linked channel can hold at most 8 channels"]
+  );
+  assert.deepEqual(
+    firstError({ channels: [secured("pc_one"), secured("pc_one")] }),
+    ["Linked channel 2 is listed twice"]
+  );
+});
+
+test("a reference carries no key beyond an id and a source, because a card is public", () => {
+  // This is the whole reason the shape is closed: a fixture row is what the viewer board reads,
+  // so a source line, a header or a token smuggled onto it would leave the tier's own vault and
+  // arrive in a browser. Refused, not stripped — an admin must hear that it did not land.
+  assert.deepEqual(
+    firstError({
+      channels: [
+        { channelId: "pc_one", sourceType: "secured", sourceUrl: "https://origin.internal/a.m3u8" },
+      ],
+    }),
+    ["Linked channel 1 carries sourceUrl — a linked channel stores only an id and a source"]
+  );
+  assert.deepEqual(
+    firstError({ channels: [{ channelId: "pc_one", sourceType: "secured", headers: { userAgent: "X" } }] }),
+    ["Linked channel 1 carries headers — a linked channel stores only an id and a source"]
+  );
+  assert.deepEqual(
+    firstError({ channels: [{ channelId: "pc_one", sourceType: "secured", token: "hunter2" }] }),
+    ["Linked channel 1 carries token — a linked channel stores only an id and a source"]
+  );
+});
+
+test("the single-channel field is refused instead of being reinterpreted", () => {
+  // It named a premium row and nothing else, but a write that still sends it would be storing
+  // a second, vaguer answer to "where is this match watched".
+  assert.deepEqual(validateFixtureInput({ premiumChannelId: "pc_one" }, false).errors, [
+    "Linked channel is now sent as a channels list with a source for each entry",
+  ]);
+  assert.equal(validateFixtureInput({ premiumChannelId: "pc_one" }, false).value.channels, undefined);
+  // Reading a row that still holds it is a different question, and is answered in
+  // `tests/premium-store.test.ts`.
 });
 
 test("a fixture is upcoming before kickoff, live until its length runs out", () => {
@@ -217,7 +322,7 @@ test("a card only appears for a match on a premium channel the admin switched on
     competition: "Test Cup",
     startsAt: new Date("2026-10-25T14:00:00.000Z").toISOString(),
     durationMinutes: 120,
-    premiumChannelId: "pc_one",
+    channels: [secured("pc_one")],
     visible: true,
     phase: "upcoming" as const,
   };
@@ -226,7 +331,7 @@ test("a card only appears for a match on a premium channel the admin switched on
   assert.equal(READY_BOARD([base], [channel], now).length, 1);
   // No linked channel, a channel that is not in the list, and a switched-off one
   // all mean nobody can watch this match, so the card does not advertise it.
-  assert.equal(READY_BOARD([{ ...base, premiumChannelId: null }], [channel], now).length, 0);
+  assert.equal(READY_BOARD([{ ...base, channels: [] }], [channel], now).length, 0);
   assert.equal(READY_BOARD([base], [{ ...channel, active: false }], now).length, 0);
   assert.equal(READY_BOARD([base], [], now).length, 0);
 });
@@ -251,7 +356,7 @@ test("unpublished, finished and far-future matches stay off the board", () => {
     competition: "",
     startsAt: new Date("2026-10-25T14:00:00.000Z").toISOString(),
     durationMinutes: 120,
-    premiumChannelId: "pc_one",
+    channels: [secured("pc_one")],
     visible: true,
     phase: "upcoming" as const,
   };
@@ -298,7 +403,7 @@ test("live matches lead the board, upcoming ones follow by kickoff, and three fi
     competition: "",
     startsAt: new Date(startsAt).toISOString(),
     durationMinutes: 180,
-    premiumChannelId: "pc_one",
+    channels: [secured("pc_one")],
     visible: true,
     phase,
   });
@@ -343,7 +448,7 @@ test("the projection names the channel but carries no source or header", () => {
         competition: "Test Cup",
         startsAt: now.toISOString(),
         durationMinutes: 120,
-        premiumChannelId: "pc_one",
+        channels: [secured("pc_one")],
         visible: true,
         phase: "live" as const,
       },
@@ -381,7 +486,7 @@ test("a channel with nothing on the box still makes a card, just not a link", ()
         competition: "",
         startsAt: now.toISOString(),
         durationMinutes: 120,
-        premiumChannelId: "pc_one",
+        channels: [secured("pc_one")],
         visible: true,
         phase: "live" as const,
       },
@@ -415,7 +520,7 @@ const GATED_FIXTURE = {
   competition: "BPL",
   startsAt: new Date("2026-10-25T11:00:00.000Z").toISOString(),
   durationMinutes: 120,
-  premiumChannelId: "pc_one",
+  channels: [secured("pc_one")],
   visible: true,
   phase: "live" as const,
 };
@@ -467,7 +572,7 @@ test("an outage takes the watch away and leaves the match on the board", () => {
 test("readiness is the same answer for every card, and a card that was never pushed stays unlinked", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
   const board = projectFixtures(
-    [GATED_FIXTURE, { ...GATED_FIXTURE, _id: "fx_two", premiumChannelId: "pc_two" }],
+    [GATED_FIXTURE, { ...GATED_FIXTURE, _id: "fx_two", channels: [secured("pc_two")] }],
     [PUSHED_CHANNEL, { ...PUSHED_CHANNEL, _id: "pc_two", proxyChannelKey: "" }],
     now,
     false
@@ -478,5 +583,36 @@ test("readiness is the same answer for every card, and a card that was never pus
     board.map((card) => card.watchPath),
     [null, null]
   );
+});
+
+// --- mixed references (what a card may now name) --------------------------------
+
+test("a direct reference joins the card without changing what the card links to", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const mixed = {
+    ...GATED_FIXTURE,
+    channels: [direct("6ab5c72de29c995275489e5c"), secured("pc_one")],
+  };
+
+  const board = projectFixtures([mixed], [PUSHED_CHANNEL], now, true);
+  assert.equal(board.length, 1);
+  // The card still answers with the secured row this tier knows how to sign for, and it finds it
+  // by asking the list which entry is secured — not by taking whatever comes first.
+  assert.equal(board[0].watchPath, "/premium/pc_one");
+  assert.equal(board[0].channelName, PUSHED_CHANNEL.name);
+});
+
+test("a card that names only direct channels offers nothing this board knows how to open", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const directOnly = {
+    ...GATED_FIXTURE,
+    _id: "fx_direct",
+    channels: [direct("6ab5c72de29c995275489e5c")],
+  };
+
+  // Pinned as the interim it is: the viewer-facing half of a mixed card — offering a direct
+  // choice at all, and saying so when a link is stale — is what the chooser and the stale-reference
+  // phases build, and this is the behaviour they change deliberately.
+  assert.equal(projectFixtures([directOnly], [PUSHED_CHANNEL], now, true).length, 0);
 });
 

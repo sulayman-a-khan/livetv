@@ -1,9 +1,15 @@
 import mongoose, { Schema, Document, Model } from "mongoose";
-import { FIXTURE_SPORTS, type FixtureSport } from "@/lib/premiumFixtures";
+import {
+  FIXTURE_SPORTS,
+  FIXTURE_SOURCE_TYPES,
+  type FixtureChannelRef,
+  type FixtureSport,
+} from "@/lib/premiumFixtures";
 
-// The list lives in the pure validation module, so the schema and the API can
-// never disagree about which sports a card may be entered for.
-export { FIXTURE_SPORTS, type FixtureSport };
+// The lists live in the pure validation module, so the schema and the API can
+// never disagree about which sports a card may be entered for, or which tiers it may
+// name a channel from.
+export { FIXTURE_SPORTS, FIXTURE_SOURCE_TYPES, type FixtureSport, type FixtureChannelRef };
 
 /**
  * A match the admin typed in by hand. There is no schedule feed behind this: an
@@ -21,7 +27,16 @@ export interface IFixture extends Document {
   startsAt: Date;
   /** How long the match is expected to hold the "LIVE NOW" badge. */
   durationMinutes: number;
-  /** The premium channel this match is watched on, or null when it is not tied to one. */
+  /**
+   * Every channel this match can be watched on, each with the tier it comes from. Written by
+   * the fixture editor; the reference stores nothing else, so no source line, header or token
+   * can be attached to a card here.
+   */
+  channels: FixtureChannelRef[];
+  /**
+   * The one premium channel this match was tied to, before a card could name several. Reads
+   * still honour it (see `toFixtureRecord`), writes never set it, and nothing reads it back.
+   */
   premiumChannelId: string | null;
   /** Admin switch: an unpublished fixture stays invisible to viewers. */
   visible: boolean;
@@ -39,6 +54,16 @@ const FixtureSchema = new Schema<IFixture>(
     competition: { type: String, default: "", trim: true },
     startsAt: { type: Date, required: true, index: true },
     durationMinutes: { type: Number, default: 120 },
+    channels: {
+      type: [
+        {
+          _id: false,
+          channelId: { type: String, required: true },
+          sourceType: { type: String, enum: [...FIXTURE_SOURCE_TYPES], required: true },
+        },
+      ],
+      default: [],
+    },
     premiumChannelId: { type: String, default: null },
     visible: { type: Boolean, default: false, index: true },
   },

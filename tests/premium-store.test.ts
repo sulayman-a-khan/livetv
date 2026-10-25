@@ -60,6 +60,25 @@ delete process.env.VERCEL;
 type PremiumStore = typeof import("../lib/premiumStore");
 const store: PremiumStore = require("../lib/premiumStore");
 
+/**
+ * The store again, reading the tier's local file from disk rather than the copy this process
+ * already holds.
+ *
+ * The local store keeps its arrays on `globalThis` for the life of the process — which is the
+ * point of it — so re-reading a file that something else rewrote means clearing both arrays and
+ * re-requiring the two modules, exactly as a fresh lambda cold start would.
+ */
+function loadFreshPremiumStore(): PremiumStore {
+  const shared = globalThis as unknown as Record<string, unknown>;
+  shared.__freetv_premium_channels = undefined;
+  shared.__freetv_premium_fixtures = undefined;
+  for (const request of ["../lib/premiumLocalStore", "../lib/premiumStore"]) {
+    const resolved = require.resolve(request);
+    delete require.cache[resolved];
+  }
+  return require("../lib/premiumStore");
+}
+
 after(() => {
   process.chdir(projectCwd);
   fs.rmSync(sandbox, { recursive: true, force: true });
@@ -86,7 +105,7 @@ const FIXTURE_INPUT = {
   competition: "BPL",
   startsAt: new Date("2026-10-25T16:00:00.000Z"),
   durationMinutes: 120,
-  premiumChannelId: null as string | null,
+  channels: [] as { channelId: string; sourceType: "secured" | "direct" }[],
   visible: false,
 };
 
@@ -134,7 +153,7 @@ test("a deployment with no database refuses every premium write instead of answe
   // The link check gates a write, so it refuses too rather than reporting a live
   // channel as missing from the list.
   await assert.rejects(
-    () => store.premiumChannelExists(OBJECT_ID),
+    () => store.existingPremiumChannelIds([OBJECT_ID]),
     refusedWith("the premium list could not be checked")
   );
 
@@ -172,7 +191,10 @@ test("off a deployment the same writes go to the tier's own local store and answ
   assert.equal(channel.proxyPushedAt, null);
 
   assert.equal((await store.listPremiumChannels()).length, 1);
-  assert.equal(await store.premiumChannelExists(channel._id), true);
+  assert.deepEqual(
+    await store.existingPremiumChannelIds([channel._id, "pc_nobody"]),
+    new Set([channel._id])
+  );
 
   const renamed = await store.updatePremiumChannel(channel._id, { active: false });
   assert.equal(renamed?.active, false);
@@ -185,10 +207,29 @@ test("off a deployment the same writes go to the tier's own local store and answ
   assert.equal(pushed?.proxyChannelKey, "prem-one");
   assert.equal(pushed?.proxyPushedAt, "2026-10-26T09:00:00.000Z");
 
-  const fixture = await store.createFixture({ ...FIXTURE_INPUT, premiumChannelId: channel._id });
+  const fixture = await store.createFixture({
+    ...FIXTURE_INPUT,
+    channels: [{ channelId: channel._id, sourceType: "secured" }],
+  });
   assert.match(fixture._id, /^fx_/);
-  assert.equal(fixture.premiumChannelId, channel._id);
+  assert.deepEqual(fixture.channels, [{ channelId: channel._id, sourceType: "secured" }]);
   assert.equal(fixture.visible, false);
+
+  const retimed = await store.updateFixture(fixture._id, {
+    channels: [
+      { channelId: channel._id, sourceType: "secured" },
+      { channelId: OBJECT_ID, sourceType: "direct" },
+    ],
+  });
+  // Both tiers on one card, in the order they were sent: a stored reference is not sorted,
+  // renamed or narrowed to the first entry on its way through the store.
+  assert.deepEqual(retimed?.channels, [
+    { channelId: channel._id, sourceType: "secured" },
+    { channelId: OBJECT_ID, sourceType: "direct" },
+  ]);
+
+  const unlinked = await store.updateFixture(fixture._id, { channels: [] });
+  assert.deepEqual(unlinked?.channels, []);
 
   const published = await store.updateFixture(fixture._id, { visible: true });
   assert.equal(published?.visible, true);
@@ -211,7 +252,100 @@ test("off a deployment the same writes go to the tier's own local store and answ
   assert.equal((await store.listFixtures()).length, 0);
   assert.equal(await store.deletePremiumChannel(channel._id), true);
   assert.equal((await store.listPremiumChannels()).length, 0);
-  assert.equal(await store.premiumChannelExists(channel._id), false);
+  assert.deepEqual(await store.existingPremiumChannelIds([channel._id]), new Set());
+});
+
+/**
+ * A row written before a card could name several channels carries `premiumChannelId` and no
+ * list. Reading it has to answer with the link it actually recorded — the same card on the same
+ * channel — because an admin's existing board is the data this change must not lose.
+ */
+test("a fixture stored in the old single-channel shape still reads as a linked card", async () => {
+  delete process.env.VERCEL;
+
+  const file = path.join(sandbox, "data", "premium-store.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      premiumChannels: [],
+      fixtures: [
+        {
+          _id: "fx_legacy",
+          sport: "football",
+          teamA: "Legacy A",
+          teamB: "Legacy B",
+          teamALogo: "",
+          teamBLogo: "",
+          competition: "Old Cup",
+          startsAt: new Date("2026-10-25T16:00:00.000Z"),
+          durationMinutes: 120,
+          premiumChannelId: "pc_legacy",
+          visible: true,
+          createdAt: new Date("2026-10-25T10:00:00.000Z"),
+          updatedAt: new Date("2026-10-25T10:00:00.000Z"),
+        },
+      ],
+    }),
+    "utf-8"
+  );
+
+  // Re-read the tier through a fresh module graph, so the store's own loader runs against the
+  // file above rather than against what this process already had in memory.
+  const fresh = loadFreshPremiumStore();
+  const [legacy] = await fresh.listFixtures();
+  assert.equal(legacy.teamA, "Legacy A");
+  assert.deepEqual(legacy.channels, [{ channelId: "pc_legacy", sourceType: "secured" }]);
+
+  // A row that recorded nothing links to nothing: an absent field is not read as a guess.
+  const unrecorded = { ...JSON.parse(fs.readFileSync(file, "utf-8")) };
+  unrecorded.fixtures[0].premiumChannelId = null;
+  fs.writeFileSync(file, JSON.stringify(unrecorded), "utf-8");
+  assert.deepEqual((await loadFreshPremiumStore().listFixtures())[0].channels, []);
+});
+
+/** Editing a card in the new shape retires the column the old shape used, in the same write. */
+test("editing a card's channels clears the single-column link it may still carry", async () => {
+  delete process.env.VERCEL;
+
+  const file = path.join(sandbox, "data", "premium-store.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      premiumChannels: [],
+      fixtures: [
+        {
+          _id: "fx_legacy",
+          sport: "football",
+          teamA: "Legacy A",
+          teamB: "Legacy B",
+          teamALogo: "",
+          teamBLogo: "",
+          competition: "",
+          startsAt: new Date("2026-10-25T16:00:00.000Z"),
+          durationMinutes: 120,
+          premiumChannelId: "pc_legacy",
+          visible: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    }),
+    "utf-8"
+  );
+
+  const fresh = loadFreshPremiumStore();
+  const edited = await fresh.updateFixture("fx_legacy", {
+    channels: [{ channelId: "pc_new", sourceType: "secured" }],
+  });
+  assert.deepEqual(edited?.channels, [{ channelId: "pc_new", sourceType: "secured" }]);
+
+  // And the cleared column survives a re-read: without it, the old link would come back the
+  // next time the board was loaded from disk.
+  const onDisk = JSON.parse(fs.readFileSync(file, "utf-8")).fixtures[0];
+  assert.equal(onDisk.premiumChannelId, null);
+  assert.deepEqual((await loadFreshPremiumStore().listFixtures())[0].channels, [
+    { channelId: "pc_new", sourceType: "secured" },
+  ]);
 });
 
 test("the local run never touched this project's own data files", () => {

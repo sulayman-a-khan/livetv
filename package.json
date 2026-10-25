@@ -21,6 +21,7 @@
     "test:link-registration": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ranking.test.js .tmp-tests/tests/link-registration.test.js",
     "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js .tmp-tests/tests/safe-fetch.test.js",
     "test:premium-fixtures": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-fixtures.test.js",
+    "test:fixture-sources": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/fixture-sources.test.js",
     "test:premium-readiness": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-readiness.test.js",
     "test:premium-store": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-store.test.js",
     "test:premium-box": "node scripts/premium-box-e2e.mjs",

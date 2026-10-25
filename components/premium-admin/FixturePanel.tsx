@@ -24,15 +24,27 @@ interface FixtureRow {
   competition: string;
   startsAt: string;
   durationMinutes: number;
-  premiumChannelId: string | null;
+  channels: ChannelRef[];
   visible: boolean;
   phase: "upcoming" | "live" | "finished";
 }
 
-interface OptionRow {
-  _id: string;
+/**
+ * A linked channel: an id and the tier it came from, and nothing else. The panel can only ever
+ * name these two fields, so there is no place in what it sends to put a source line or a header.
+ */
+interface ChannelRef {
+  channelId: string;
+  sourceType: "direct" | "secured";
+}
+
+/** One channel the editor offers, as the sources route describes it. */
+interface SourceOption extends ChannelRef {
   name: string;
 }
+
+/** What a card can hold: a chooser on a phone screen, not a list to scroll for a minute. */
+const MAX_CHANNELS = 8;
 
 interface FormState {
   sport: "football" | "cricket";
@@ -44,7 +56,7 @@ interface FormState {
   /** Local wall clock as typed into the datetime field. */
   startsAt: string;
   durationMinutes: string;
-  premiumChannelId: string;
+  channels: ChannelRef[];
   visible: boolean;
 }
 
@@ -57,7 +69,7 @@ const EMPTY_FORM: FormState = {
   competition: "",
   startsAt: "",
   durationMinutes: "120",
-  premiumChannelId: "",
+  channels: [],
   visible: false,
 };
 
@@ -93,6 +105,57 @@ function countdown(iso: string, now: number): string {
 }
 
 /**
+ * One tier's worth of channels, as tap-to-link marks.
+ *
+ * A group with nothing in it says nothing: an admin with no secured rows should not have to read
+ * an empty heading to find out why.
+ */
+function ChannelSourceGroup({
+  label,
+  options,
+  selected,
+  full,
+  onToggle,
+}: {
+  label: string;
+  options: SourceOption[];
+  selected: ChannelRef[];
+  full: boolean;
+  onToggle: (option: SourceOption) => void;
+}) {
+  if (options.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">{label}</p>
+      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+        {options.map((option) => {
+          const linked = selected.some(
+            (ref) => ref.channelId === option.channelId && ref.sourceType === option.sourceType
+          );
+          return (
+            <button
+              key={`${option.sourceType}:${option.channelId}`}
+              type="button"
+              aria-pressed={linked}
+              disabled={!linked && full}
+              onClick={() => onToggle(option)}
+              title={linked ? `Unlink ${option.name}` : `Link ${option.name}`}
+              className={`text-[11px] px-2 py-1 rounded-lg border transition-colors ${
+                linked
+                  ? "bg-brand-600 border-brand-500 text-white"
+                  : "bg-slate-800/70 border-slate-700 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
+              }`}
+            >
+              {option.name}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * The manual fixture board. Every match on it was typed in by the admin: there is
  * no schedule feed behind this panel, and a new fixture starts unpublished so an
  * entered match cannot appear to viewers until it is switched on.
@@ -107,7 +170,8 @@ export default function FixturePanel({
   onToggle: () => void;
 }) {
   const [rows, setRows] = useState<FixtureRow[]>([]);
-  const [channels, setChannels] = useState<OptionRow[]>([]);
+  const [directSources, setDirectSources] = useState<SourceOption[]>([]);
+  const [securedSources, setSecuredSources] = useState<SourceOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -122,12 +186,12 @@ export default function FixturePanel({
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
     try {
-      const [fixtures, premium] = await Promise.all([
+      const [fixtures, sources] = await Promise.all([
         fetch("/api/admin/fixtures", {
           headers: { "x-admin-secret": secretKey.trim() },
           cache: "no-store",
         }).then((r) => r.json()),
-        fetch("/api/admin/premium/channels", {
+        fetch("/api/admin/fixtures/sources", {
           headers: { "x-admin-secret": secretKey.trim() },
           cache: "no-store",
         }).then((r) => r.json()),
@@ -137,10 +201,13 @@ export default function FixturePanel({
         setLoadError(fixtures.error || "Failed to load fixtures");
         return;
       }
+      if (!sources.success) {
+        setLoadError(sources.error || "Failed to load the channel list");
+        return;
+      }
       setRows((fixtures.fixtures || []) as FixtureRow[]);
-      setChannels(
-        ((premium.premiumChannels || []) as OptionRow[]).map((c) => ({ _id: c._id, name: c.name }))
-      );
+      setDirectSources((sources.direct || []) as SourceOption[]);
+      setSecuredSources((sources.secured || []) as SourceOption[]);
       setLoadError(null);
     } catch (err: any) {
       if (seq !== loadSeq.current) return;
@@ -197,12 +264,38 @@ export default function FixturePanel({
       competition: row.competition,
       startsAt: toInputValue(row.startsAt),
       durationMinutes: String(row.durationMinutes),
-      premiumChannelId: row.premiumChannelId || "",
+      channels: row.channels.map((ref) => ({ ...ref })),
       visible: row.visible,
     });
     setEditingId(row._id);
     setShowForm(true);
     setMessage(null);
+  }
+
+  /**
+   * Tap to link, tap again to unlink. Selecting a channel writes a reference onto the fixture;
+   * it never touches the channel's own row, so a direct channel keeps its links, its pin state
+   * and its probe history exactly as the catalogue holds them.
+   */
+  function toggleChannel(option: SourceOption) {
+    setForm((current) => {
+      const linked = current.channels.some(
+        (ref) => ref.channelId === option.channelId && ref.sourceType === option.sourceType
+      );
+      if (linked) {
+        return {
+          ...current,
+          channels: current.channels.filter(
+            (ref) => !(ref.channelId === option.channelId && ref.sourceType === option.sourceType)
+          ),
+        };
+      }
+      if (current.channels.length >= MAX_CHANNELS) return current;
+      return {
+        ...current,
+        channels: [...current.channels, { channelId: option.channelId, sourceType: option.sourceType }],
+      };
+    });
   }
 
   async function submit() {
@@ -218,7 +311,7 @@ export default function FixturePanel({
         competition: form.competition,
         startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : "",
         durationMinutes: Number(form.durationMinutes),
-        premiumChannelId: form.premiumChannelId || null,
+        channels: form.channels,
         visible: form.visible,
       };
       const res = await fetch(editingId ? `/api/admin/fixtures/${editingId}` : "/api/admin/fixtures", {
@@ -281,6 +374,16 @@ export default function FixturePanel({
     } finally {
       setBusyId(null);
     }
+  }
+
+  /**
+   * What a linked channel is called, looked up in the tier the reference names. A channel that is
+   * no longer in that list shows its id: the link is stale rather than wrong, and the admin needs
+   * to see which one it is.
+   */
+  function channelName(ref: ChannelRef): string {
+    const options = ref.sourceType === "direct" ? directSources : securedSources;
+    return options.find((option) => option.channelId === ref.channelId)?.name || ref.channelId;
   }
 
   const liveCount = rows.filter((r) => r.phase === "live").length;
@@ -398,20 +501,31 @@ export default function FixturePanel({
                   onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}
                 />
               </div>
-              <div className="sm:col-span-2">
-                <label className={LABEL_CLASS}>Watch on (premium channel)</label>
-                <select
-                  className={FIELD_CLASS}
-                  value={form.premiumChannelId}
-                  onChange={(e) => setForm({ ...form, premiumChannelId: e.target.value })}
-                >
-                  <option value="">Not linked</option>
-                  {channels.map((c) => (
-                    <option key={c._id} value={c._id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+              <div className="sm:col-span-2 space-y-2.5">
+                <p className={LABEL_CLASS}>
+                  Watch on · {form.channels.length} linked
+                  {form.channels.length >= MAX_CHANNELS ? ` (max ${MAX_CHANNELS})` : ""}
+                </p>
+                <ChannelSourceGroup
+                  label="Secured HLS"
+                  options={securedSources}
+                  selected={form.channels}
+                  full={form.channels.length >= MAX_CHANNELS}
+                  onToggle={toggleChannel}
+                />
+                <ChannelSourceGroup
+                  label="Direct HLS"
+                  options={directSources}
+                  selected={form.channels}
+                  full={form.channels.length >= MAX_CHANNELS}
+                  onToggle={toggleChannel}
+                />
+                {securedSources.length === 0 && directSources.length === 0 && (
+                  <p className="text-[10px] text-slate-500">
+                    No channels to link yet — the direct catalogue and the secured list are both
+                    empty.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -474,8 +588,8 @@ export default function FixturePanel({
                   <p className="text-[10px] text-slate-500 truncate">
                     {row.competition ? `${row.competition} · ` : ""}
                     {new Date(row.startsAt).toLocaleString()}
-                    {row.premiumChannelId
-                      ? ` · ${channels.find((c) => c._id === row.premiumChannelId)?.name || "linked channel"}`
+                    {row.channels.length
+                      ? ` · ${row.channels.map(channelName).join(" · ")}`
                       : ""}
                   </p>
                 </div>

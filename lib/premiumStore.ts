@@ -19,7 +19,14 @@ import {
 } from "./premiumLocalStore";
 import FixtureModel from "@/models/Fixture";
 import PremiumChannelModel from "@/models/PremiumChannel";
-import { fixturePhase, type FixtureInput, type PremiumChannelInput } from "./premiumFixtures";
+import {
+  FIXTURE_SOURCE_TYPES,
+  fixturePhase,
+  type FixtureChannelRef,
+  type FixtureInput,
+  type FixtureSourceType,
+  type PremiumChannelInput,
+} from "./premiumFixtures";
 
 export interface PremiumChannelRecord {
   _id: string;
@@ -53,7 +60,8 @@ export interface FixtureRecord {
   competition: string;
   startsAt: string;
   durationMinutes: number;
-  premiumChannelId: string | null;
+  /** Every channel this match can be watched on, each naming the tier it comes from. */
+  channels: FixtureChannelRef[];
   visible: boolean;
   /** Derived from the kickoff clock, so the admin sees the badge a card would show. */
   phase: "upcoming" | "live" | "finished";
@@ -85,8 +93,14 @@ function bySortOrder(a: PremiumChannelRecord, b: PremiumChannelRecord): number {
  *
  * The thrown `status` is what every one of these routes' own `fail()` already maps
  * into its response, so the refusal arrives as a 503 carrying this sentence.
+ *
+ * Exported because `lib/fixtureSources.ts` answers the same question about a channel list the
+ * writes consult before they accept a reference, and must refuse for the same reason.
  */
-function requirePersistingStore(conn: typeof mongoose | null, action: string): void {
+export function requirePersistingStore(
+  conn: typeof mongoose | null,
+  action: string
+): void {
   if (conn || !mustUseDatabase()) return;
   throw Object.assign(new Error(`Database unavailable — ${action}`), { status: 503 });
 }
@@ -123,6 +137,43 @@ function toPremiumRecord(row: {
   };
 }
 
+/**
+ * The channels a stored row says this match can be watched on, in the order it stored them.
+ *
+ * Two shapes have to read as one answer. A row written after a card could name several
+ * channels carries the list; a row written before it carries only `premiumChannelId`, and that
+ * field always named a premium row, so it reads as one secured reference instead of being
+ * dropped — an existing board keeps showing its matches on the channel the admin chose.
+ * An entry that is not an id plus a known source is skipped rather than guessed at.
+ */
+function readFixtureChannels(row: {
+  channels?: unknown;
+  premiumChannelId?: string | null;
+}): FixtureChannelRef[] {
+  const refs: FixtureChannelRef[] = [];
+  const stored = Array.isArray(row.channels) ? row.channels : [];
+  for (const entry of stored) {
+    const record = entry as { channelId?: unknown; sourceType?: unknown };
+    const channelId = typeof record?.channelId === "string" ? record.channelId.trim() : "";
+    const sourceType =
+      typeof record?.sourceType === "string" ? record.sourceType.trim().toLowerCase() : "";
+    if (!channelId) continue;
+    if (!(FIXTURE_SOURCE_TYPES as readonly string[]).includes(sourceType)) continue;
+    const typed = sourceType as FixtureSourceType;
+    if (refs.some((ref) => ref.channelId === channelId && ref.sourceType === typed)) continue;
+    refs.push({ channelId, sourceType: typed });
+  }
+
+  const legacy = typeof row.premiumChannelId === "string" ? row.premiumChannelId.trim() : "";
+  if (legacy && !refs.some((ref) => ref.sourceType === "secured" && ref.channelId === legacy)) {
+    refs.push({ channelId: legacy, sourceType: "secured" });
+  }
+  return refs;
+}
+
+/**
+ * A stored row — in either shape — as the rest of the tier reads it.
+ */
 function toFixtureRecord(
   row: {
     _id: unknown;
@@ -134,6 +185,7 @@ function toFixtureRecord(
     competition?: string;
     startsAt?: Date;
     durationMinutes?: number;
+    channels?: unknown;
     premiumChannelId?: string | null;
     visible?: boolean;
     createdAt?: Date;
@@ -153,7 +205,7 @@ function toFixtureRecord(
     competition: row.competition || "",
     startsAt: startsAt.toISOString(),
     durationMinutes: duration,
-    premiumChannelId: row.premiumChannelId ? String(row.premiumChannelId) : null,
+    channels: readFixtureChannels(row),
     visible: row.visible === true,
     phase: fixturePhase(startsAt, duration, now),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
@@ -314,23 +366,27 @@ function byKickoff(a: FixtureRecord, b: FixtureRecord): number {
 }
 
 /**
- * Does a premium channel with this id exist? A fixture may only be tied to a
- * channel the admin has actually entered, or the card would advertise a match
- * nobody can watch.
+ * Which of these ids name a premium channel this store actually has.
  *
- * Guarded like a write even though it reads: it is reached only from the two
- * fixture writes, and "Linked channel is not in the premium list" is a wrong
- * diagnosis when the truth is that nothing could be read at all.
+ * One pass for a whole list rather than a query per entry, because a fixture write checks every
+ * channel on the card. Guarded like a write even though it reads: it is reached only from the two
+ * fixture writes, and "channel is not in the premium list" is a wrong diagnosis when the truth is
+ * that nothing could be read at all.
  */
-export async function premiumChannelExists(id: string): Promise<boolean> {
+export async function existingPremiumChannelIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
   const conn = await connectToDatabase();
   requirePersistingStore(conn, "the premium list could not be checked");
   if (conn) {
-    if (!mongoose.isValidObjectId(id)) return false;
-    const found = await PremiumChannelModel.findById(id).select("_id").lean();
-    return Boolean(found);
+    const objectIds = ids.filter((id) => mongoose.isValidObjectId(id));
+    if (objectIds.length === 0) return new Set();
+    const found = await PremiumChannelModel.find({ _id: { $in: objectIds } })
+      .select("_id")
+      .lean();
+    return new Set(found.map((row) => String(row._id)));
   }
-  return Boolean(premiumLocalStore.getChannel(id));
+  const present = new Set(premiumLocalStore.listChannels().map((channel) => channel._id));
+  return new Set(ids.filter((id) => present.has(id)));
 }
 
 export async function listFixtures(): Promise<FixtureRecord[]> {
@@ -357,7 +413,7 @@ export async function createFixture(input: FixtureInput): Promise<FixtureRecord>
       competition: input.competition,
       startsAt: input.startsAt,
       durationMinutes: input.durationMinutes,
-      premiumChannelId: input.premiumChannelId,
+      channels: input.channels,
       visible: input.visible,
     });
     return toFixtureRecord(created.toObject(), now);
@@ -373,7 +429,8 @@ export async function createFixture(input: FixtureInput): Promise<FixtureRecord>
     competition: input.competition,
     startsAt: input.startsAt,
     durationMinutes: input.durationMinutes,
-    premiumChannelId: input.premiumChannelId,
+    channels: input.channels,
+    premiumChannelId: null,
     visible: input.visible,
     createdAt: now,
     updatedAt: now,
@@ -387,14 +444,18 @@ export async function updateFixture(
   patch: Partial<FixtureInput>
 ): Promise<FixtureRecord | null> {
   const now = new Date();
+  // A row whose list was just edited owns that list: the single-column link it may still carry
+  // is cleared in the same write, or re-reading it would put a channel back on the card the
+  // admin just took off.
+  const stored = patch.channels ? { ...patch, premiumChannelId: null } : patch;
   const conn = await connectToDatabase();
   requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return null;
-    const updated = await FixtureModel.findByIdAndUpdate(id, patch, { new: true }).lean();
+    const updated = await FixtureModel.findByIdAndUpdate(id, stored, { new: true }).lean();
     return updated ? toFixtureRecord(updated, now) : null;
   }
-  const updated = premiumLocalStore.updateFixture(id, patch);
+  const updated = premiumLocalStore.updateFixture(id, stored);
   return updated ? toFixtureRecord(updated, now) : null;
 }
 

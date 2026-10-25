@@ -21,6 +21,8 @@
     "lib/channelIdentity.ts",
     "lib/db.ts",
     "lib/fixtureBoard.ts",
+    "lib/fixtureSources.ts",
+    "lib/inMemoryStore.ts",
     "lib/premiumFixtures.ts",
     "lib/premiumLocalStore.ts",
     "lib/premiumReadiness.ts",

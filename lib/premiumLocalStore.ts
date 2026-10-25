@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import type { FixtureChannelRef } from "./premiumFixtures";
 
 /**
  * The premium tier's own local store — its own file, its own arrays, and no
@@ -43,6 +44,13 @@ export interface LocalFixture {
   competition: string;
   startsAt: Date;
   durationMinutes: number;
+  /**
+   * Optional in the type for the same reason a stored premium row may have no
+   * `proxyChannelKey`: a file written before a card could name several channels has no such
+   * field on its fixtures, and reading one must not invent a reference it never recorded.
+   */
+  channels?: FixtureChannelRef[];
+  /** Read-only legacy link, kept so an older file still shows its match on the right channel. */
   premiumChannelId: string | null;
   visible: boolean;
   createdAt: Date;
@@ -61,6 +69,22 @@ declare global {
 
 const text = (value: unknown, fallback = ""): string =>
   typeof value === "string" ? value : fallback;
+
+/**
+ * A linked channel as this file can legitimately hold it: an id and the tier it came from,
+ * and nothing else. An entry that is not that shape is dropped rather than kept, because the
+ * alternative is a card that offers a channel no route can name — and a key that is not one of
+ * these two is exactly the kind of thing that must not be stored on a fixture.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const readRef = (value: any): FixtureChannelRef | null => {
+  const channelId = typeof value?.channelId === "string" ? value.channelId.trim() : "";
+  const sourceType =
+    typeof value?.sourceType === "string" ? value.sourceType.trim().toLowerCase() : "";
+  if (!channelId) return null;
+  if (sourceType !== "direct" && sourceType !== "secured") return null;
+  return { channelId, sourceType };
+};
 
 /**
  * Read the file once per process. Nothing is ever seeded: an absent or unreadable
@@ -108,6 +132,9 @@ function ensureLoaded() {
         competition: text(f?.competition),
         startsAt: f?.startsAt ? new Date(f.startsAt) : new Date(),
         durationMinutes: typeof f?.durationMinutes === "number" ? f.durationMinutes : 120,
+        channels: Array.isArray(f?.channels)
+          ? f.channels.map(readRef).filter((ref: FixtureChannelRef | null) => ref !== null)
+          : undefined,
         premiumChannelId: text(f?.premiumChannelId) || null,
         visible: f?.visible === true,
         createdAt: f?.createdAt ? new Date(f.createdAt) : new Date(),
@@ -172,6 +199,8 @@ export const premiumLocalStore = {
   /**
    * Deleting a channel clears the link on every fixture that pointed at it but
    * never deletes the match itself: only the admin decides a fixture is gone.
+   * Only a secured reference is cleared — a direct one names the catalogue, which this
+   * tier has no part in deleting.
    */
   deleteChannel: (id: string): boolean => {
     ensureLoaded();
@@ -181,6 +210,7 @@ export const premiumLocalStore = {
     );
     (global.__freetv_premium_fixtures || []).forEach((f) => {
       if (f.premiumChannelId === id) f.premiumChannelId = null;
+      if (f.channels) f.channels = f.channels.filter((ref) => !(ref.sourceType === "secured" && ref.channelId === id));
     });
     saveToDisk();
     return (global.__freetv_premium_channels?.length || 0) < before;

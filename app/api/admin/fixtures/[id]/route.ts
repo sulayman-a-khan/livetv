@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
-import { deleteFixture, premiumChannelExists, updateFixture } from "@/lib/premiumStore";
+import { deleteFixture, updateFixture } from "@/lib/premiumStore";
+import { describeUnknownFixtureRefs, unknownFixtureRefs } from "@/lib/fixtureSources";
 import { validateFixtureInput } from "@/lib/premiumFixtures";
 
 export const dynamic = "force-dynamic";
@@ -34,11 +35,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       );
     }
 
-    if (value.premiumChannelId && !(await premiumChannelExists(value.premiumChannelId))) {
-      return NextResponse.json(
-        { success: false, error: "Linked channel is not in the premium list" },
-        { status: 400 }
-      );
+    if (value.channels) {
+      const unknown = await unknownFixtureRefs(value.channels);
+      if (unknown.length > 0) {
+        return NextResponse.json(
+          { success: false, error: describeUnknownFixtureRefs(unknown) },
+          { status: 400 }
+        );
+      }
     }
 
     const fixture = await updateFixture(params.id, value);

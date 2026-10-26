@@ -29,6 +29,21 @@ export interface FixtureSourceOption {
 }
 
 /**
+ * A catalogue row the public board was asked to resolve.
+ *
+ * Five fields, all of them names: no stream url, no probe bookkeeping, no link count. A board read
+ * that asked for more than it projects would be a wider door than the card needs.
+ */
+export interface BoardDirectRow {
+  _id: string;
+  name: string;
+  category: string;
+  logoUrl: string;
+  /** Whether the catalogue is showing this channel publicly (`isPinned`). */
+  listed: boolean;
+}
+
+/**
  * The direct channels a card may offer.
  *
  * Pinned-only, because that is the rule the public catalogue itself obeys: an unpinned channel
@@ -64,29 +79,53 @@ export async function listDirectChannelOptions(): Promise<FixtureSourceOption[]>
 }
 
 /**
- * Which of these ids name a direct channel that is still on the public catalogue.
+ * Which of these ids name a direct channel at all, and which of those the public catalogue is
+ * currently showing.
  *
- * A deleted or unpinned channel is absent from the returned set rather than guessed about: a
- * card that points at one has nothing to offer, and Phase 3's job is to say so rather than to
- * drop the match. Nothing here needs the stream box, so a secured outage cannot affect it.
+ * One read for the whole batch, keyed by the ids a board actually names: a card with eight links
+ * costs the same query as a card with one, and a board of a hundred cards still costs one. That is
+ * deliberate — the stale-reference case is common enough (a channel deleted after a match was
+ * entered) that answering it per reference would be a request amplifier wearing a helpful name.
+ *
+ * Two answers come back, because they are two different facts and the card explains them
+ * differently: an id that is absent named no channel and is a stale link, and an id that is present
+ * with `listed: false` is a real channel the app has deliberately taken off screen — which the
+ * board may name, but must not link.
  */
-export async function existingDirectChannelIds(ids: string[]): Promise<Set<string>> {
-  if (ids.length === 0) return new Set();
+export async function listDirectChannelsByIds(ids: string[]): Promise<BoardDirectRow[]> {
+  if (ids.length === 0) return [];
   const conn = await connectToDatabase();
-  // Guarded like a write, for the same reason the premium check is: this answers a fixture
-  // write, and "channel is not in the catalogue" is the wrong sentence when the truth is that
-  // nothing could be read at all.
+  // Guarded like a write, for the same reason the premium check is: this answers both a fixture
+  // write and the public board, and "that channel does not exist" is the wrong sentence when the
+  // truth is that nothing could be read at all.
   requirePersistingStore(conn, "the channel catalogue could not be checked");
   if (conn) {
+    // Only spellable ids are asked for: a catalogue row is keyed by an ObjectId, so anything else
+    // already has its answer, and sending it would only throw a CastError.
     const objectIds = ids.filter((id) => mongoose.isValidObjectId(id));
-    if (objectIds.length === 0) return new Set();
-    const found = await Channel.find({ _id: { $in: objectIds }, isPinned: true })
-      .select("_id")
+    if (objectIds.length === 0) return [];
+    const found = await Channel.find({ _id: { $in: objectIds } })
+      .select("_id name logo category isPinned")
       .lean();
-    return new Set(found.map((row) => String(row._id)));
+    return found.map((row) => ({
+      _id: String(row._id),
+      name: row.name || "",
+      category: typeof row.category === "string" ? row.category : "Sports",
+      logoUrl: row.logo || "",
+      listed: row.isPinned === true,
+    }));
   }
-  const present = new Set(inMemoryDb.getChannels().filter((c) => c.isPinned).map((c) => c._id));
-  return new Set(ids.filter((id) => present.has(id)));
+  const wanted = new Set(ids);
+  return inMemoryDb
+    .getChannels()
+    .filter((channel) => wanted.has(channel._id))
+    .map((channel) => ({
+      _id: channel._id,
+      name: channel.name,
+      category: channel.category,
+      logoUrl: channel.logo,
+      listed: channel.isPinned === true,
+    }));
 }
 
 /**
@@ -105,6 +144,11 @@ export function describeUnknownFixtureRefs(
  * The references a write cannot be accepted for: each one asks its own tier, in one query for
  * that tier, and the answer is the reference rather than an index, so the caller can name the
  * channel that is missing.
+ *
+ * The direct half distinguishes the two ways a link can be wrong, because they want different
+ * repairs: an id with no row behind it is a reference to a channel that is gone, and a row that
+ * exists but is not pinned is a channel the app is deliberately not showing. Saying "not a channel"
+ * about the second would send the admin looking for a channel that is in front of them.
  */
 export async function unknownFixtureRefs(
   refs: FixtureChannelRef[]
@@ -112,15 +156,22 @@ export async function unknownFixtureRefs(
   if (refs.length === 0) return [];
   const direct = refs.filter((ref) => ref.sourceType === "direct").map((ref) => ref.channelId);
   const secured = refs.filter((ref) => ref.sourceType === "secured").map((ref) => ref.channelId);
-  const [knownDirect, knownSecured] = await Promise.all([
-    existingDirectChannelIds(direct),
+  const [directRows, knownSecured] = await Promise.all([
+    listDirectChannelsByIds(direct),
     existingPremiumChannelIds(secured),
   ]);
+  const listedDirect = new Set(directRows.filter((row) => row.listed).map((row) => row._id));
+  const existingDirect = new Set(directRows.map((row) => row._id));
 
   const unknown: { ref: FixtureChannelRef; reason: string }[] = [];
   for (const ref of refs) {
-    if (ref.sourceType === "direct" && !knownDirect.has(ref.channelId)) {
-      unknown.push({ ref, reason: "is not a channel on the direct catalogue" });
+    if (ref.sourceType === "direct" && !listedDirect.has(ref.channelId)) {
+      unknown.push({
+        ref,
+        reason: existingDirect.has(ref.channelId)
+          ? "is not on the public channel list"
+          : "is not a channel on the direct catalogue",
+      });
     } else if (ref.sourceType === "secured" && !knownSecured.has(ref.channelId)) {
       unknown.push({ ref, reason: "is not a channel in the secured list" });
     }

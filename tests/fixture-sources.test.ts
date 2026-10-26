@@ -135,12 +135,80 @@ test("the direct list an editor offers is the public catalogue, and only its nam
   assert.equal(printed.includes("m3u8"), false);
 });
 
-test("a direct channel is known only when it is on the public catalogue", async () => {
-  const known = await sources.existingDirectChannelIds([PINNED._id, UNPINNED._id, "6ab5c72de29c995275489e5e"]);
-  assert.deepEqual(known, new Set([PINNED._id]));
+test("a board's links are resolved in one read, and by both facts that matter", async () => {
+  const rows = await sources.listDirectChannelsByIds([
+    PINNED._id,
+    UNPINNED._id,
+    "6ab5c72de29c995275489e5e",
+    "not even an id",
+  ]);
+
+  // The pinned one and the unpinned one both come back, because they are both channels and the card
+  // has to say different things about them. The two ids with no row behind them come back as
+  // absence, which is the board's stale-link case — and an id this tier cannot hold is not sent to
+  // the database to find that out.
+  assert.deepEqual(
+    rows.map((row) => `${row._id}/${row.listed}`),
+    [`${PINNED._id}/true`, `${UNPINNED._id}/false`]
+  );
+  assert.equal(rows[0].name, "Pinned Sports One");
+
+  // Five fields, all of them names: a board read that pulled a stream url or a probe bookkeeping
+  // field would be a wider door than a match card has any use for.
+  assert.deepEqual(Object.keys(rows[0]).sort(), ["_id", "category", "listed", "logoUrl", "name"]);
+  const printed = JSON.stringify(rows);
+  assert.equal(printed.includes("origin.example"), false);
+  assert.equal(printed.includes("m3u8"), false);
+
+  // An empty list asks nothing at all, so a board of premium-only cards costs no catalogue read.
+  assert.deepEqual(await sources.listDirectChannelsByIds([]), []);
+});
+
+test("resolving a hundred links is one read, not a hundred", async () => {
+  const before = catalogueSnapshot();
+  const listChannels = inMemoryDb.getChannels.bind(inMemoryDb);
+  let reads = 0;
+  // Counted at the store, which is where a per-reference query would show up: the whole batch is
+  // resolved by one call however many ids it names, and the ids nobody has a row for are answered
+  // by absence rather than by another question.
+  (inMemoryDb as unknown as { getChannels: () => unknown[] }).getChannels = () => {
+    reads += 1;
+    return listChannels();
+  };
+
+  try {
+    const ids = [
+      PINNED._id,
+      UNPINNED._id,
+      "6ab5c72de29c995275489e5e",
+      ...Array.from({ length: 100 }, (_, i) => `6ab5c72de29c995275489e${String(i).padStart(2, "0")}`),
+    ];
+    const rows = await sources.listDirectChannelsByIds(ids);
+    assert.equal(reads, 1, "one batch read for the whole set");
+    assert.deepEqual(rows.map((row) => row._id), [PINNED._id, UNPINNED._id]);
+  } finally {
+    (inMemoryDb as unknown as { getChannels: () => unknown[] }).getChannels = listChannels;
+  }
+
+  assert.equal(catalogueSnapshot(), before);
+});
+
+test("a direct channel is offered only when the catalogue is showing it", async () => {
+  const mixed = await sources.unknownFixtureRefs([
+    { channelId: PINNED._id, sourceType: "direct" },
+    { channelId: UNPINNED._id, sourceType: "direct" },
+  ]);
+
+  // The unpinned row is refused on the way in, and the reason is the true one: the channel exists
+  // and is not being shown. Telling an admin it is "not a channel" would send them looking for a
+  // row that is on their own dashboard.
+  assert.deepEqual(
+    mixed.map(({ ref, reason }) => `${ref.channelId}/${reason}`),
+    [`${UNPINNED._id}/is not on the public channel list`]
+  );
 
   // An empty list asks nothing at all, so a card with no links costs no query.
-  assert.deepEqual(await sources.existingDirectChannelIds([]), new Set());
+  assert.deepEqual(await sources.unknownFixtureRefs([]), []);
 });
 
 test("a mixed list is checked against each tier it names", async () => {
@@ -169,12 +237,13 @@ test("a mixed list is checked against each tier it names", async () => {
 
   // Every mistake in one answer, and each one says which tier it was looked for in — an id that
   // exists in the catalogue is still an unknown *secured* channel, and the admin has to be told
-  // that rather than that the channel does not exist.
+  // that rather than that the channel does not exist. The unpinned direct row is refused too, but
+  // with the reason that fits it: a channel that is there and not shown.
   assert.deepEqual(
     unknown.map(({ ref, reason }) => `${ref.channelId}/${ref.sourceType}/${reason}`),
     [
       "pc_ghost/secured/is not a channel in the secured list",
-      `${UNPINNED._id}/direct/is not a channel on the direct catalogue`,
+      `${UNPINNED._id}/direct/is not on the public channel list`,
     ]
   );
   assert.equal(typeof sources.describeUnknownFixtureRefs(unknown), "string");
@@ -205,7 +274,11 @@ test("linking a match to a direct channel changes nothing about that channel", a
   });
   await store.deleteFixture(fixture._id);
   await sources.listDirectChannelOptions();
-  await sources.existingDirectChannelIds([PINNED._id, UNPINNED._id]);
+  await sources.listDirectChannelsByIds([PINNED._id, UNPINNED._id]);
+  await sources.unknownFixtureRefs([
+    { channelId: PINNED._id, sourceType: "direct" },
+    { channelId: UNPINNED._id, sourceType: "direct" },
+  ]);
 
   // Channels, links, pin state, priority, probe bookkeeping: not one field moved, through the
   // whole write-read-delete life of a card that named two of them.
@@ -217,7 +290,7 @@ test("a deployment with no database refuses to guess whether a direct channel ex
   process.env.VERCEL = "1";
 
   await assert.rejects(
-    () => sources.existingDirectChannelIds([PINNED._id]),
+    () => sources.listDirectChannelsByIds([PINNED._id]),
     (err: unknown) => {
       const e = err as Error & { status?: number };
       assert.equal(e.status, 503);

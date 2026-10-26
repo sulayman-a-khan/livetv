@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { projectFixtures } from "@/lib/fixtureBoard";
-import { listDirectChannelOptions } from "@/lib/fixtureSources";
-import { listFixtures, listPremiumChannels } from "@/lib/premiumStore";
+import { projectFixtures, referencedChannelIds } from "@/lib/fixtureBoard";
+import { listDirectChannelsByIds } from "@/lib/fixtureSources";
+import { listFixtures, listPremiumBoardChannels } from "@/lib/premiumStore";
 import { isPremiumReady, readPremiumReadiness } from "@/lib/premiumReadiness";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,10 @@ const READY_CACHE = "public, s-maxage=15";
  * Source URLs and upstream headers are not in this response, and there is no way to ask for them
  * through it: a choice is an id, a name, a category, a picture and this site's own address.
  *
+ * A link whose channel has been deleted is in it as a count, not an id. The board has no name for
+ * such a reference and will not print a raw one it cannot check, so the card says that one of its
+ * channels is gone and keeps everything it does know — the teams, the competition and the clock.
+ *
  * `securedReady` is the only thing it says about the stream box, and it is a boolean:
  * which box, at which address, with how many lanes, is not a visitor's business.
  */
@@ -37,31 +41,36 @@ export async function GET(_req: NextRequest) {
     ]);
     const securedReady = isPremiumReady(readiness);
 
-    // A card that names one tier never causes a read of the other. The direct half of the board
-    // is a query against a protected catalogue, so it happens only when a published match
-    // actually links a direct channel — which also means a board of premium-only cards costs
-    // exactly what it cost before a card could name two tiers.
-    const needsSecured = fixtures.some((fixture) =>
-      fixture.channels.some((ref) => ref.sourceType === "secured")
+    // Only the cards that can still appear ask anything of a channel list: a finished or
+    // unpublished match has no choice to resolve, so its links cost no read.
+    //
+    // The two reads that remain are batches, keyed by the distinct ids those cards name — one per
+    // tier per board read, whatever the number of cards or links, and neither list is scanned. A
+    // card whose link has gone stale therefore costs the same as a card whose link is fine, which
+    // is the point: staleness is common, and answering it per reference would be a request
+    // amplifier wearing a helpful name.
+    const resolvable = fixtures.filter(
+      (fixture) => fixture.visible && fixture.phase !== "finished"
     );
-    const needsDirect = fixtures.some((fixture) =>
-      fixture.channels.some((ref) => ref.sourceType === "direct")
-    );
+    const directIds = referencedChannelIds(resolvable, "direct");
+    const securedIds = referencedChannelIds(resolvable, "secured");
 
-    const [securedChannels, directOptions] = await Promise.all([
-      needsSecured ? listPremiumChannels() : Promise.resolve([]),
-      needsDirect ? listDirectChannelOptions() : Promise.resolve([]),
+    const [securedChannels, directChannels] = await Promise.all([
+      listPremiumBoardChannels(securedIds),
+      listDirectChannelsByIds(directIds),
     ]);
 
     const publicFixtures = projectFixtures(
       fixtures,
-      securedChannels,
-      directOptions.map((option) => ({
-        _id: option.channelId,
-        name: option.name,
-        category: option.category,
-        logoUrl: option.logoUrl,
+      securedChannels.map((channel) => ({
+        _id: channel._id,
+        name: channel.name,
+        category: channel.category,
+        logoUrl: channel.logoUrl,
+        active: channel.active,
+        proxyChannelKey: channel.proxyChannelKey,
       })),
+      directChannels,
       new Date(),
       securedReady
     );

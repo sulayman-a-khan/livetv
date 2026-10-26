@@ -1,9 +1,12 @@
 /**
- * Focused tests for the premium tier's entry rules (`lib/premiumFixtures.ts`).
+ * Focused tests for the premium tier's entry rules (`lib/premiumFixtures.ts`) and for what the
+ * public board does with them (`lib/fixtureBoard.ts`) — including the links a card holds that no
+ * longer name a channel.
  *
  * Run with `npm run test:premium-fixtures` — that compiles the pure rule modules
  * plus this file into `.tmp-tests/` and runs them on Node's own test runner.
- * Nothing here touches MongoDB, the network or a running server.
+ * Nothing here touches MongoDB, the network or a running server; the reads that do belong to the
+ * board are counted in `npm run test:fixture-sources`.
  */
 
 import assert from "node:assert/strict";
@@ -17,8 +20,10 @@ import {
   validatePremiumSourcePush,
 } from "../lib/premiumFixtures";
 import {
+  dedupeRefs,
   offersOf,
   projectFixtures,
+  referencedChannelIds,
   type BoardChannel,
   type BoardDirectChannel,
   type BoardFixture,
@@ -47,6 +52,21 @@ const DIRECT_ONE: BoardDirectChannel = {
   name: "Star Sports 1 HD",
   category: "Sports",
   logoUrl: "",
+  listed: true,
+};
+
+/**
+ * A direct channel that exists, is switched on and has a watch page — and that the catalogue is
+ * currently not showing. The board may name it, and must not link it, because a homepage card that
+ * advertised a channel the app deliberately keeps off screen would be overruling a choice somebody
+ * made on purpose.
+ */
+const DIRECT_UNLISTED: BoardDirectChannel = {
+  _id: "6ab5c72de29c995275489e5d",
+  name: "Star Sports 2 HD",
+  category: "Sports",
+  logoUrl: "",
+  listed: false,
 };
 
 const GOOD_CHANNEL = {
@@ -340,10 +360,18 @@ test("a card appears for a match the board can name a channel for", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
 
   assert.equal(READY_BOARD([base], [channel], now).length, 1);
-  // No linked channel, and a channel that is not in either list, mean the board has nobody to
-  // name on this card — so it does not advertise the match.
+  // No linked channel at all is the one case a card has no voice for: nothing to offer, nothing
+  // gone, no channel ever named — so it is not published as a match anybody can watch.
   assert.equal(READY_BOARD([{ ...base, channels: [] }], [channel], now).length, 0);
-  assert.equal(READY_BOARD([base], [], now).length, 0);
+
+  // A reference whose row is *not in the list at all* is a different fact, and the match survives
+  // it: the link is stale, not the fixture.
+  const staleOnly = READY_BOARD([base], [], now)[0];
+  assert.equal(staleOnly.id, base._id);
+  assert.equal(staleOnly.teamA, base.teamA);
+  assert.equal(staleOnly.choices.length, 0);
+  assert.equal(staleOnly.staleReferences, 1);
+  assert.equal(staleOnly.watchPath, null);
 
   // A channel the admin switched off is a different thing from an absent one: the match is still
   // scheduled, and the card says which channel is not carrying it rather than pretending the
@@ -477,6 +505,7 @@ test("the projection names the channels but carries no source or header", () => 
   );
 
   assert.equal(card.choices.length, 2);
+  assert.equal(card.staleReferences, 0);
   assert.equal(card.choices[0].name, "Example Sports HD");
   assert.equal(card.choices[0].logoUrl, "https://host.example/logo.png");
   assert.equal(card.choices[0].category, "Sports");
@@ -493,6 +522,7 @@ test("the projection names the channels but carries no source or header", () => 
     "id",
     "phase",
     "sport",
+    "staleReferences",
     "startsAt",
     "teamA",
     "teamALogo",
@@ -775,30 +805,328 @@ test("a card is a link exactly when it has one thing to offer", () => {
   }
 });
 
-test("a reference whose channel is gone names nothing and cannot take the card down with it", () => {
+test("a reference whose channel is gone keeps the card and everything else on it", () => {
   const now = new Date("2026-10-25T12:00:00.000Z");
   const halfStale = {
     ...GATED_FIXTURE,
     channels: [secured("pc_deleted"), direct(DIRECT_ONE._id)],
   };
 
-  // One dead link on a card that has a live one: the live choice is still offered, and the dead
-  // reference is not turned into a row named by an id. Saying which reference went stale, and
-  // giving the viewer a way to see that, is the unavailable-reference phase.
   const [card] = READY_BOARD([halfStale], [PUSHED_CHANNEL], now, [DIRECT_ONE]);
+  // The live choice is still offered, the match is still the match, and the dead link is stated as
+  // a count. One broken reference taking down a card that has a working channel on it would be the
+  // board overreacting — and taking it down *silently* would be the board lying by omission.
   assert.equal(card.choices.length, 1);
   assert.equal(card.choices[0].sourceType, "direct");
+  assert.equal(card.staleReferences, 1);
+  assert.equal(card.watchPath, `/watch/${DIRECT_ONE._id}`);
+  assert.equal(card.teamA, GATED_FIXTURE.teamA);
+  assert.equal(card.competition, GATED_FIXTURE.competition);
+  assert.equal(card.startsAt, GATED_FIXTURE.startsAt);
+
+  // The stale side of that card reaches the browser as a number and nothing else. The id it held is
+  // not in the payload: it is not a name a viewer could use, and printing it would put an internal
+  // key on a public page for no reason.
+  const printed = JSON.stringify(card);
+  assert.equal(printed.includes("pc_deleted"), false);
+});
+
+test("a stale link on either side of the mix costs the card the link, never the match", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const cases: { name: string; refs: BoardFixture["channels"]; channels: BoardChannel[]; direct: BoardDirectChannel[] }[] = [
+    {
+      name: "secured link dead, secured channel live",
+      refs: [secured("pc_deleted"), secured("pc_one")],
+      channels: [PUSHED_CHANNEL],
+      direct: [],
+    },
+    {
+      name: "direct link dead, direct channel live",
+      refs: [direct("6ab5c72de29c995275489e5e"), direct(DIRECT_ONE._id)],
+      channels: [],
+      direct: [DIRECT_ONE],
+    },
+    {
+      name: "one of each, one dead",
+      refs: [secured("pc_deleted"), direct(DIRECT_ONE._id)],
+      channels: [PUSHED_CHANNEL],
+      direct: [DIRECT_ONE],
+    },
+  ];
+
+  for (const testCase of cases) {
+    const [card] = READY_BOARD(
+      [{ ...GATED_FIXTURE, _id: "fx_case", channels: testCase.refs }],
+      testCase.channels,
+      now,
+      testCase.direct
+    );
+    assert.equal(card.staleReferences, 1, testCase.name);
+    assert.equal(card.choices.length, 1, testCase.name);
+    // Exactly one thing left to open, so the card is a link and not a dialog asking a question with
+    // one answer.
+    assert.equal(card.watchPath, card.choices[0].watchPath, testCase.name);
+    assert.notEqual(card.watchPath, null, testCase.name);
+  }
+});
+
+test("every link on a card can be dead and the match is still on the board", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = READY_BOARD(
+    [{ ...GATED_FIXTURE, channels: [secured("pc_deleted"), direct("6ab5c72de29c995275489e5e")] }],
+    [],
+    now,
+    []
+  );
+
+  // This is the case the earlier rule dropped the card for. The match is real, published and
+  // kickstarted; what is missing is its channels, and that is sayable — so it stays, as a poster
+  // with a count, and the board's own "nothing to watch" line.
+  assert.equal(card.choices.length, 0);
+  assert.equal(card.staleReferences, 2);
+  assert.equal(card.watchPath, null);
+  assert.equal(card.phase, "live");
+  assert.deepEqual(offersOf(card.choices), []);
+
+  // And it cannot push a real card off the board: three published matches, one of them all-dead,
+  // still fill the three slots.
+  const board = READY_BOARD(
+    [
+      { ...GATED_FIXTURE, _id: "fx_dead", channels: [secured("pc_deleted")] },
+      { ...GATED_FIXTURE, _id: "fx_live" },
+      { ...GATED_FIXTURE, _id: "fx_other", channels: [direct(DIRECT_ONE._id)] },
+    ],
+    [PUSHED_CHANNEL],
+    now,
+    [DIRECT_ONE]
+  );
+  assert.deepEqual(board.map((entry) => entry.id), ["fx_dead", "fx_live", "fx_other"]);
+});
+
+test("a direct channel the catalogue stopped showing is named, explained and not linked", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = READY_BOARD(
+    [{ ...GATED_FIXTURE, channels: [direct(DIRECT_UNLISTED._id), direct(DIRECT_ONE._id)] }],
+    [],
+    now,
+    [DIRECT_UNLISTED, DIRECT_ONE]
+  );
+
+  // A delisted channel is not a stale one: the row exists, so the card can and does name it — it
+  // just has no route to offer, because the app is deliberately not showing that channel.
+  assert.equal(card.staleReferences, 0);
+  assert.deepEqual(
+    card.choices.map((choice) => `${choice.name}:${choice.state}:${choice.watchPath}`),
+    [
+      `${DIRECT_UNLISTED.name}:delisted:null`,
+      `${DIRECT_ONE.name}:ready:/watch/${DIRECT_ONE._id}`,
+    ]
+  );
+  // One openable choice out of two rows: the tap goes to the one that works, and no dialog asks
+  // about a channel the catalogue has hidden.
   assert.equal(card.watchPath, `/watch/${DIRECT_ONE._id}`);
 
-  // Every reference dead, and there is no channel left for the board to put its name on.
-  assert.equal(
-    READY_BOARD(
-      [{ ...GATED_FIXTURE, channels: [secured("pc_deleted"), direct("6ab5c72de29c995275489e5c")] }],
-      [],
-      now,
-      []
-    ).length,
-    0
+  const [delistedOnly] = READY_BOARD(
+    [{ ...GATED_FIXTURE, channels: [direct(DIRECT_UNLISTED._id)] }],
+    [],
+    now,
+    [DIRECT_UNLISTED]
   );
+  assert.equal(delistedOnly.watchPath, null);
+  assert.equal(delistedOnly.staleReferences, 0);
+});
+
+test("mixed valid, stale and unavailable choices keep the admin's order and the fixture's facts", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const [card] = READY_BOARD(
+    [
+      {
+        ...GATED_FIXTURE,
+        _id: "fx_mixed_states",
+        channels: [
+          direct(DIRECT_ONE._id),
+          secured("pc_deleted"),
+          secured("pc_two"),
+          direct(DIRECT_UNLISTED._id),
+        ],
+      },
+    ],
+    [PUSHED_CHANNEL, { ...SECOND_PUSHED, active: false }],
+    now,
+    [DIRECT_ONE, DIRECT_UNLISTED]
+  );
+
+  // Order is the admin's, and a dead link in the middle of it does not shuffle what remains — it is
+  // simply not in the list of channels the board can name.
+  assert.deepEqual(
+    card.choices.map((choice) => `${choice.sourceType}:${choice.name}:${choice.state}`),
+    [
+      `direct:${DIRECT_ONE.name}:ready`,
+      `secured:${SECOND_PUSHED.name}:off-air`,
+      `direct:${DIRECT_UNLISTED.name}:delisted`,
+    ]
+  );
+  assert.equal(card.staleReferences, 1);
+  assert.equal(card.choices.length, 3);
+  assert.equal(card.id, "fx_mixed_states");
+  assert.equal(card.durationMinutes, GATED_FIXTURE.durationMinutes);
+  assert.equal(card.sport, GATED_FIXTURE.sport);
+});
+
+test("a reference that comes back is offered again on the next read, with nothing to repair", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const fixture = { ...GATED_FIXTURE, channels: [secured("pc_one"), direct(DIRECT_ONE._id)] };
+
+  // The premium row is gone this minute: one stale link, and the direct channel it shares the card
+  // with is untouched.
+  const gone = projectFixtures([fixture], [], [DIRECT_ONE], now, true)[0];
+  assert.equal(gone.staleReferences, 1);
+  assert.equal(gone.choices.length, 1);
+  assert.equal(gone.watchPath, `/watch/${DIRECT_ONE._id}`);
+
+  // The same stored row, unchanged, read again with the channel back: nothing was written about the
+  // staleness, so there is no repair step for anybody to run and no flag to clear first.
+  const back = projectFixtures([fixture], [PUSHED_CHANNEL], [DIRECT_ONE], now, true)[0];
+  assert.equal(back.staleReferences, 0);
+  assert.equal(back.choices.length, 2);
+  assert.equal(back.watchPath, null);
+
+  // The direct half behaves the same way, and for the same reason: a channel the catalogue stops
+  // showing is explained, and a channel it starts showing again is offered on the next read.
+  const delisted = projectFixtures(
+    [fixture],
+    [PUSHED_CHANNEL],
+    [{ ...DIRECT_ONE, listed: false }],
+    now,
+    true
+  )[0];
+  assert.equal(delisted.staleReferences, 0);
+  assert.equal(delisted.choices[1].state, "delisted");
+  assert.equal(delisted.watchPath, "/premium/pc_one");
+
+  const relisted = projectFixtures([fixture], [PUSHED_CHANNEL], [DIRECT_ONE], now, true)[0];
+  assert.equal(relisted.choices[1].state, "ready");
+  assert.equal(relisted.watchPath, null);
+});
+
+test("an outage does not change which links are stale, and does not fake one as fine", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const fixture = { ...GATED_FIXTURE, channels: [secured("pc_deleted"), direct(DIRECT_ONE._id)] };
+
+  const ready = projectFixtures([fixture], [PUSHED_CHANNEL], [DIRECT_ONE], now, true)[0];
+  const offline = projectFixtures([fixture], [PUSHED_CHANNEL], [DIRECT_ONE], now, false)[0];
+
+  // The box's answer reaches the secured half of the card and nothing else — including the count of
+  // links that name no channel, which is a fact about the fixture, not about the box.
+  assert.equal(ready.staleReferences, 1);
+  assert.equal(offline.staleReferences, 1);
+  assert.deepEqual(
+    offline.choices.map((choice) => `${choice.sourceType}:${choice.state}`),
+    ["direct:ready"]
+  );
+  assert.equal(offline.watchPath, `/watch/${DIRECT_ONE._id}`);
+});
+
+test("a duplicate link is one choice, not a dialog with the same channel twice", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const doubled = {
+    ...GATED_FIXTURE,
+    channels: [direct(DIRECT_ONE._id), direct(DIRECT_ONE._id), secured("pc_one")],
+  };
+
+  const [card] = READY_BOARD([doubled], [PUSHED_CHANNEL], now, [DIRECT_ONE]);
+  assert.equal(card.choices.length, 2);
+  assert.equal(card.staleReferences, 0);
+  // Two offers from three links: still a question worth asking. Had the duplicate counted, a card
+  // with one channel on it would have opened a dialog with one button in it.
+  assert.equal(card.watchPath, null);
+
+  const doubledAndStale = {
+    ...GATED_FIXTURE,
+    channels: [secured("pc_deleted"), secured("pc_deleted")],
+  };
+  const [poster] = READY_BOARD([doubledAndStale], [], now, []);
+  assert.equal(poster.staleReferences, 1);
+  assert.equal(poster.choices.length, 0);
+});
+
+test("an entry that is not a reference at all is read as no reference", () => {
+  // The write path refuses these, so they only arrive from a hand-edited row. What the board must
+  // not do is turn one into a choice, a name, or a stale count it cannot justify.
+  const junk = [
+    "pc_one",
+    { channelId: "" },
+    { channelId: "pc_two", sourceType: "premium" },
+    null,
+  ] as unknown as BoardFixture["channels"];
+
+  assert.deepEqual(dedupeRefs(junk), []);
+  assert.deepEqual(dedupeRefs([secured("pc_one"), secured("pc_one"), direct(DIRECT_ONE._id)]), [
+    secured("pc_one"),
+    direct(DIRECT_ONE._id),
+  ]);
+  // Trimmed on the way in, so a stored id with stray spaces is the same channel.
+  assert.deepEqual(dedupeRefs([{ channelId: " pc_one ", sourceType: "secured" }]), [
+    secured("pc_one"),
+  ]);
+
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  assert.equal(READY_BOARD([{ ...GATED_FIXTURE, channels: junk }], [PUSHED_CHANNEL], now).length, 0);
+  // A reference that is a shape but a nonsense id is the other case: it is a link, so it counts.
+  const [card] = READY_BOARD(
+    [{ ...GATED_FIXTURE, channels: [{ channelId: "pc one", sourceType: "secured" }] }],
+    [PUSHED_CHANNEL],
+    now
+  );
+  assert.equal(card.staleReferences, 1);
+  assert.equal(card.choices.length, 0);
+});
+
+test("the board asks each tier once, for the ids its cards actually name", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const make = (id: string, channels: BoardFixture["channels"]) => ({
+    ...GATED_FIXTURE,
+    _id: id,
+    channels,
+  });
+
+  // Four published cards, eleven links between them and five distinct ids: one channel shared by
+  // three cards, one listed twice on a fourth, one that has no row behind it, and two tiers that
+  // must never be asked about each other's ids.
+  const fixtures: BoardFixture[] = [
+    make("fx_1", [secured("pc_one"), direct(DIRECT_ONE._id)]),
+    make("fx_2", [secured("pc_one"), secured("pc_gone")]),
+    make("fx_3", [secured("pc_one"), direct(DIRECT_UNLISTED._id)]),
+    make("fx_4", [direct(DIRECT_ONE._id), direct(DIRECT_ONE._id), secured("pc_three")]),
+  ];
+
+  // The two tiers are asked about separately, by their own ids: a premium row id is never sent to
+  // the catalogue, and a catalogue id is never sent to the premium list. A dead id is in the batch
+  // like any other — the read answers it by absence, which is what costs nothing extra.
+  assert.deepEqual(referencedChannelIds(fixtures, "secured").sort(), [
+    "pc_gone",
+    "pc_one",
+    "pc_three",
+  ]);
+  assert.deepEqual(referencedChannelIds(fixtures, "direct").sort(), [
+    DIRECT_ONE._id,
+    DIRECT_UNLISTED._id,
+  ]);
+  // A tier that names nothing asks for nothing, which is what a card that only links a direct
+  // channel costs the premium list: no query at all.
+  assert.deepEqual(referencedChannelIds([{ ...fixtures[2], channels: [direct(DIRECT_ONE._id)] }], "secured"), []);
+  assert.deepEqual(referencedChannelIds([], "secured"), []);
+  assert.deepEqual(referencedChannelIds([], "direct"), []);
+
+  // A stale reference is answered by that same one batch read, not by a second pass looking for
+  // what is missing: the ids that came back are the ids that exist, and the rest need no asking.
+  const board = projectFixtures(
+    fixtures,
+    [PUSHED_CHANNEL, SECOND_PUSHED],
+    [DIRECT_ONE, DIRECT_UNLISTED],
+    now,
+    true
+  );
+  assert.equal(board.reduce((total, card) => total + card.staleReferences, 0), 1);
 });
 

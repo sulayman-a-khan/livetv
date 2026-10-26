@@ -52,14 +52,16 @@ function TeamMark({ name, logo }: { name: string; logo: string }) {
 /**
  * What a live match with nothing to open says.
  *
- * Every choice on such a card is a secured one — a direct channel is always offered, since it
- * plays from its own origin — so the board can name the reason the box or the row gave instead
- * of a bare "no channels". When the choices disagree about why, the shared answer is the honest
- * one.
+ * When every choice gives the same reason, that reason is the card's line: a premium outage, a
+ * source nobody pushed, a channel switched off, or a direct channel the catalogue has stopped
+ * showing. When they disagree — or when the card has no channel left to name at all, only links that
+ * have gone stale — the shared answer is the honest one, and the dialog is where the detail lives.
  */
 function noOfferText(choices: FixtureChoice[]): string {
   const states = new Set(choices.map((choice) => choice.state));
-  return states.size === 1 ? unavailableText(choices[0].state) : "এখন দেখার জন্য কোনো চ্যানেল নেই।";
+  return states.size === 1 && choices.length > 0
+    ? unavailableText(choices[0].state)
+    : "এখন দেখার জন্য কোনো চ্যানেল নেই।";
 }
 
 function FixtureCard({

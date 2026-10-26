@@ -9,7 +9,8 @@ import type { ChoiceState, FixtureChoice, PublicFixture } from "@/lib/fixtureBoa
  *
  * It does not play anything and it does not fetch anything: every row is either a link to a route
  * that already exists — `/watch/…` for a direct channel, `/premium/…` for a secured one — or the
- * channel named with the reason it cannot be opened right now. So the dialog cannot invent a second
+ * channel named with the reason it cannot be opened right now. A link whose channel has been deleted
+ * is not a row at all; it is the one line under them, counted. So the dialog cannot invent a second
  * delivery path, cannot reach the stream box, and cannot learn a source line even if it wanted to:
  * the payload it is handed has none.
  */
@@ -18,7 +19,21 @@ import type { ChoiceState, FixtureChoice, PublicFixture } from "@/lib/fixtureBoa
 export function unavailableText(state: ChoiceState): string {
   if (state === "box-offline") return "প্রিমিয়াম স্ট্রিম এখন চালু নেই।";
   if (state === "not-pushed") return "এই চ্যানেলের স্ট্রিম এখনও যোগ করা হয়নি।";
+  if (state === "delisted") return "চ্যানেলটি এখন তালিকায় নেই।";
   return "চ্যানেলটি এখন অফ-এয়ার।";
+}
+
+/**
+ * How many of the card's links name a channel that is no longer there.
+ *
+ * A count, because that is everything the board knows: there is no name for a reference whose
+ * channel has gone, and printing the id it held would be showing a number a viewer cannot use and
+ * an admin cannot read as a channel. The words say which of the two cases the card is in — a
+ * channel that exists and cannot be opened is named above this line, one that no longer exists is
+ * counted by it.
+ */
+export function staleText(count: number): string {
+  return count === 1 ? "একটি চ্যানেল এখন আর নেই।" : `${count}টি চ্যানেল এখন আর নেই।`;
 }
 
 /** Which tier a row comes from, in the same words the rest of the app uses for them. */
@@ -93,6 +108,31 @@ function ChoiceMark({
     />
   ) : (
     <span className="w-7 h-7 rounded-lg bg-white/10 border border-slate-700 shrink-0" />
+  );
+}
+
+/**
+ * The card's dead links, as one line.
+ *
+ * Reachable by keyboard for the same reason a disabled row is: the viewer is told the match has a
+ * channel missing rather than being shown a short list and left to wonder. It is deliberately not a
+ * row per link — a count has no name to put next to it, and an empty placeholder repeated twice
+ * would look like two channels the app simply will not talk about.
+ */
+function StaleRow({ count }: { count: number }) {
+  return (
+    <div
+      tabIndex={0}
+      aria-disabled="true"
+      className="flex items-center gap-2.5 rounded-xl border border-slate-800/60 p-2.5 opacity-60"
+    >
+      <span className="w-7 h-7 rounded-lg bg-white/10 border border-slate-700 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[10px] font-bold text-amber-300/90 truncate">
+          {staleText(count)}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -189,6 +229,7 @@ export default function FixtureChannelDialog({
           {fixture.choices.map((choice) => (
             <ChoiceRow key={`${choice.sourceType}:${choice.channelId}`} choice={choice} />
           ))}
+          {fixture.staleReferences > 0 ? <StaleRow count={fixture.staleReferences} /> : null}
         </div>
       </div>
     </div>

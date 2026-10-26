@@ -28,6 +28,13 @@
  *   9. a card that names channels from both tiers offers them as choices, each with the route its
  *      own tier already answers on — one offer taps straight through, two ask the viewer, and the
  *      box going away takes only the secured choice off the offer while the direct one stays.
+ *  10. every read resolves the links a card holds now and nothing it held before: a card left with
+ *      no channel to name comes off the board, a card linked again to a channel that exists is
+ *      offered again with the stale count back at zero, and a deleted channel's id appears nowhere
+ *      in what a viewer is sent. The stale-reference shape itself — a card that keeps a link to a
+ *      channel that is gone and survives it as a count — is measured by
+ *      tests/premium-fixtures.test.ts, because the local store clears a deleted channel's links on
+ *      the way out, which is a thing this run is not allowed to undo from outside the validator.
  *
  * It writes to no production database: the first thing it does after the server answers is read
  * `dbMode` from the premium admin route, and it aborts before a single write unless that says
@@ -1075,6 +1082,61 @@ async function main() {
     const boxAfterDelete = await getJson(`${stack.base}/admin/channels`, { authorization: `Bearer ${stack.adminToken}` });
     const providersAfterDelete = await getJson(`${stack.base}/admin/providers`, { authorization: `Bearer ${stack.adminToken}` });
     gate("and it took the box's channel and its credential with it", (boxAfterDelete.json.channels ?? []).every((c) => c.channelKey !== expectedKey) && (providersAfterDelete.json.providers ?? []).every((p) => p.providerId !== expectedKey), JSON.stringify({ channels: (boxAfterDelete.json.channels ?? []).map((c) => c.channelKey), providers: (providersAfterDelete.json.providers ?? []).map((p) => p.providerId) }));
+
+    /* ---------------- a card whose channel has been deleted ---------------- */
+
+    // The two stores answer the same admin action with different data, and this run can only
+    // measure the one it lives in: the local store clears a deleted channel's link from every card
+    // that named it, so the card ends up naming no channel at all — the one state that does take a
+    // match off the board. An Atlas row keeps the reference no delete removed, and its card
+    // survives as a count; that shape is measured by tests/premium-fixtures.test.ts and in the
+    // browser, because nothing in this run writes a fixture row behind the validator's back.
+    section("a card whose channel has been deleted");
+    const staleBoard = await getJson(`${site}/api/fixtures`, {});
+    gate(
+      "a card left naming no channel is off the board, and the deleted id appears nowhere",
+      staleBoard.res.status === 200 &&
+        !(staleBoard.json.fixtures ?? []).some((f) => f.id === fixtureId) &&
+        !staleBoard.text.includes(channelId) &&
+        leaksIn(staleBoard.text).length === 0,
+      JSON.stringify({
+        status: staleBoard.res.status,
+        ids: (staleBoard.json.fixtures ?? []).map((f) => f.id),
+        namesRow: staleBoard.text.includes(channelId),
+        leaks: leaksIn(staleBoard.text),
+      })
+    );
+
+    const storedAfterDelete = (
+      (await getJson(`${site}/api/admin/fixtures`, admin)).json.fixtures ?? []
+    ).find((row) => row._id === fixtureId) ?? {};
+    gate(
+      "the delete took the link, not the match: the fixture is still stored with its schedule",
+      storedAfterDelete._id === fixtureId &&
+        storedAfterDelete.teamA === "E2E United" &&
+        storedAfterDelete.competition === "Harness Cup" &&
+        (storedAfterDelete.channels ?? []).length === 0,
+      JSON.stringify({ teamA: storedAfterDelete.teamA, channels: storedAfterDelete.channels })
+    );
+
+    // And a card with nothing to name can be given a link again, on the same read: what the board
+    // counts comes from the references the card holds now, never from the ones it once held.
+    const relinked = await fetch(`${site}/api/admin/fixtures/${fixtureId}`, {
+      method: "PATCH",
+      headers: { ...admin, "content-type": "application/json" },
+      body: JSON.stringify({ channels: [{ channelId: directRef.channelId, sourceType: "direct" }] }),
+      cache: "no-store",
+    });
+    const relinkedBoard = await getJson(`${site}/api/fixtures`, {});
+    const relinkedCard = (relinkedBoard.json.fixtures ?? []).find((f) => f.id === fixtureId) ?? {};
+    gate(
+      "a card linked to a channel that exists is on the board again, counting nothing",
+      relinked.status === 200 &&
+        relinkedCard.staleReferences === 0 &&
+        (relinkedCard.choices ?? []).length === 1 &&
+        relinkedCard.watchPath === `/watch/${directRef.channelId}`,
+      JSON.stringify({ status: relinked.status, stale: relinkedCard.staleReferences, choices: relinkedCard.choices, watchPath: relinkedCard.watchPath })
+    );
     }
 
     /* ---------------- the tier never touched the Direct HLS catalogue ---------------- */

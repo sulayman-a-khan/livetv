@@ -50,6 +50,22 @@ export interface PremiumChannelRecord {
   updatedAt: string;
 }
 
+/**
+ * What the public match board is allowed to know about a premium channel: its name, its place,
+ * whether the admin switched it on, and whether it has a handle on the stream box.
+ *
+ * There is no `sourceUrl` and no `headers` here, so a card cannot be handed a source line even by
+ * spreading a row — the shape the projection reads simply does not have one.
+ */
+export interface PremiumBoardChannel {
+  _id: string;
+  name: string;
+  category: string;
+  logoUrl: string;
+  active: boolean;
+  proxyChannelKey: string;
+}
+
 export interface FixtureRecord {
   _id: string;
   sport: "football" | "cricket";
@@ -220,6 +236,59 @@ export async function listPremiumChannels(): Promise<PremiumChannelRecord[]> {
     return rows.map(toPremiumRecord).sort(bySortOrder);
   }
   return premiumLocalStore.listChannels().map(toPremiumRecord).sort(bySortOrder);
+}
+
+/**
+ * The six fields a public match card may say about a premium channel, for the ids it names.
+ *
+ * Narrower than `listPremiumChannels` on purpose, and for two reasons that are the same reason: the
+ * board needs the name, the switch and the handle to decide what a card may offer, and everything it
+ * does not need — the note, the timestamps, the legacy source line and its headers — is one more
+ * thing a projection could accidentally repeat. Asking by id also keeps the read proportional to
+ * what a board references rather than to how many channels the admin has ever created.
+ */
+export async function listPremiumBoardChannels(
+  ids: string[]
+): Promise<PremiumBoardChannel[]> {
+  if (ids.length === 0) return [];
+  const conn = await connectToDatabase();
+  if (conn) {
+    const objectIds = ids.filter((id) => mongoose.isValidObjectId(id));
+    if (objectIds.length === 0) return [];
+    const rows = await PremiumChannelModel.find({ _id: { $in: objectIds } })
+      .select("_id name category logoUrl active proxyChannelKey")
+      .lean();
+    return rows.map(toPremiumBoardChannel);
+  }
+  const wanted = new Set(ids);
+  return premiumLocalStore
+    .listChannels()
+    .filter((channel) => wanted.has(channel._id))
+    .map(toPremiumBoardChannel);
+}
+
+/**
+ * A read that came back empty because nothing could be read at all is not a board with no
+ * channels on it. Reads deliberately stay unguarded (a homepage must not turn into a 500 page
+ * because a lookup was slow), so a deployment whose database is unreachable shows no premium
+ * offer — which is the safe direction: a card never links a stream on optimism.
+ */
+function toPremiumBoardChannel(row: {
+  _id: unknown;
+  name?: string;
+  category?: string;
+  logoUrl?: string;
+  active?: boolean;
+  proxyChannelKey?: string;
+}): PremiumBoardChannel {
+  return {
+    _id: String(row._id),
+    name: row.name || "",
+    category: row.category || "Premium",
+    logoUrl: row.logoUrl || "",
+    active: row.active !== false,
+    proxyChannelKey: row.proxyChannelKey || "",
+  };
 }
 
 /**

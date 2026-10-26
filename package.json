@@ -24,6 +24,7 @@
     "test:fixture-sources": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/fixture-sources.test.js",
     "test:premium-readiness": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-readiness.test.js",
     "test:premium-store": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-store.test.js",
+    "test:proxy-control": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/proxy-control.test.js",
     "test:premium-box": "node scripts/premium-box-e2e.mjs",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",
     "check:packaging": "node scripts/verify-packaging-secrets.mjs",

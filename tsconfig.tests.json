@@ -17,6 +17,9 @@
   },
   "include": [
     "tests/**/*.ts",
+    "app/api/admin/proxy/session/route.ts",
+    "app/api/admin/proxy/status/route.ts",
+    "lib/adminAuth.ts",
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
     "lib/db.ts",
@@ -27,6 +30,7 @@
     "lib/premiumLocalStore.ts",
     "lib/premiumReadiness.ts",
     "lib/premiumStore.ts",
+    "lib/proxyControl.ts",
     "lib/streamHealth.ts",
     "lib/ssrfGuard.ts",
     "lib/safeFetch.ts"

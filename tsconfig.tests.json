@@ -22,8 +22,10 @@
     }
   },
   "include": [
+    "app/api/admin/proxy/inspect/route.ts",
     "app/api/admin/proxy/session/route.ts",
     "app/api/admin/proxy/status/route.ts",
+    "components/proxy-admin/proxyBanner.ts",
     "lib/adminAuth.ts",
     "lib/channelIdentity.ts",
     "lib/channelMaintenance.ts",

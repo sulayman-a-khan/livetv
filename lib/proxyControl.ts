@@ -3,15 +3,16 @@
  *
  * What this module is allowed to read, and why that is all it reads:
  *
- *   - The one upstream route it touches is `GET /healthz`. That route asks for no token,
- *     reads in-process state only, performs no upstream fetch, opens no provider session
- *     and cannot consume a provider's connection limit — so asking it cannot disturb a
- *     stream somebody is already watching.
- *   - It carries **no credential of any kind**. The box's `/admin/*` surface is guarded by
- *     a single bearer token that also authorises writes, and the proxy offers no
- *     read-only token to hand out, so this tier does not read `/admin/*` at all. A status
- *     page is not worth putting a vault-admin credential on the site for.
- *   - It projects the answer into a fixed shape. The box's body is never passed through, so
+ *   - The health route (`GET /healthz`) asks for no token, reads in-process state only,
+ *     performs no upstream fetch, opens no provider session and cannot consume a
+ *     provider's connection limit — so asking it cannot disturb a stream somebody is
+ *     already watching.
+ *   - The inspection routes (`GET /readonly/*`) are guarded by the box's own **read-only**
+ *     token, a credential that can look at the vault and change nothing: it is refused by
+ *     every write route on the box, and the box does not expose the vault's admin surface
+ *     to it at all. The token lives in this server's environment and never in a response,
+ *     a URL or a log line.
+ *   - It projects every answer into a fixed shape. The box's body is never passed through, so
  *     a field the box grows tomorrow — or an error string that names a host — cannot reach
  *     a browser by accident.
  *
@@ -112,6 +113,11 @@ export interface ProxyBoxSnapshot {
 export interface ProxyControlDeps {
   /** Defaults to `PROXY_BASE_URL`. Never taken from a request. */
   baseUrl?: string;
+  /**
+   * The box's read-only token. Defaults to `PROXY_READONLY_TOKEN`. Never taken from a
+   * request, and never leaves this server.
+   */
+  token?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
   timeoutMs?: number;
@@ -375,7 +381,6 @@ export function isProxyAdminSecretValid(presented: string | null | undefined): b
   if (!raw) return false;
   return safeEquals(raw, expected);
 }
-
 /**
  * What the server is missing, by name only. `PROXY_BASE_URL` unset means the box is not
  * configured here — which is a different problem from the box being down, and the panel
@@ -413,4 +418,496 @@ export async function proxyStatusResponse(
 
   const snapshot = await readProxyBoxSnapshot(deps);
   return { status: 200, body: { success: true, snapshot } };
+}
+
+/* ================================================================== *
+ * Inspection: the box's read-only surface, read through the same door
+ * ================================================================== */
+
+/**
+ * The four read-only routes the box publishes. Nothing else is asked for: the box's admin
+ * and app surfaces are never read by this tier.
+ */
+const INSPECT_PATHS = ["status", "providers", "channels", "accounts"] as const;
+
+/**
+ * How long the box has to answer an inspection read. The same bound as the health read:
+ * these routes read in-process state and never open a provider session.
+ */
+const INSPECT_TIMEOUT_MS = 5_000;
+
+/**
+ * The largest inspection answer that is read. A provider list and a channel list are the
+ * biggest bodies here; a cap keeps a misconfigured base URL from turning a panel into a
+ * memory sink.
+ */
+const MAX_INSPECT_BYTES = 256 * 1024;
+
+/**
+ * Why the inspection came back empty, in the terms an operator can act on. A dead tunnel,
+ * a refused token and a missing read-only surface are three different problems, so the panel
+ * must not merge them into one "unavailable".
+ */
+export type InspectRefusal =
+  /** The box did not answer at all. */
+  | "unreachable"
+  /** The box answered and refused the read-only token. */
+  | "unauthorized"
+  /** The box answered, but it has no read-only surface mounted. */
+  | "not_found"
+  /** This server has no read-only token or no address, so nothing was asked. */
+  | "not_configured"
+  /** The box answered with something this tier cannot use. */
+  | "error";
+
+export interface ProxyProviderView {
+  providerId: string;
+  label: string;
+  active: boolean;
+  kind: string | null;
+  /** The box's own masked host. The credential behind it never leaves the box. */
+  server: string;
+  usernameHint: string;
+  maxConnections: number;
+  ownHeaders: boolean;
+  channels: string[];
+  /** A code, never the box's own text: `undecryptable` or `unreadable`. */
+  problem: string | null;
+}
+
+export interface ProxyChannelView {
+  channelKey: string;
+  displayName: string;
+  category: string;
+  active: boolean;
+  providerId: string;
+  kind: string | null;
+  backupCount: number;
+  state: "serving" | "inactive" | "unusable" | null;
+  problem: string | null;
+}
+
+export interface ProxyAccountView {
+  providerId: string;
+  label: string;
+  channels: string[];
+  usernameHint: string;
+  server: string;
+  maxConnections: number;
+  inFlight: number;
+  queued: number;
+  runs: number;
+  failures: number;
+  maxInFlight: number;
+}
+
+export interface ProxyLaneView {
+  /** The provider the lane belongs to. Never the lane key: that is a credential hash. */
+  providerId: string;
+  holders: string[];
+  maxConnections: number;
+}
+
+export interface ProxyInspectSnapshot {
+  /** The box answered at all. Says nothing about whether it accepted the token. */
+  reachable: boolean;
+  /** The box's read-only surface accepted the token and answered with its data. */
+  authorized: boolean;
+  /** Why the inspection is empty, when it is. */
+  refusal: InspectRefusal | null;
+  checkedAt: number;
+  vault: {
+    driver: string | null;
+    ready: boolean;
+    lastRefreshAt: number | null;
+    lastRefreshMs: number | null;
+    providers: number;
+    stored: number;
+    resolvable: number;
+    unreadable: number;
+    /** Only the presence of a fault travels: the text can name a database host. */
+    hasError: boolean;
+  };
+  ownership: {
+    mode: "process-local" | "shared-filesystem" | null;
+    held: number;
+    refusals: number;
+  };
+  capacity: {
+    providerBusy: number;
+    maxConcurrentUpstream: number;
+    sourcesConfigured: number;
+    upstreamRuns: number;
+    last: {
+      channelKey: string | null;
+      code: string | null;
+      holders: number;
+      maxConnections: number;
+      at: number | null;
+    } | null;
+  };
+  providers: ProxyProviderView[];
+  channels: ProxyChannelView[];
+  accounts: ProxyAccountView[];
+  lanes: ProxyLaneView[];
+}
+
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/** Free text: trimmed, stripped of control characters, and length-capped. */
+function str(value: unknown, max = 120): string | null {
+  if (typeof value !== "string") return null;
+  return value.replace(CONTROL_CHARS, "").trim().slice(0, max);
+}
+
+/** A provider id or a channel key: the shape the box itself uses for one. */
+function id(value: unknown): string | null {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return /^[a-z0-9_-]{1,64}$/i.test(raw) ? raw : null;
+}
+
+/** A list of ids, capped, with anything that is not one dropped. */
+function idList(value: unknown, max = 200): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    const key = id(item);
+    if (key) out.push(key);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * A server address reduced to what an operator can recognise: the scheme and the host.
+ *
+ * The box already masks its own addresses, so this is the second pass rather than the only
+ * one — and the second pass is the one that does not depend on the box being the version
+ * that masks correctly. Userinfo, path and query go: an address is the one place on a
+ * provider row where a credential can hide.
+ */
+function safeServer(value: unknown): string {
+  const raw = str(value, 300);
+  if (!raw) return "";
+  const withoutUserinfo = raw.replace(/^((?:[a-z][a-z0-9+.-]*:)?\/\/)[^/@]*@/i, "$1");
+  const withoutQuery = withoutUserinfo.split(/[?#]/)[0] ?? "";
+  const scheme = withoutQuery.match(/^(?:[a-z][a-z0-9+.-]*:)?\/\//i)?.[0] ?? "";
+  const authority = (withoutQuery.slice(scheme.length).split("/")[0] ?? "").slice(0, 200);
+  return `${scheme}${authority}`.slice(0, 200);
+}
+
+/**
+ * A username reduced to its first two characters. The box sends it that way already; if it
+ * ever sent the whole name, this is what keeps the whole name off the page.
+ */
+function safeHint(value: unknown): string {
+  const raw = str(value, 32);
+  if (!raw) return "";
+  return raw.length > 2 ? `${raw.slice(0, 2)}***` : "***";
+}
+
+function kind(value: unknown): string | null {
+  return oneOf(value, ["xtream", "hls"] as const);
+}
+
+function providerProblem(value: unknown): string | null {
+  return oneOf(value, ["undecryptable", "unreadable"] as const);
+}
+
+function channelProblem(value: unknown): string | null {
+  return oneOf(value, ["provider_disabled", "provider_unusable", "row_unusable", "unusable"] as const);
+}
+
+function channelState(value: unknown): "serving" | "inactive" | "unusable" | null {
+  return oneOf(value, ["serving", "inactive", "unusable"] as const);
+}
+
+function emptyInspection(now: number): ProxyInspectSnapshot {
+  return {
+    reachable: false,
+    authorized: false,
+    refusal: "not_configured",
+    checkedAt: now,
+    vault: {
+      driver: null,
+      ready: false,
+      lastRefreshAt: null,
+      lastRefreshMs: null,
+      providers: 0,
+      stored: 0,
+      resolvable: 0,
+      unreadable: 0,
+      hasError: false,
+    },
+    ownership: { mode: null, held: 0, refusals: 0 },
+    capacity: {
+      providerBusy: 0,
+      maxConcurrentUpstream: 0,
+      sourcesConfigured: 0,
+      upstreamRuns: 0,
+      last: null,
+    },
+    providers: [],
+    channels: [],
+    accounts: [],
+    lanes: [],
+  };
+}
+
+function providerViews(body: unknown): ProxyProviderView[] {
+  const list = record(body).providers;
+  if (!Array.isArray(list)) return [];
+  const out: ProxyProviderView[] = [];
+  for (const item of list.slice(0, 200)) {
+    const row = record(item);
+    const providerId = id(row.providerId);
+    if (!providerId) continue;
+    out.push({
+      providerId,
+      label: str(row.label, 80) ?? "",
+      active: flag(row.active),
+      kind: kind(row.kind),
+      server: safeServer(row.server),
+      usernameHint: safeHint(row.usernameHint),
+      maxConnections: num(row.maxConnections),
+      ownHeaders: flag(row.ownHeaders),
+      channels: idList(row.channels),
+      problem: providerProblem(row.problem),
+    });
+  }
+  return out;
+}
+
+function channelViews(body: unknown): ProxyChannelView[] {
+  const list = record(body).channels;
+  if (!Array.isArray(list)) return [];
+  const out: ProxyChannelView[] = [];
+  for (const item of list.slice(0, 500)) {
+    const row = record(item);
+    const channelKey = id(row.channelKey);
+    if (!channelKey) continue;
+    out.push({
+      channelKey,
+      displayName: str(row.displayName, 120) ?? "",
+      category: str(row.category, 60) ?? "",
+      active: flag(row.active),
+      providerId: id(row.providerId) ?? "",
+      kind: kind(row.kind),
+      backupCount: num(row.backupCount),
+      state: channelState(row.state),
+      problem: channelProblem(row.problem),
+    });
+  }
+  return out;
+}
+
+function accountViews(body: unknown): ProxyAccountView[] {
+  const list = record(body).accounts;
+  if (!Array.isArray(list)) return [];
+  const out: ProxyAccountView[] = [];
+  for (const item of list.slice(0, 200)) {
+    const row = record(item);
+    const providerId = id(row.providerId);
+    if (!providerId) continue;
+    out.push({
+      providerId,
+      label: str(row.label, 80) ?? "",
+      channels: idList(row.channels),
+      usernameHint: safeHint(row.usernameHint),
+      server: safeServer(row.server),
+      maxConnections: num(row.maxConnections),
+      inFlight: num(row.inFlight),
+      queued: num(row.queued),
+      runs: num(row.runs),
+      failures: num(row.failures),
+      maxInFlight: num(row.maxInFlight),
+    });
+  }
+  return out;
+}
+
+function laneViews(body: unknown): ProxyLaneView[] {
+  const list = record(body).lanes;
+  if (!Array.isArray(list)) return [];
+  const out: ProxyLaneView[] = [];
+  for (const item of list.slice(0, 200)) {
+    const row = record(item);
+    const providerId = id(row.providerId);
+    if (!providerId) continue;
+    out.push({
+      providerId,
+      holders: idList(row.holders),
+      maxConnections: num(row.maxConnections),
+    });
+  }
+  return out;
+}
+
+/**
+ * Read the box's read-only surface.
+ *
+ * Never throws: a box that is down, a box that refuses the token and a box with no
+ * read-only surface are three readings, not three exceptions. Each answer is projected
+ * field by field, so nothing the box says beyond the allow-list can reach a browser — and
+ * the fields that could carry a credential (a lane key, a stream id, a raw vault error)
+ * are not in the allow-list in the first place.
+ */
+export async function readProxyInspection(
+  deps: ProxyControlDeps = {}
+): Promise<ProxyInspectSnapshot> {
+  const clock = deps.now ?? Date.now;
+  const baseUrl = (deps.baseUrl ?? process.env.PROXY_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const token = (deps.token ?? process.env.PROXY_READONLY_TOKEN ?? "").trim();
+  if (!baseUrl || !token) {
+    // Nothing is asked: a server with no read-only token has no reason to talk to the box,
+    // and a server with no address has nowhere to talk to.
+    return emptyInspection(clock());
+  }
+
+  const send = deps.fetchImpl ?? fetch;
+  const answers = await Promise.all(
+    INSPECT_PATHS.map(async (path) => {
+      try {
+        const res = await send(`${baseUrl}/readonly/${path}`, {
+          method: "GET",
+          // The read-only token, in the header the box expects. It never appears in a URL,
+          // a query string or an answer.
+          headers: { authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(deps.timeoutMs ?? INSPECT_TIMEOUT_MS),
+          cache: "no-store",
+        });
+
+        const declared = Number(res.headers?.get?.("content-length") || "");
+        if (Number.isFinite(declared) && declared > MAX_INSPECT_BYTES) {
+          return { path, status: res.status, body: null as unknown };
+        }
+        const raw = await res.text();
+        let body: unknown = null;
+        try {
+          body = raw.length > MAX_INSPECT_BYTES ? null : JSON.parse(raw);
+        } catch {
+          body = null;
+        }
+        return { path, status: res.status, body };
+      } catch {
+        // Timeout, refused connection, DNS failure — all the same thing to an operator.
+        return { path, status: 0, body: null as unknown };
+      }
+    })
+  );
+
+  const statuses = answers.map((answer) => answer.status);
+  const refusal: InspectRefusal | null = statuses.every((status) => status === 200)
+    ? null
+    : statuses.some((status) => status === 401 || status === 403)
+      ? // A refusal is definite evidence about the credential, so it outranks a timeout on
+        // another route: the operator is told the key is wrong, not that the box is down.
+        "unauthorized"
+      : statuses.some((status) => status === 0)
+        ? "unreachable"
+        : statuses.some((status) => status === 404)
+          ? "not_found"
+          : "error";
+
+  const now = clock();
+  const byPath = new Map<string, (typeof answers)[number]>(
+    answers.map((answer) => [answer.path, answer])
+  );
+  const bodyOf = (path: string): unknown => {
+    const answer = byPath.get(path);
+    return answer && answer.status === 200 ? answer.body : null;
+  };
+
+  const statusBody = record(bodyOf("status"));
+  const vault = record(statusBody.vault);
+  const ownership = record(statusBody.ownership);
+  const capacity = record(statusBody.capacity);
+  const last = record(capacity.lastProviderBusy);
+
+  const snapshot: ProxyInspectSnapshot = {
+    // The box answered even when it refused: reachability is a fact about the transport,
+    // not about the credential.
+    reachable: refusal !== "unreachable",
+    authorized: refusal === null,
+    refusal,
+    checkedAt: now,
+    vault: {
+      driver: oneOf(vault.driver, ["memory", "mongo", "none"] as const),
+      ready: flag(vault.ready),
+      lastRefreshAt:
+        typeof vault.lastRefreshAt === "number" && Number.isFinite(vault.lastRefreshAt)
+          ? vault.lastRefreshAt
+          : null,
+      lastRefreshMs:
+        typeof vault.lastRefreshMs === "number" && Number.isFinite(vault.lastRefreshMs)
+          ? vault.lastRefreshMs
+          : null,
+      providers: num(vault.providers),
+      stored: num(vault.stored),
+      resolvable: num(vault.resolvable),
+      unreadable: num(vault.unreadable),
+      hasError: flag(vault.hasError),
+    },
+    ownership: {
+      mode: oneOf(ownership.mode, ["process-local", "shared-filesystem"] as const),
+      held: num(ownership.held),
+      refusals: num(ownership.refusals),
+    },
+    capacity: {
+      providerBusy: num(capacity.providerBusy),
+      maxConcurrentUpstream: num(capacity.maxConcurrentUpstream),
+      sourcesConfigured: num(capacity.sourcesConfigured),
+      upstreamRuns: num(capacity.upstreamRuns),
+      last:
+        Object.keys(last).length > 0
+          ? {
+              channelKey: handle(last.channelKey),
+              code: code(last.code),
+              holders: num(last.holders),
+              maxConnections: num(last.maxConnections),
+              at: typeof last.at === "number" && Number.isFinite(last.at) ? last.at : null,
+            }
+          : null,
+    },
+    providers: providerViews(bodyOf("providers")),
+    channels: channelViews(bodyOf("channels")),
+    accounts: accountViews(bodyOf("accounts")),
+    lanes: laneViews(bodyOf("accounts")),
+  };
+
+  return snapshot;
+}
+
+/**
+ * What the inspection is missing, by name only. The read-only token is a different secret
+ * from the box's admin token, so a deployment can have a working health panel and no
+ * inspection at all — and the panel has to be able to say which of the two it is.
+ */
+export function proxyInspectionConfigProblem(): string | null {
+  const missing: string[] = [];
+  if (!(process.env.PROXY_BASE_URL || "").trim()) missing.push("PROXY_BASE_URL");
+  if (!(process.env.PROXY_READONLY_TOKEN || "").trim()) missing.push("PROXY_READONLY_TOKEN");
+  return missing.length ? missing.join(", ") : null;
+}
+
+/**
+ * The whole of the inspection endpoint: the auth decision, and only then the question.
+ *
+ * The order matters and is the point of this function: an unauthorized call is answered
+ * without the box ever being asked, so the panel cannot be used to make the site talk to
+ * the box on behalf of somebody who does not have the admin secret.
+ */
+export async function proxyInspectResponse(
+  presentedSecret: string | null | undefined,
+  deps: ProxyControlDeps = {}
+): Promise<ProxyControlResponse> {
+  if (!isProxyAdminSecretValid(presentedSecret)) {
+    return {
+      status: 401,
+      body: { success: false, error: "Unauthorized: Invalid Admin Secret Key" },
+    };
+  }
+
+  const inspection = await readProxyInspection(deps);
+  return { status: 200, body: { success: true, inspection } };
 }

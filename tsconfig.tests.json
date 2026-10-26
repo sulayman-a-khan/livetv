@@ -17,6 +17,7 @@
   },
   "include": [
     "tests/**/*.ts",
+    "app/api/admin/proxy/inspect/route.ts",
     "app/api/admin/proxy/session/route.ts",
     "app/api/admin/proxy/status/route.ts",
     "lib/adminAuth.ts",

@@ -17,6 +17,7 @@ import {
   Tv,
 } from "lucide-react";
 import type { ProxyBoxSnapshot, ProxyInspectSnapshot } from "@/lib/proxyControl";
+import { proxyStateBanner } from "./proxyBanner";
 
 interface ProxyAdminDashboardProps {
   secretKey: string;
@@ -257,32 +258,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         body: "বাক্স থেকে কোনো উত্তর আসেনি। বাক্স চালু আছে কি না এবং টানেল ঠিক আছে কি না আলাদাভাবে দেখুন।",
       };
     }
-    switch (state) {
-      case "usable":
-        return {
-          tone: "green",
-          title: "স্ট্রিম বক্স চালু আছে এবং ভল্ট প্রস্তুত।",
-          body: "বাক্স উত্তর দিয়েছে, ভল্ট পড়া যাচ্ছে এবং দেওয়া ফলে চ্যানেল খোলা আছে।",
-        };
-      case "degraded":
-        return {
-          tone: "amber",
-          title: "স্ট্রিম বক্স চালু আছে, কিন্তু ভল্ট প্রস্তুত নয়।",
-          body: "বাক্স নিজেকে সুস্থ বলছে, তবে ভল্ট এখনো প্রস্তুত নয় বা ভল্টে সমস্যা দেখা যাচ্ছে। এই অবস্থায় চ্যানেল খুলবে না। বিস্তারিত বাক্সের নিজস্ব লগে আছে।",
-        };
-      case "unusable":
-        return {
-          tone: "red",
-          title: "স্ট্রিম বক্স উত্তর দিচ্ছে, কিন্তু নিজেকে সুস্থ বলছে না।",
-          body: "বাক্স জীবিত আছে, কিন্তু নিজের স্বাস্থ্যের খবরে সমস্যা জানিয়েছে।",
-        };
-      default:
-        return {
-          tone: "slate",
-          title: "স্ট্রিম বক্সের অবস্থা এখনো জানা নেই।",
-          body: "এখনো কোনো উত্তর পাওয়া যায়নি।",
-        };
-    }
+    return proxyStateBanner(state);
   })();
 
   const toneClass = {

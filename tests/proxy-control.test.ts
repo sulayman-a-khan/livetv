@@ -1180,3 +1180,28 @@ test("an unreachable upstream produces a safe inspection reading, not an error p
   assert.ok(!said.includes("127.0.0.1"), "the box's address reached the browser");
   assert.ok(!/at\s+\w+\s+\(/.test(said), "a stack trace reached the browser");
 });
+
+test("every state the panel can be in has its own banner", () => {
+  const { proxyStateBanner } = require("../components/proxy-admin/proxyBanner");
+
+  const states = ["usable", "degraded", "unusable", "unreachable"] as const;
+  const titles = new Map<string, string>();
+  for (const state of states) {
+    const banner = proxyStateBanner(state);
+    assert.ok(banner.title.length > 0, `${state} has no title`);
+    assert.ok(banner.body.length > 0, `${state} has no body`);
+    assert.ok(!titles.has(banner.title), `${state} shares its banner with ${titles.get(banner.title)}`);
+    titles.set(banner.title, state);
+  }
+
+  // A box that cannot be reached is the failure an operator has to act on first, so it
+  // must never be the neutral "not known yet" line.
+  const down = proxyStateBanner("unreachable");
+  assert.equal(down.tone, "red");
+  assert.notEqual(down.title, proxyStateBanner(null).title);
+
+  // The reading really does produce that state, so the banner is not decoration.
+  const snapshot = snapshotFromHealth({ status: 0, body: null }, Date.now());
+  assert.equal(snapshot.state, "unreachable");
+  assert.equal(snapshot.reachable, false);
+});

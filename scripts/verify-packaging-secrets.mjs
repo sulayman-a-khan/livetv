@@ -86,6 +86,19 @@ export function findingsFor(config, where) {
     return findings;
   }
 
+  // `extraResources` and `extraFiles` copy files into the package outside the "files"
+  // list, so they are a way around a clean "files" list and need their own look.
+  for (const key of ["extraResources", "extraFiles"]) {
+    const entries = config[key];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      const from = typeof entry === "string" ? entry : entry && typeof entry === "object" ? entry.from : null;
+      if (typeof from !== "string") continue;
+      const hit = DANGEROUS.find(([regex]) => regex.test(from));
+      if (hit) findings.push(`${where}: "${key}" copies ${from} — ${hit[1]}`);
+    }
+  }
+
   const exclusions = patterns.filter((p) => typeof p === "string" && p.startsWith("!"));
   const excludesEnv = exclusions.some((p) => /\.env/.test(p));
 
@@ -342,6 +355,33 @@ function selfTest() {
       ["no files list at all", write("e", { appId: "x", win: { target: "portable" } }), true],
       ["the corrected rule", write("f", { appId: "x", files: ["main.js", "public/**/*", "!**/.env", "!data/**"] }), false],
       ["not a packaging config", write("g", { scripts: { build: "next build" } }), false],
+      [
+        "a clean files list with a credential copied in beside it",
+        write("h", {
+          appId: "x",
+          files: ["main.js", "!**/.env"],
+          extraResources: [{ from: ".env", to: ".env" }],
+        }),
+        true,
+      ],
+      [
+        "a clean files list with a whole data directory copied in beside it",
+        write("i", {
+          appId: "x",
+          files: ["main.js"],
+          extraFiles: ["data/events.json"],
+        }),
+        true,
+      ],
+      [
+        "a clean files list with an ordinary resource copied in beside it",
+        write("j", {
+          appId: "x",
+          files: ["main.js"],
+          extraResources: [{ from: "build/icon.png", to: "icon.png" }],
+        }),
+        false,
+      ],
     ];
     let ok = true;
     for (const [label, entry, expectFinding] of cases) {

@@ -16,8 +16,9 @@ const STORAGE_KEY = "freetv_admin_secret";
  * HLS route or the premium tier's route, so the panel can be opened, used and signed out of
  * without the other admin surfaces being loaded, asked anything, or changed.
  *
- * The panel is read-only. It reports what the stream box says about itself and changes
- * nothing: no provider is created, no credential is edited, no channel is pushed.
+ * The panel reads the box and can ask this server to perform a named action on it. It holds
+ * no proxy credential: the browser carries the site admin secret and nothing else, and the
+ * box's write token stays on the server.
  */
 export default function ProxyAdminPage() {
   const [passcode, setPasscode] = useState("");

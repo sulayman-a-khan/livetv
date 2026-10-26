@@ -22,6 +22,7 @@
     "test:ssrf-guard": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/ssrf-guard.test.js .tmp-tests/tests/safe-fetch.test.js",
     "test:premium-fixtures": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/premium-fixtures.test.js",
     "test:proxy-control": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/proxy-control.test.js",
+    "test:proxy-actions": "tsc -p tsconfig.tests.json --noCheck && node --test .tmp-tests/tests/proxy-actions.test.js",
     "test:premium-box": "node scripts/premium-box-e2e.mjs",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",
     "snapshot:production": "node scripts/snapshot-production-catalogue.mjs",

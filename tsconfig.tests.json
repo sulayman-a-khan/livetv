@@ -22,15 +22,18 @@
     }
   },
   "include": [
+    "app/api/admin/proxy/action/route.ts",
     "app/api/admin/proxy/inspect/route.ts",
     "app/api/admin/proxy/session/route.ts",
     "app/api/admin/proxy/status/route.ts",
+    "components/proxy-admin/proxyActionLabels.ts",
     "components/proxy-admin/proxyBanner.ts",
     "lib/adminAuth.ts",
     "lib/channelIdentity.ts",
     "lib/channelMaintenance.ts",
     "lib/fixtureBoard.ts",
     "lib/premiumFixtures.ts",
+    "lib/proxyActions.ts",
     "lib/proxyControl.ts",
     "lib/safeFetch.ts",
     "lib/ssrfGuard.ts",

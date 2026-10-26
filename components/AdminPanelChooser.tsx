@@ -107,8 +107,9 @@ export default function AdminPanelChooser({ secretKey }: AdminPanelChooserProps)
             </div>
             <h2 className="text-sm font-bold text-white mt-3">24/7 Proxy Control Panel</h2>
             <p className="text-[11px] text-slate-400 mt-1">
-              The stream box&apos;s own health, ownership mode and counters. Read-only: it reports
-              what the box says about itself and changes nothing.
+              The stream box&apos;s own health, ownership mode and counters, and the four actions
+              that change a row: refresh the vault, take a provider or a channel out of
+              service, and probe a source.
             </p>
             <span className="flex items-center gap-1 text-[11px] font-bold text-cyan-300 mt-3">
               Open proxy panel

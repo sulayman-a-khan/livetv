@@ -12,9 +12,8 @@
  * Runs with plain `node`, reads nothing but configuration files, and reports the *pattern* that
  * breaks the rule — never a value, and never a secret it happened to pass.
  *
- *   npm run check:packaging                     # the repository this file lives in
+ *   npm run check:packaging                     # this repository and every sibling of the suite
  *   npm run check:packaging -- --at=DIR         # one directory tree
- *   npm run check:packaging -- --suite          # every sibling project of the suite
  *   npm run check:packaging -- --self-test      # assert the check itself still bites
  */
 
@@ -193,6 +192,136 @@ function discoverConfigs(root, maxDepth = 3) {
 function scan(dir) {
   return discoverConfigs(dir);
 }
+
+/**
+ * What a *built* package must not contain. The rule above judges the builder's intent;
+ * this judges what the builder actually produced, because a package that carries a `.env`
+ * is a credential in transit no matter what the config says today.
+ */
+const FORBIDDEN_FILE = [
+  [/\.env(\..*)?$/i, "an env file, which is where credentials live"],
+  [/\.(key|pem|p12|pfx|crt|der)$/i, "a certificate or private key"],
+  [/^(store|snapshot)\.json$/i, "a store file, which can carry recorded rows"],
+  [/(credential|secret|token|password)/i, "a file named for a credential"],
+];
+
+/**
+ * The app tree of a built package. electron-builder writes `resources/app` inside its
+ * unpacked output, and the single-file portable EXE is packed from that same tree, so
+ * whatever is here is what the EXE carries.
+ */
+function isArtifactAppDir(dir) {
+  return path.basename(dir) === "app" && path.basename(path.dirname(dir)) === "resources";
+}
+
+function artifactAppDirs(root) {
+  const found = [];
+  const skip = new Set(["node_modules", ".git", ".next", ".tmp-tests", "coverage", ".vercel"]);
+  const walk = (dir, depth) => {
+    if (depth > 6) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (isArtifactAppDir(full)) {
+        found.push(full);
+        continue;
+      }
+      if (skip.has(entry.name)) continue;
+      walk(full, depth + 1);
+    }
+  };
+  walk(root, 0);
+  return found;
+}
+
+/**
+ * The forbidden files inside one built package. Paths and sizes only — a credential is
+ * never read, opened or printed by this check.
+ */
+function findingsInArtifact(appDir) {
+  const findings = [];
+  const walk = (dir, depth) => {
+    if (depth > 4) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const at = path.relative(appDir, full);
+      if (entry.isDirectory()) {
+        if (entry.name === "data") {
+          let count = 0;
+          try {
+            count = fs.readdirSync(full).length;
+          } catch {
+            count = 0;
+          }
+          // An empty directory carries nothing. A directory with rows in it does.
+          if (count > 0) {
+            findings.push({ at, why: "the runtime data directory, which holds recorded rows", size: count });
+          }
+          continue;
+        }
+        if (entry.name !== "node_modules") walk(full, depth + 1);
+        continue;
+      }
+      const hit = FORBIDDEN_FILE.find(([regex]) => regex.test(entry.name));
+      if (!hit) continue;
+      let size = 0;
+      try {
+        size = fs.statSync(full).size;
+      } catch {
+        size = 0;
+      }
+      findings.push({ at, why: hit[1], size });
+    }
+  };
+  walk(appDir, 0);
+  return findings;
+}
+
+/**
+ * The packaging config that governs a built package: the nearest `package.json` above it
+ * that carries a build block. Used to say whether a package predates the current rule.
+ */
+function governingConfig(appDir) {
+  let dir = path.dirname(appDir);
+  for (let depth = 0; depth < 6; depth += 1) {
+    const file = path.join(dir, "package.json");
+    if (fs.existsSync(file)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        if (isPackagingConfig(parsed?.build)) return file;
+      } catch {
+        return null;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * A path a reader can act on: relative to the suite when the package is in it, absolute
+ * otherwise. A path that climbs out of the project tells nobody which file it means.
+ */
+function displayPath(target) {
+  const suite = path.resolve(ROOT, "..");
+  const relative = path.relative(suite, target);
+  if (!relative.startsWith("..") && !path.isAbsolute(relative)) return path.join(path.basename(suite), relative);
+  return target;
+}
 /**
  * Asserts the check still catches each shape of the mistake, against throwaway configs in a temp
  * directory — so a future edit to `findingsFor` cannot pass by going blind.
@@ -220,7 +349,42 @@ function selfTest() {
       const passed = expectFinding ? found.length > 0 : found.length === 0;
       ok = check(`self-test: ${label}`, passed, passed ? "" : `expected ${expectFinding ? "a finding" : "clean"}, got ${JSON.stringify(found)}`) && ok;
     }
-    return ok;
+
+    // The artifact rules are checked the same way, against a throwaway package tree.
+    const appDir = path.join(dir, "resources", "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(path.join(appDir, "main.js"), "0");
+    let okArtifacts = true;
+    const clean = findingsInArtifact(appDir);
+    okArtifacts =
+      check("self-test: a package with nothing but its code is clean", clean.length === 0, clean.length ? JSON.stringify(clean) : "") &&
+      okArtifacts;
+
+    fs.writeFileSync(path.join(appDir, ".env"), "SECRET=never-printed\n");
+    const withEnv = findingsInArtifact(appDir);
+    okArtifacts =
+      check("self-test: a package carrying an env file is caught", withEnv.some((f) => f.at === ".env"), JSON.stringify(withEnv)) &&
+      okArtifacts;
+
+    fs.mkdirSync(path.join(appDir, "data"), { recursive: true });
+    fs.writeFileSync(path.join(appDir, "data", "events.json"), "{}");
+    const withData = findingsInArtifact(appDir);
+    okArtifacts =
+      check("self-test: a package carrying the runtime data directory is caught", withData.some((f) => f.at === "data"), JSON.stringify(withData)) &&
+      okArtifacts;
+
+    fs.writeFileSync(path.join(appDir, "signing.pem"), "-----BEGIN KEY-----\n");
+    const withKey = findingsInArtifact(appDir);
+    okArtifacts =
+      check("self-test: a package carrying a private key is caught", withKey.some((f) => f.at === "signing.pem"), JSON.stringify(withKey)) &&
+      okArtifacts;
+
+    // The report must name the file and never its contents.
+    okArtifacts =
+      check("self-test: the artifact report never carries a value", !JSON.stringify(withEnv).includes("never-printed")) &&
+      okArtifacts;
+
+    return ok && okArtifacts;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -233,26 +397,29 @@ if (arg("self-test")) {
   console.log(`\n${ok ? "the packaging check still bites" : "the packaging check is blind"}`);
   process.exitCode = ok ? 0 : 1;
 } else {
-  const suite = arg("suite");
   const named = arg("at");
   let roots;
+  let suiteWide = false;
   if (named) {
     roots = [path.resolve(String(named))];
-  } else if (suite) {
+  } else {
+    // The default covers the whole suite, because the one packaging config in it lives in
+    // a sibling project. A check that only looked at this repository inspected nothing at
+    // all and still passed, which is how a rule quietly stops being enforced.
     const parent = path.resolve(ROOT, "..");
     try {
       roots = fs
         .readdirSync(parent, { withFileTypes: true })
         .filter((entry) => entry.isDirectory() && entry.name !== "node_modules")
         .map((entry) => path.join(parent, entry.name));
+      if (!roots.includes(ROOT)) roots.push(ROOT);
+      suiteWide = true;
     } catch {
       // A checkout on its own (a CI box, a deploy) has no siblings to name. Say so rather than
       // pretending the wider suite was checked.
       console.log("  note: no suite parent to walk, so only this repository was checked");
       roots = [ROOT];
     }
-  } else {
-    roots = [ROOT];
   }
 
   const configs = roots.flatMap(scan);
@@ -269,6 +436,55 @@ if (arg("self-test")) {
         : `${findings.length} packaging rule violation(s)`,
     findings.length === 0
   );
+
+  // A rule that the builder obeys is worth nothing if the package already on disk carries
+  // the secret. The built tree is judged too, and a package that holds one fails here.
+  const artifacts = roots.flatMap((root) => artifactAppDirs(root));
+  let artifactFindings = 0;
+  for (const appDir of artifacts) {
+    const found = findingsInArtifact(appDir);
+    if (!found.length) continue;
+    artifactFindings += found.length;
+    const config = governingConfig(appDir);
+    let age = "";
+    if (config) {
+      try {
+        const built = fs.statSync(appDir).mtimeMs;
+        const rule = fs.statSync(config).mtimeMs;
+        age =
+          built < rule
+            ? "this package was built before the current packaging rule, so it is a leftover that still carries the secret"
+            : "this package was built after the current packaging rule, so the rule was not obeyed";
+      } catch {
+        /* the ages are a note, not a verdict */
+      }
+    }
+    console.log(`  ${displayPath(appDir)} — ${found.length} forbidden entr(ies) in a built package`);
+    for (const item of found) {
+      const size = item.at.endsWith("data") ? `${item.size} entr(ies)` : `${item.size} byte(s)`;
+      console.log(`    ${item.at} — ${item.why} (${size})`);
+    }
+    if (age) console.log(`    ${age}`);
+  }
+  check(
+    artifacts.length === 0
+      ? "no built package to inspect here, so nothing is claimed about a build"
+      : artifactFindings === 0
+        ? "no built package carries a credential"
+        : `${artifactFindings} forbidden entr(ies) in ${artifacts.length} built package(s)`,
+    artifactFindings === 0
+  );
+
+  // A check that found no packaging config at all has not checked anything. Say so as a
+  // failure rather than as a quiet pass.
+  if (suiteWide) {
+    check(
+      "the suite's packaging config was found and inspected",
+      configs.length > 0,
+      configs.length === 0 ? "no packaging config was reachable from the suite root" : ""
+    );
+  }
+
   console.log(`\n${results.filter((row) => row.pass).length} passed, ${results.filter((row) => !row.pass).length} failed`);
   process.exitCode = results.every((row) => row.pass) ? 0 : 1;
 }

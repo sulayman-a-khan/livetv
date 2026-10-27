@@ -226,9 +226,13 @@ test("a box that stops answering is cut off by the probe's own timeout instead o
     const signal = (init as { signal?: AbortSignal }).signal;
     assert.ok(signal, "the readiness probe must carry a deadline");
     return new Promise<Response>((_resolve, reject) => {
-      signal?.addEventListener("abort", () =>
-        reject(new Error("This operation was aborted — the box never answered"))
-      );
+      // An open request holds the event loop alive the way a real socket does; the
+      // deadline's own timer is unref'd, so without this the promise never settles.
+      const open = setTimeout(() => {}, 60_000);
+      signal?.addEventListener("abort", () => {
+        clearTimeout(open);
+        reject(new Error("This operation was aborted — the box never answered"));
+      });
     });
   }) as unknown as typeof fetch;
 

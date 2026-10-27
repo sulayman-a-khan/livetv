@@ -23,6 +23,11 @@ const ALLOWED = [
   "https://www.youtube.com/watch?v=5FW9ZVMR_7M",
   "http://172.15.0.1/stream.m3u8", // just below the 172.16/12 private band
   "http://172.32.0.1/stream.m3u8", // just above the 172.16/12 private band
+  "http://100.63.0.1/stream.m3u8", // just below the 100.64/10 carrier-grade NAT band
+  "http://100.128.0.1/stream.m3u8", // just above the 100.64/10 carrier-grade NAT band
+  "http://198.17.0.1/stream.m3u8", // just below the 198.18/15 benchmarking band
+  "http://198.20.0.1/stream.m3u8", // just above the 198.18/15 benchmarking band
+  "http://223.255.255.255/stream.m3u8", // just below the multicast band
   "https://sub.domain.co.uk/a/b?c=d#e",
 ];
 
@@ -40,18 +45,40 @@ const REJECTED = [
   "http://192.168.1.1/router",
   "http://172.16.0.1/x",
   "http://172.31.255.255/x",
+  // carrier-grade NAT
+  "http://100.64.0.1/x",
+  "http://100.127.255.254/x",
+  "http://100.100.100.200/latest/meta-data/",
   // "this" network
   "http://0.0.0.0/x",
+  // never routable: protocol assignments, documentation, benchmarking,
+  // multicast and reserved
+  "http://192.0.0.1/x",
+  "http://192.0.2.1/x",
+  "http://198.18.0.1/x",
+  "http://198.51.100.1/x",
+  "http://203.0.113.1/x",
+  "http://224.0.0.1/x",
+  "http://239.255.255.255/x",
+  "http://240.0.0.1/x",
+  "http://255.255.255.255/x",
   // IPv6 loopback / unspecified / unique-local / link-local
   "http://[::1]/x",
   "http://[::]/x",
   "http://[fc00::1]/x",
   "http://[fd12:3456::1]/x",
   "http://[fe80::1]/x",
+  // IPv6 multicast, documentation and NAT64
+  "http://[ff02::1]/x",
+  "http://[2001:db8::1]/x",
+  "http://[64:ff9b::1]/x",
+  "http://[64:ff9b:1::1]/x",
   // IPv4-mapped IPv6 — Node normalises the dotted form to hex; both must block
   "http://[::ffff:127.0.0.1]/x",
   "http://[::ffff:7f00:1]/x",
   "http://[::ffff:169.254.169.254]/x",
+  // IPv4-compatible IPv6
+  "http://[::127.0.0.1]/x",
   // disallowed schemes
   "file:///etc/passwd",
   "gopher://internal/x",
@@ -83,7 +110,10 @@ test("isPrivateOrInternalHost classifies host literals", () => {
   const internal = [
     "localhost", "a.localhost", "127.0.0.1", "10.1.2.3", "192.168.0.1",
     "172.16.0.1", "172.31.0.1", "169.254.169.254", "0.0.0.0",
+    "100.64.0.1", "100.127.255.254", "192.0.0.1", "198.18.0.1",
+    "224.0.0.1", "240.0.0.1", "255.255.255.255",
     "[::1]", "::1", "[::]", "::", "[fc00::1]", "[fe80::1]",
+    "[ff02::1]", "[2001:db8::1]", "[64:ff9b::1]",
     "[::ffff:7f00:1]", "[::ffff:127.0.0.1]",
   ];
   for (const h of internal) {
@@ -91,6 +121,8 @@ test("isPrivateOrInternalHost classifies host literals", () => {
   }
   const publicHosts = [
     "example.com", "210.4.72.204", "172.15.0.1", "172.32.0.1",
+    "100.63.0.1", "100.128.0.1", "198.17.0.1", "198.20.0.1",
+    "223.255.255.255", "2606:2800:220:1::1",
     "8.8.8.8", "gpcdn.net", "1.1.1.1",
   ];
   for (const h of publicHosts) {

@@ -63,6 +63,9 @@ const PUBLIC_RESOLVER = resolverFor({
   "edge.example.net": ["93.184.216.35"],
   "rebind.example.com": ["169.254.169.254"],
   "loop.example.com": ["127.0.0.1"],
+  "cgnat.example.com": ["100.64.0.1"],
+  "lan.example.com": ["10.1.2.3"],
+  "multicast.example.com": ["224.0.0.1"],
 });
 
 test("a public URL is fetched once, unchanged", async () => {
@@ -208,6 +211,20 @@ test("a name that resolves into the server's own network is refused", async () =
   assert.ok((verdict.reason || "").length > 0);
 });
 
+test("a name that resolves to a private or carrier-grade NAT address is refused", async () => {
+  for (const host of ["lan.example.com", "cgnat.example.com"]) {
+    const verdict = await checkHostResolvesPublic(host, PUBLIC_RESOLVER);
+    assert.equal(verdict.ok, false, `expected refusal for ${host}`);
+    assert.ok((verdict.reason || "").length > 0);
+  }
+});
+
+test("a name that resolves to a multicast address is refused", async () => {
+  const verdict = await checkHostResolvesPublic("multicast.example.com", PUBLIC_RESOLVER);
+  assert.equal(verdict.ok, false);
+  assert.ok((verdict.reason || "").length > 0);
+});
+
 test("a redirect target is resolved against the URL that produced it", () => {
   const verdict = checkRedirectTarget("https://cdn.example.com/a/b.m3u8", "../c.m3u8");
   assert.equal(verdict.ok, true);
@@ -227,13 +244,21 @@ test("isPrivateOrInternalAddress classifies addresses, not names", () => {
   const internal = [
     "127.0.0.1", "10.1.2.3", "192.168.0.1", "172.16.0.1", "172.31.0.1",
     "169.254.169.254", "0.0.0.0", "::1", "::", "fc00::1", "fd12:3456::1",
-    "fe80::1", "::ffff:7f00:1", "::ffff:127.0.0.1", "::ffff:169.254.169.254",
+    "fe80::1", "ff02::1", "2001:db8::1", "64:ff9b::1",
+    "100.64.0.1", "100.127.255.254", "192.0.0.1", "192.0.2.1",
+    "198.18.0.1", "198.51.100.1", "203.0.113.1", "224.0.0.1",
+    "240.0.0.1", "255.255.255.255",
+    "::ffff:7f00:1", "::ffff:127.0.0.1", "::ffff:169.254.169.254",
+    "::127.0.0.1",
   ];
   for (const address of internal) {
     assert.equal(isPrivateOrInternalAddress(address), true, `expected internal: ${address}`);
   }
 
-  const publicAddresses = ["93.184.216.34", "8.8.8.8", "1.1.1.1", "172.15.0.1", "2606:2800:220:1::1"];
+  const publicAddresses = [
+    "93.184.216.34", "8.8.8.8", "1.1.1.1", "172.15.0.1", "2606:2800:220:1::1",
+    "100.63.0.1", "100.128.0.1", "198.17.0.1", "198.20.0.1", "223.255.255.255",
+  ];
   for (const address of publicAddresses) {
     assert.equal(isPrivateOrInternalAddress(address), false, `expected public: ${address}`);
   }

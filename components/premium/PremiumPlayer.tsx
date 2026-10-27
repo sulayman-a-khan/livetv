@@ -2,6 +2,7 @@
 
 import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
+import { premiumPlayFailureText } from "@/lib/premiumPlayFailure";
 
 /**
  * The premium tier's own player, deliberately its own file.
@@ -41,11 +42,27 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
     let recovering = false;
 
     const sign = async (): Promise<SignedUrl> => {
-      const res = await fetch(`/api/premium/${encodeURIComponent(channelId)}/play`, { cache: "no-store" });
-      const data = await res.json().catch(() => null);
-      const error = typeof data?.error === "string" ? data.error : "the stream box did not answer";
-      if (!res.ok || data?.success !== true || typeof data.entryUrl !== "string") throw new Error(error);
-      return { url: data.entryUrl, expiresAt: Number(data.expiresAt) || 0 };
+      let data: { success?: unknown; code?: unknown; entryUrl?: unknown; expiresAt?: unknown } | null =
+        null;
+      try {
+        const res = await fetch(`/api/premium/${encodeURIComponent(channelId)}/play`, {
+          cache: "no-store",
+        });
+        data = await res.json().catch(() => null);
+        if (res.ok && data?.success === true && typeof data.entryUrl === "string") {
+          return { url: data.entryUrl, expiresAt: Number(data.expiresAt) || 0 };
+        }
+      } catch {
+        // The request never reached this server. That is the network rather than the channel,
+        // and it carries no code — so it reads as the generic line instead of blaming the box.
+        throw new Error(premiumPlayFailureText(null));
+      }
+      // What the viewer reads is the Bengali line for the code the server sent. The server's own
+      // English sentence stays in the response body for the log; putting it on this screen would
+      // answer a Bengali question in the wrong language.
+      throw new Error(
+        premiumPlayFailureText(typeof data?.code === "string" ? data.code : null)
+      );
     };
 
     const scheduleRefresh = (expiresAt: number) => {
@@ -116,7 +133,9 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
             hls.recoverMediaError();
             return;
           }
-          block(data.details || "স্ট্রিম বন্ধ হয়ে গেছে");
+          // hls.js's own detail is an English phrase for a log, not for this screen.
+          console.warn("[premium] hls error", data.type, data.details);
+          block("স্ট্রিম বন্ধ হয়ে গেছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
         });
         return;
       }
@@ -136,7 +155,15 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
         },
         { once: true }
       );
-      video.addEventListener("error", () => block(video.error?.message || "স্ট্রিম বক্স সাড়া দেয়নি"), { once: true });
+      video.addEventListener(
+        "error",
+        () => {
+          // The browser's MediaError message is English and names a code, not a reason.
+          console.warn("[premium] media error", video.error?.code);
+          block("স্ট্রিম চালু করা যায়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
+        },
+        { once: true }
+      );
     };
 
     void sign()

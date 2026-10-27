@@ -93,11 +93,14 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!removed) {
       return NextResponse.json({ success: false, error: "Premium channel not found" }, { status: 404 });
     }
+    // The matches stay; the links to this channel do not. Saying so is the difference between an
+    // admin who knows the board was left alone and one who has to go and check every card.
+    const kept = "The matches that named it were left in place, with their link to it cleared.";
     return NextResponse.json({
       success: true,
       message: row?.proxyChannelKey
-        ? `Premium channel deleted, and its source was taken off the box. Fixtures were left in place.`
-        : "Premium channel deleted. Fixtures were left in place.",
+        ? `Premium channel deleted, and its source was taken off the box. ${kept}`
+        : `Premium channel deleted. ${kept}`,
     });
   } catch (error: any) {
     return fail(error, "Failed to delete premium channel");

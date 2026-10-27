@@ -418,15 +418,50 @@ export async function updatePremiumChannel(
   return updated ? toPremiumRecord(updated) : null;
 }
 
+/**
+ * Take a deleted channel off every card that named it.
+ *
+ * The match itself survives — only the admin decides a match is gone — but the link does not: a
+ * reference to a channel that no longer exists is a dead end for the public board and for the
+ * editor, and it is the one dangling id this tier is able to repair on its own. A channel that
+ * comes back under its own id is on the card again with no repair step in between.
+ *
+ * A direct reference is never touched: the catalogue is not this tier's to edit.
+ *
+ * One board, one write per card that named the channel. Cards are few and a delete is an admin
+ * action, so a single list is cheaper than a query per card.
+ */
+async function clearFixtureLinks(channelId: string): Promise<void> {
+  const fixtures = await listFixtures();
+  for (const fixture of fixtures) {
+    const kept = fixture.channels.filter(
+      (ref) => !(ref.sourceType === "secured" && ref.channelId === channelId)
+    );
+    if (kept.length === fixture.channels.length) continue;
+    await updateFixture(fixture._id, { channels: kept });
+  }
+}
+
+/**
+ * Remove a channel and every link to it.
+ *
+ * The row goes first, then the links that named it, so a card is never left pointing at a
+ * channel this store has already forgotten.
+ */
 export async function deletePremiumChannel(id: string): Promise<boolean> {
   const conn = await connectToDatabase();
   requirePersistingStore(conn, "nothing was deleted");
+  let removed: boolean;
   if (conn) {
     if (!mongoose.isValidObjectId(id)) return false;
     const result = await PremiumChannelModel.deleteOne({ _id: id });
-    return result.deletedCount > 0;
+    removed = result.deletedCount > 0;
+  } else {
+    removed = premiumLocalStore.deleteChannel(id);
   }
-  return premiumLocalStore.deleteChannel(id);
+  if (!removed) return false;
+  await clearFixtureLinks(id);
+  return true;
 }
 
 /** Soonest kickoff first, so the board reads like the schedule it is. */
@@ -466,6 +501,24 @@ export async function listFixtures(): Promise<FixtureRecord[]> {
     return rows.map((row) => toFixtureRecord(row, now)).sort(byKickoff);
   }
   return premiumLocalStore.listFixtures().map((row) => toFixtureRecord(row, now)).sort(byKickoff);
+}
+
+/**
+ * One card by id, projected. Returns null when no card carries that id.
+ *
+ * A read, and unguarded like the other reads: a card that cannot be found is a card that is not
+ * there, which is a fact the editor can act on.
+ */
+export async function getFixture(id: string): Promise<FixtureRecord | null> {
+  const now = new Date();
+  const conn = await connectToDatabase();
+  if (conn) {
+    if (!mongoose.isValidObjectId(id)) return null;
+    const row = await FixtureModel.findById(id).lean();
+    return row ? toFixtureRecord(row, now) : null;
+  }
+  const local = premiumLocalStore.getFixture(id);
+  return local ? toFixtureRecord(local, now) : null;
 }
 
 export async function createFixture(input: FixtureInput): Promise<FixtureRecord> {

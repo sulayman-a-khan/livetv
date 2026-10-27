@@ -197,10 +197,11 @@ export const premiumLocalStore = {
   },
 
   /**
-   * Deleting a channel clears the link on every fixture that pointed at it but
-   * never deletes the match itself: only the admin decides a fixture is gone.
-   * Only a secured reference is cleared — a direct one names the catalogue, which this
-   * tier has no part in deleting.
+   * Remove a channel row.
+   *
+   * The links to it are cleared by the tier's own delete path (`clearFixtureLinks` in
+   * `lib/premiumStore.ts`) rather than here, so that MongoDB and this file behave the same
+   * way: one rule, one implementation, whichever store is underneath.
    */
   deleteChannel: (id: string): boolean => {
     ensureLoaded();
@@ -208,10 +209,6 @@ export const premiumLocalStore = {
     global.__freetv_premium_channels = (global.__freetv_premium_channels || []).filter(
       (c) => c._id !== id
     );
-    (global.__freetv_premium_fixtures || []).forEach((f) => {
-      if (f.premiumChannelId === id) f.premiumChannelId = null;
-      if (f.channels) f.channels = f.channels.filter((ref) => !(ref.sourceType === "secured" && ref.channelId === id));
-    });
     saveToDisk();
     return (global.__freetv_premium_channels?.length || 0) < before;
   },

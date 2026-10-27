@@ -227,6 +227,10 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
 
   return (
     <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-5">
+      {/* The section's own name, so the cards below read as the 24/7 sports section rather than
+          as another panel of channels. It appears only when the board has cards to show: an
+          empty board is not a section, it is the promo banner that the caller passed in. */}
+      <h2 className="text-sm font-black text-white tracking-tight mb-2.5">24/7 Sports</h2>
       <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {fixtures.map((fixture, index) => (
           <FixtureCard

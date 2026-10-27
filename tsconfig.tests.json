@@ -1,8 +1,8 @@
 {
-  "//": "Compiles the pure ranking rules plus tests/ into .tmp-tests so Node's own test runner can execute them. Type checking is the project's own `npx tsc --noEmit`.",
+  "//": "Compiles the pure ranking rules plus tests/ into .tmp-tests so Node's own test runner can execute them. The compiler options mirror the app's own tsconfig.json, so this compile is a real type check and not only an emit: a type error in a test file fails it.",
   "compilerOptions": {
     "target": "ES2020",
-    "lib": ["esnext"],
+    "lib": ["dom", "dom.iterable", "esnext"],
     "module": "commonjs",
     "moduleResolution": "node",
     "rootDir": ".",
@@ -10,6 +10,7 @@
     "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "strict": true,
     "noEmit": false,
     "paths": {
       "@/*": ["./*"]
@@ -17,9 +18,11 @@
   },
   "include": [
     "tests/**/*.ts",
+    "app/api/admin/fixtures/[id]/route.ts",
     "app/api/admin/proxy/inspect/route.ts",
     "app/api/admin/proxy/session/route.ts",
     "app/api/admin/proxy/status/route.ts",
+    "app/api/premium/[id]/play/route.ts",
     "components/proxy-admin/proxyBanner.ts",
     "lib/adminAuth.ts",
     "lib/channelMaintenance.ts",
@@ -30,6 +33,7 @@
     "lib/inMemoryStore.ts",
     "lib/premiumFixtures.ts",
     "lib/premiumLocalStore.ts",
+    "lib/premiumPlayFailure.ts",
     "lib/premiumReadiness.ts",
     "lib/premiumStore.ts",
     "lib/proxyControl.ts",

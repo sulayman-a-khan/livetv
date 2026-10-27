@@ -129,14 +129,20 @@ export async function listDirectChannelsByIds(ids: string[]): Promise<BoardDirec
 }
 
 /**
+ * One reference and the reason it does not name a channel.
+ */
+export interface FixtureRefFinding {
+  ref: FixtureChannelRef;
+  reason: string;
+}
+
+/**
  * One sentence per refused reference, in the order they arrived.
  *
  * Shared because both fixture writes answer the same way, and an admin who sent two bad links
  * should read both mistakes in one message rather than one per round-trip.
  */
-export function describeUnknownFixtureRefs(
-  unknown: { ref: FixtureChannelRef; reason: string }[]
-): string {
+export function describeUnknownFixtureRefs(unknown: FixtureRefFinding[]): string {
   return unknown.map(({ ref, reason }) => `Linked channel ${ref.channelId} ${reason}.`).join(" ");
 }
 
@@ -149,11 +155,31 @@ export function describeUnknownFixtureRefs(
  * repairs: an id with no row behind it is a reference to a channel that is gone, and a row that
  * exists but is not pinned is a channel the app is deliberately not showing. Saying "not a channel"
  * about the second would send the admin looking for a channel that is in front of them.
+ *
+ * Every reference that does not resolve is refused here: this is the write that is adding them.
  */
-export async function unknownFixtureRefs(
-  refs: FixtureChannelRef[]
-): Promise<{ ref: FixtureChannelRef; reason: string }[]> {
-  if (refs.length === 0) return [];
+export async function unknownFixtureRefs(refs: FixtureChannelRef[]): Promise<FixtureRefFinding[]> {
+  return (await checkFixtureRefs(refs)).refused;
+}
+
+/**
+ * What a write found when it checked the references it was given.
+ *
+ * Two lists, because there are two different questions. A reference the admin is adding now has
+ * to name a channel, or it is refused. A reference the card already carried and that no longer
+ * names one — a channel deleted since, or a direct channel the catalogue has stopped showing —
+ * is a stale link, and it is kept rather than refused: refusing it would lock the admin out of
+ * the card they are trying to fix, and dropping it would destroy the one thing that lets a link
+ * repair itself, which is that a channel that comes back is on the card again with no repair
+ * step in between.
+ *
+ * The two lists come out of the same two queries, so the split costs no extra read.
+ */
+export async function checkFixtureRefs(
+  refs: FixtureChannelRef[],
+  carried: FixtureChannelRef[] = []
+): Promise<{ refused: FixtureRefFinding[]; stale: FixtureRefFinding[] }> {
+  if (refs.length === 0) return { refused: [], stale: [] };
   const direct = refs.filter((ref) => ref.sourceType === "direct").map((ref) => ref.channelId);
   const secured = refs.filter((ref) => ref.sourceType === "secured").map((ref) => ref.channelId);
   const [directRows, knownSecured] = await Promise.all([
@@ -162,19 +188,23 @@ export async function unknownFixtureRefs(
   ]);
   const listedDirect = new Set(directRows.filter((row) => row.listed).map((row) => row._id));
   const existingDirect = new Set(directRows.map((row) => row._id));
+  const carriedKeys = new Set(carried.map((ref) => `${ref.sourceType}:${ref.channelId}`));
 
-  const unknown: { ref: FixtureChannelRef; reason: string }[] = [];
+  const refused: FixtureRefFinding[] = [];
+  const stale: FixtureRefFinding[] = [];
   for (const ref of refs) {
+    let reason: string | null = null;
     if (ref.sourceType === "direct" && !listedDirect.has(ref.channelId)) {
-      unknown.push({
-        ref,
-        reason: existingDirect.has(ref.channelId)
-          ? "is not on the public channel list"
-          : "is not a channel on the direct catalogue",
-      });
+      reason = existingDirect.has(ref.channelId)
+        ? "is not on the public channel list"
+        : "is not a channel on the direct catalogue";
     } else if (ref.sourceType === "secured" && !knownSecured.has(ref.channelId)) {
-      unknown.push({ ref, reason: "is not a channel in the secured list" });
+      reason = "is not a channel in the secured list";
     }
+    if (!reason) continue;
+    const finding: FixtureRefFinding = { ref, reason };
+    if (carriedKeys.has(`${ref.sourceType}:${ref.channelId}`)) stale.push(finding);
+    else refused.push(finding);
   }
-  return unknown;
+  return { refused, stale };
 }

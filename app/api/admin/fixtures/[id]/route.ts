@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
-import { deleteFixture, updateFixture } from "@/lib/premiumStore";
-import { describeUnknownFixtureRefs, unknownFixtureRefs } from "@/lib/fixtureSources";
+import { deleteFixture, getFixture, updateFixture } from "@/lib/premiumStore";
+import { checkFixtureRefs, describeUnknownFixtureRefs } from "@/lib/fixtureSources";
 import { validateFixtureInput } from "@/lib/premiumFixtures";
 
 export const dynamic = "force-dynamic";
@@ -36,10 +36,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     if (value.channels) {
-      const unknown = await unknownFixtureRefs(value.channels);
-      if (unknown.length > 0) {
+      // A link the card already carried and that no longer names a channel is a stale link, not
+      // a mistake: refusing the whole save would lock the admin out of the very card they are
+      // trying to fix, and keeping it is what lets a channel that comes back repair itself.
+      // A link the admin is adding now still has to name a channel.
+      const stored = await getFixture(params.id);
+      const { refused } = await checkFixtureRefs(value.channels, stored?.channels ?? []);
+      if (refused.length > 0) {
         return NextResponse.json(
-          { success: false, error: describeUnknownFixtureRefs(unknown) },
+          { success: false, error: describeUnknownFixtureRefs(refused) },
           { status: 400 }
         );
       }

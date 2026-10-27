@@ -320,6 +320,28 @@ function toChannelRefs(raw: unknown, label: string, errors: string[]): FixtureCh
   return refs;
 }
 
+/**
+ * The links on a card that name no channel in the lists the editor was given.
+ *
+ * The direct list holds only the channels the catalogue is currently showing, so a direct link
+ * missing from it is either gone or deliberately taken off screen — two facts with two different
+ * repairs, which is why the editor asks about them by tier rather than guessing. A secured link
+ * missing from its list names a channel this tier no longer has.
+ *
+ * This is the editor's own question — "what is on this card that I cannot see?" — asked of the
+ * lists the editor was handed. The server answers the same question separately, for a write.
+ */
+export function unresolvedFixtureRefs(
+  refs: FixtureChannelRef[],
+  known: { direct: string[]; secured: string[] }
+): FixtureChannelRef[] {
+  const direct = new Set(known.direct);
+  const secured = new Set(known.secured);
+  return refs.filter((ref) =>
+    ref.sourceType === "direct" ? !direct.has(ref.channelId) : !secured.has(ref.channelId)
+  );
+}
+
 export function validateFixtureInput(
   body: Record<string, unknown>,
   creating: boolean

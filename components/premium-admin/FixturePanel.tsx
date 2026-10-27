@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
+import { unresolvedFixtureRefs } from "@/lib/premiumFixtures";
 import {
   CheckSquare,
   CalendarClock,
@@ -386,6 +387,22 @@ export default function FixturePanel({
     return options.find((option) => option.channelId === ref.channelId)?.name || ref.channelId;
   }
 
+  /**
+   * The links on this card that name a channel the editor cannot see: a secured channel that was
+   * deleted, or a direct channel the catalogue has stopped showing.
+   *
+   * They are shown rather than left out, because a link the admin cannot see is a link they
+   * cannot take off the card. While the channel lists are loading or failed, nothing is called
+   * missing — an empty list is not evidence that every channel is gone.
+   */
+  const missingLinks =
+    loading || loadError
+      ? []
+      : unresolvedFixtureRefs(form.channels, {
+          direct: directSources.map((option) => option.channelId),
+          secured: securedSources.map((option) => option.channelId),
+        });
+
   const liveCount = rows.filter((r) => r.phase === "live").length;
   const visibleCount = rows.filter((r) => r.visible).length;
 
@@ -520,6 +537,31 @@ export default function FixturePanel({
                   full={form.channels.length >= MAX_CHANNELS}
                   onToggle={toggleChannel}
                 />
+                {missingLinks.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-amber-400/80 mb-1">
+                      Link no longer there
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {missingLinks.map((ref) => (
+                        <button
+                          key={`${ref.sourceType}:${ref.channelId}`}
+                          type="button"
+                          onClick={() => toggleChannel({ ...ref, name: channelName(ref) })}
+                          title="Take this link off the card"
+                          className="text-[11px] px-2 py-1 rounded-lg border border-amber-600/50 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20"
+                        >
+                          {channelName(ref)}
+                          <span className="ml-1 text-amber-400/70">✕</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      A linked channel is not there any more — it was deleted, or the catalogue
+                      stopped showing it. Tap one to take its link off this card.
+                    </p>
+                  </div>
+                )}
                 {securedSources.length === 0 && directSources.length === 0 && (
                   <p className="text-[10px] text-slate-500">
                     No channels to link yet — the direct catalogue and the secured list are both

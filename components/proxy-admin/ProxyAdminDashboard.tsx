@@ -11,6 +11,8 @@ import {
   HardDrive,
   Layers,
   Loader2,
+  Power,
+  Radio,
   RefreshCw,
   Server,
   ShieldAlert,
@@ -18,6 +20,11 @@ import {
 } from "lucide-react";
 import type { ProxyBoxSnapshot, ProxyInspectSnapshot } from "@/lib/proxyControl";
 import { proxyStateBanner } from "./proxyBanner";
+import {
+  proxyActionFailure,
+  proxyActionSuccess,
+  type ProxyActionLine,
+} from "./proxyActionLabels";
 
 interface ProxyAdminDashboardProps {
   secretKey: string;
@@ -103,10 +110,13 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 function Card({
   icon,
   title,
+  aside,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
+  /** A control that belongs to this card, shown at the end of its header. */
+  aside?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -114,20 +124,57 @@ function Card({
       <div className="flex items-center gap-2.5 mb-3">
         <span className="text-cyan-300">{icon}</span>
         <h2 className="text-sm font-bold text-white">{title}</h2>
+        {aside ? <div className="ml-auto shrink-0">{aside}</div> : null}
       </div>
       {children}
     </section>
   );
 }
 
+/** A small control on a row: the box's own rows are read-only, these are how they change. */
+function RowButton({
+  onClick,
+  disabled,
+  title,
+  children,
+  tone = "slate",
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  title: string;
+  children: React.ReactNode;
+  tone?: "slate" | "amber";
+}) {
+  const toneClass =
+    tone === "amber"
+      ? "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+      : "bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-cyan-500/40";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border transition-all disabled:opacity-50 ${toneClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
  * The 24/7 proxy control panel.
  *
- * Read-only by construction: it asks the box what it can see and shows it. It has no button
- * that changes anything upstream, no field that could carry a credential, and no credential
- * of its own — the browser holds the site admin secret and nothing else. The health route
- * asks for no token at all, and the inspection routes are read with a token that stays on
- * this server, so this panel cannot leak one even if the whole page were copied.
+ * It reads the box's health and the box's read-only surface, and it can ask this server to
+ * perform one of four named actions on the box: re-read the vault, take a provider or a
+ * channel out of service, or put one back, or check whether a channel's source still
+ * answers.
+ *
+ * What the panel cannot do is hold a proxy credential. The browser carries the site admin
+ * secret and nothing else; every write goes through the server, which keeps the box's write
+ * token in its own environment. So a page that changes the box is still a page that cannot
+ * leak a credential, because the credential is not in it.
  *
  * The four states are kept apart on purpose. "The box answered" is not "the service works":
  * the box reports `ok: true` even while its vault is broken, and that is exactly the
@@ -141,6 +188,8 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
+  const [outcome, setOutcome] = useState<ProxyActionLine | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   /**
    * The last time the box answered, kept in the browser as well as on the server: a serverless
@@ -216,6 +265,54 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     await Promise.all([load(), loadInspection()]);
   }, [load, loadInspection]);
 
+  /**
+   * Asks the server to perform one action on the box.
+   *
+   * The browser names the action and the row; the server holds the credential and builds the
+   * request. Nothing is sent to the box from here, so a panel that is copied, or a request
+   * that is replayed, still cannot carry a proxy token.
+   *
+   * Every action that changes something asks first. The refresh does not, because it changes
+   * nothing: it only makes the box look at its own vault again.
+   */
+  const runAction = useCallback(
+    async (
+      action: string,
+      target: string | null,
+      active: boolean | undefined,
+      confirmText: string | null
+    ) => {
+      if (confirmText && !window.confirm(confirmText)) return;
+      setBusyAction(`${action}:${target ?? ""}`);
+      try {
+        const res = await fetch("/api/admin/proxy/action", {
+          method: "POST",
+          headers: { "x-admin-secret": secretKey.trim(), "content-type": "application/json" },
+          body: JSON.stringify({ action, target, active }),
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (data?.success === true) {
+          setOutcome(
+            proxyActionSuccess(data.result?.action ?? action, data.result?.detail)
+          );
+          // The box's state has changed, so what the panel is showing is no longer the
+          // truth until it is read again.
+          await refreshAll();
+        } else {
+          setOutcome(
+            proxyActionFailure(data?.code ?? null, data?.result?.code ?? null)
+          );
+        }
+      } catch {
+        setOutcome({ tone: "red", text: "সার্ভারের কাজটি শেষ হয়নি।" });
+      } finally {
+        setBusyAction(null);
+      }
+    },
+    [refreshAll, secretKey]
+  );
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem(LAST_SUCCESS_KEY);
@@ -267,6 +364,12 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     red: "bg-red-500/10 border-red-500/30 text-red-300",
     slate: "bg-slate-500/10 border-slate-500/30 text-slate-300",
   }[banner.tone];
+
+  const outcomeToneClass = {
+    green: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+    amber: "bg-amber-500/10 border-amber-500/30 text-amber-300",
+    red: "bg-red-500/10 border-red-500/30 text-red-300",
+  }[outcome?.tone ?? "green"];
 
   /**
    * The inspection is reported apart from the health reading, because the two fail for
@@ -324,7 +427,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         return {
           tone: "green",
           title: "ভল্টের বিস্তারিত পাওয়া গেছে।",
-          body: "বাক্সের read-only সারফেস উত্তর দিয়েছে। এখানে কোনো লেখা বা বদলানোর বাটন নেই।",
+          body: "বাক্সের read-only সারফেস উত্তর দিয়েছে।",
         };
     }
   })();
@@ -346,7 +449,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-bold text-white">২৪/৭ প্রক্সি কন্ট্রোল প্যানেল</h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              স্ট্রিম বক্সের নিজের স্বাস্থ্যের খবর। এই প্যানেল কোনো কিছু বদলায় না — শুধু পড়ে ও দেখায়।
+              স্ট্রিম বক্সের নিজের স্বাস্থ্যের খবর ও দৈনন্দিন কাজ।
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -392,6 +495,19 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
             প্রতি {REFRESH_MS / 1000} সেকেন্ডে নিজে থেকে হালনাগাদ হয়
           </span>
         </div>
+
+        {outcome && (
+          <div
+            className={`mt-3 flex items-start gap-2 px-3 py-2 rounded-xl border ${outcomeToneClass}`}
+          >
+            {outcome.tone === "green" ? (
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-px" />
+            ) : (
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+            )}
+            <p className="text-[11px] font-bold">{outcome.text}</p>
+          </div>
+        )}
       </div>
 
       <div className={`flex items-start gap-3 p-4 rounded-2xl border ${toneClass}`}>
@@ -424,7 +540,24 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
             <Row label="সাইনিং সারফেস" value={snapshot.surfaces.appApi ? "mounted" : "নেই"} />
           </Card>
 
-          <Card icon={<Database className="w-4 h-4" />} title="ভল্ট">
+          <Card
+            icon={<Database className="w-4 h-4" />}
+            title="ভল্ট"
+            aside={
+              <RowButton
+                onClick={() => runAction("refresh_vault", null, undefined, null)}
+                disabled={busyAction !== null}
+                title="বাক্সকে তার ভল্ট আবার পড়তে বলুন"
+              >
+                {busyAction === "refresh_vault:" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3 h-3" />
+                )}
+                <span>রিফ্রেশ</span>
+              </RowButton>
+            }
+          >
             <Row label="ড্রাইভার" value={driverLabel(snapshot.vault.driver)} />
             <Row
               label="প্রস্তুত"
@@ -693,6 +826,33 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                             সমস্যা: {providerProblemLabel(provider.problem)}
                           </p>
                         )}
+                        <div className="mt-2 flex items-center gap-1.5">
+                          <RowButton
+                            onClick={() =>
+                              runAction(
+                                "set_provider_active",
+                                provider.providerId,
+                                !provider.active,
+                                provider.active
+                                  ? `প্রোভাইডার "${provider.label || provider.providerId}" বন্ধ করবেন? এর নিচের সব চ্যানেল আর খুলবে না।`
+                                  : `প্রোভাইডার "${provider.label || provider.providerId}" চালু করবেন?`
+                              )
+                            }
+                            disabled={busyAction !== null}
+                            tone={provider.active ? "amber" : "slate"}
+                            title={
+                              provider.active
+                                ? "প্রোভাইডার বন্ধ করুন"
+                                : "প্রোভাইডার চালু করুন"
+                            }
+                          >
+                            <Power className="w-3 h-3" />
+                            <span>{provider.active ? "বন্ধ করুন" : "চালু করুন"}</span>
+                          </RowButton>
+                          {busyAction === `set_provider_active:${provider.providerId}` && (
+                            <Loader2 className="w-3 h-3 animate-spin text-cyan-300" />
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -717,23 +877,60 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                             {channel.channelKey} · {channel.providerId || "—"}
                           </p>
                         </div>
-                        <div className="text-right shrink-0">
-                          <p
-                            className={`text-[10px] font-bold ${
-                              channel.state === "serving"
-                                ? "text-emerald-300"
-                                : channel.state === "inactive"
-                                  ? "text-slate-400"
-                                  : "text-red-300"
-                            }`}
-                          >
-                            {stateLabel(channel.state)}
-                          </p>
-                          {channel.problem && (
-                            <p className="text-[10px] text-amber-300">
-                              {channelProblemLabel(channel.problem)}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right">
+                            <p
+                              className={`text-[10px] font-bold ${
+                                channel.state === "serving"
+                                  ? "text-emerald-300"
+                                  : channel.state === "inactive"
+                                    ? "text-slate-400"
+                                    : "text-red-300"
+                              }`}
+                            >
+                              {stateLabel(channel.state)}
                             </p>
-                          )}
+                            {channel.problem && (
+                              <p className="text-[10px] text-amber-300">
+                                {channelProblemLabel(channel.problem)}
+                              </p>
+                            )}
+                          </div>
+                          <RowButton
+                            onClick={() =>
+                              runAction(
+                                "set_channel_active",
+                                channel.channelKey,
+                                !channel.active,
+                                channel.active
+                                  ? `চ্যানেল "${channel.displayName || channel.channelKey}" বন্ধ করবেন? এটি আর খুলবে না।`
+                                  : `চ্যানেল "${channel.displayName || channel.channelKey}" চালু করবেন?`
+                              )
+                            }
+                            disabled={busyAction !== null}
+                            tone={channel.active ? "amber" : "slate"}
+                            title={
+                              channel.active ? "চ্যানেল বন্ধ করুন" : "চ্যানেল চালু করুন"
+                            }
+                          >
+                            <Power className="w-3 h-3" />
+                            <span>{channel.active ? "বন্ধ" : "চালু"}</span>
+                          </RowButton>
+                          <RowButton
+                            onClick={() =>
+                              runAction(
+                                "probe_channel",
+                                channel.channelKey,
+                                undefined,
+                                `চ্যানেল "${channel.displayName || channel.channelKey}" যাচাই করতে একটি সংযোগ খোলা হবে — প্রোভাইডারের সংযোগ সীমার একটি জায়গা নেয়।`
+                              )
+                            }
+                            disabled={busyAction !== null}
+                            title="চ্যানেলের সোর্স যাচাই করুন"
+                          >
+                            <Radio className="w-3 h-3" />
+                            <span>যাচাই</span>
+                          </RowButton>
                         </div>
                       </div>
                     ))}

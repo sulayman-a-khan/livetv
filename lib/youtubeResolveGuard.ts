@@ -51,6 +51,20 @@ export interface YouTubeResolveGuard {
   reset(): void;
 }
 
+/**
+ * The bound below is **per Edge instance**, not per site.
+ *
+ * The counters live in this guard's own closure, and the guard is created once per isolate,
+ * so every isolate gets its own `maxPerClient` window and its own `maxPerHour` budget. The
+ * real ceiling is therefore **instances × maxPerHour** — at the defaults, instances × 240
+ * per hour — and the per-client window is likewise per instance, not shared.
+ *
+ * A genuinely global ceiling needs a counter every isolate can read at once. This
+ * deployment has no such store (no Redis, no Edge Config, no KV), and the resolver route
+ * itself is a protected path, so there is nowhere to put one without changing code the
+ * Direct HLS contract pins. The bound is therefore left per instance on purpose, and the
+ * true ceiling is written down here rather than left to look like a global one.
+ */
 const DEFAULTS = {
   maxPerClient: 20,
   windowMs: 60_000,

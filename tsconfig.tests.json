@@ -19,6 +19,7 @@
   "include": [
     "tests/**/*.ts",
     "app/api/admin/fixtures/[id]/route.ts",
+    "app/api/youtube/resolve/route.ts",
     "app/api/admin/proxy/inspect/route.ts",
     "app/api/admin/proxy/session/route.ts",
     "app/api/admin/proxy/status/route.ts",
@@ -39,6 +40,9 @@
     "lib/proxyControl.ts",
     "lib/streamHealth.ts",
     "lib/ssrfGuard.ts",
-    "lib/safeFetch.ts"
+    "lib/safeFetch.ts",
+    "lib/youtube.ts",
+    "lib/youtubeResolveGuard.ts",
+    "middleware.ts"
   ]
 }

@@ -24,6 +24,7 @@
     "test:premium-fixtures": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/premium-fixtures.test.js",
     "test:fixture-sources": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/fixture-sources.test.js",
     "test:fixture-stale-links": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/fixture-stale-links.test.js",
+    "test:youtube-resolve-guard": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/youtube-resolve-guard.test.js",
     "test:premium-readiness": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/premium-readiness.test.js",
     "test:premium-play-failure": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/premium-play-failure.test.js",
     "test:premium-store": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/premium-store.test.js",

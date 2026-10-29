@@ -261,7 +261,7 @@ export async function verifyBoxHandshake(
         }
       }
     } catch (error) {
-      reason = error instanceof Error ? error.name : "the address could not be reached";
+      reason = `the address could not be reached${describeError(error)}`;
     }
     if (attempt < attempts - 1) {
       await new Promise((resolve) => setTimeout(resolve, HANDSHAKE_PAUSE_MS));
@@ -320,11 +320,24 @@ async function proveBoxSecret(
   } catch (error) {
     return {
       ok: false,
-      reason: `the address could not be asked for its catalogue: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      reason: `the address could not be asked for its catalogue${describeError(error)}`,
     };
   }
+}
+
+/**
+ * A short description of a failure, to finish a sentence with.
+ *
+ * The error's *name* alone says nothing an operator can act on — "TypeError" reports that
+ * the machine gave up, not on what — so the message comes with it, flattened to one line and
+ * trimmed. Nothing secret can reach here: the only fetch that fails this way is one to an
+ * address the caller proposed, and a credential is never allowed in one.
+ */
+function describeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const flat = message.replace(/\s+/g, " ").trim();
+  if (!flat) return "";
+  return ` (${flat.slice(0, 120)})`;
 }
 
 /**

@@ -233,6 +233,27 @@ test("an address that answers as a box is accepted, and one that does not is ref
   assert.equal(dead.ok, false);
 });
 
+test("a refusal says what went wrong, in a sentence the operator can act on", async () => {
+  // The operator of a box reads this reason on the box's own screen, so it has to say what
+  // happened — not the name of the error class. "TypeError" tells the operator nothing; a
+  // sentence that names the failure tells them what to change.
+  const failure = new TypeError("fetch failed");
+  const silent = stubFetch(failure);
+  const dead = await verifyBoxHandshake("https://dead.example.com", {
+    fetchImpl: silent.fetchImpl,
+    attempts: 1,
+    appToken: APP_TOKEN,
+  });
+  assert.equal(dead.ok, false);
+  assert.ok(dead.reason, "a refusal says why");
+  assert.ok(
+    !/^\s*TypeError\s*$/.test(dead.reason as string),
+    `the reason must not be a bare error name: ${dead.reason}`
+  );
+  assert.match(dead.reason as string, /could not be reached/i, "the reason says the address was not reached");
+  assert.match(dead.reason as string, /fetch failed/i, "the reason carries what the machine said");
+});
+
 test("the health read asks for no credential, and the second read proves the box holds the site's token", async () => {
   const box = boxFetch();
   await verifyBoxHandshake("https://box.example.com", {

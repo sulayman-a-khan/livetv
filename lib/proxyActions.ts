@@ -25,6 +25,7 @@
  * make this server write on their behalf.
  */
 import { isProxyAdminSecretValid } from "./proxyControl";
+import { resolveBoxAddress } from "./boxRegistry";
 
 /**
  * How long the box has to answer an action.
@@ -296,9 +297,9 @@ function failureCodeFor(boxStatus: number): ProxyActionFailureCode {
  * cannot be performed, and saying which one is missing is the difference between a five
  * minute fix and an hour of guessing.
  */
-export function proxyActionConfigProblem(): string | null {
+export async function proxyActionConfigProblem(): Promise<string | null> {
   const missing: string[] = [];
-  if (!(process.env.PROXY_BASE_URL || "").trim()) missing.push("PROXY_BASE_URL");
+  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
   if (!(process.env.PROXY_ADMIN_TOKEN || "").trim()) missing.push("PROXY_ADMIN_TOKEN");
   return missing.length ? missing.join(", ") : null;
 }
@@ -369,7 +370,9 @@ export async function proxyActionResponse(
     active = request.active;
   }
 
-  const baseUrl = (deps.baseUrl ?? process.env.PROXY_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
   const token = (deps.token ?? process.env.PROXY_ADMIN_TOKEN ?? "").trim();
   if (!baseUrl || !token) {
     const missing = [!baseUrl ? "PROXY_BASE_URL" : null, !token ? "PROXY_ADMIN_TOKEN" : null].filter(

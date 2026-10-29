@@ -13,8 +13,14 @@
 
 import assert from "node:assert/strict";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
+
+// The box registry keeps a local registration in a file. These cases are about this
+// server's own configuration, so the file is pointed at a path that does not exist: the
+// site then has no registered box, whatever this machine happens to hold.
+process.env.BOX_REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-actions-registry", "proxy-box.json");
 
 type Actions = typeof import("../lib/proxyActions");
 const actions: Actions = require("../lib/proxyActions");
@@ -443,7 +449,7 @@ test("without the write credential the server says what is missing and asks noth
   assert.ok(!String(result.body.error).includes(BOX_TOKEN));
   assert.equal(box.calls.length, 0, "a server that cannot write must not ask the box");
 
-  assert.equal(proxyActionConfigProblem(), "PROXY_ADMIN_TOKEN");
+  assert.equal(await proxyActionConfigProblem(), "PROXY_ADMIN_TOKEN");
 });
 
 test("a boolean is required for the two activation actions", async () => {

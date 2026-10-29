@@ -13,8 +13,14 @@
 
 import assert from "node:assert/strict";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
+
+// The box registry keeps a local registration in a file. These cases are about this
+// server's own configuration, so the file is pointed at a path that does not exist: the
+// site then has no registered box, whatever this machine happens to hold.
+process.env.BOX_REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-control-registry", "proxy-box.json");
 
 type Control = typeof import("../lib/proxyControl");
 const control: Control = require("../lib/proxyControl");
@@ -159,17 +165,17 @@ test("an unset admin secret locks the panel in every environment", async () => {
   assert.equal(isProxyAdminSecretValid(null), false);
 });
 
-test("the panel's own secret is the site admin secret, compared the same way", () => {
+test("the panel's own secret is the site admin secret, compared the same way", async () => {
   setEnv("ADMIN_SECRET_KEY", "correct-horse-battery-staple");
   assert.equal(isProxyAdminSecretValid("correct-horse-battery-staple"), true);
   assert.equal(isProxyAdminSecretValid("  correct-horse-battery-staple  "), true);
   assert.equal(isProxyAdminSecretValid("correct-horse-battery-stapl"), false);
 
   setEnv("PROXY_BASE_URL", "https://box.example.com");
-  assert.equal(proxyControlConfigProblem(), null);
+  assert.equal(await proxyControlConfigProblem(), null);
 
   setEnv("PROXY_BASE_URL", "");
-  const problem = proxyControlConfigProblem();
+  const problem = await proxyControlConfigProblem();
   assert.ok(problem && problem.includes("PROXY_BASE_URL"), "a missing variable is named, not valued");
   assert.ok(!problem.includes("https://"), "the problem text must not carry a value");
 });
@@ -771,13 +777,13 @@ test("a server with no read-only token asks the box nothing at all", async () =>
   assert.equal(inspection.refusal, "not_configured");
 });
 
-test("the inspection names what is missing, by name only", () => {
+test("the inspection names what is missing, by name only", async () => {
   setEnv("PROXY_BASE_URL", "https://box.example.com");
   setEnv("PROXY_READONLY_TOKEN", READONLY_TOKEN);
-  assert.equal(proxyInspectionConfigProblem(), null);
+  assert.equal(await proxyInspectionConfigProblem(), null);
 
   setEnv("PROXY_READONLY_TOKEN", "");
-  const problem = proxyInspectionConfigProblem();
+  const problem = await proxyInspectionConfigProblem();
   assert.ok(problem && problem.includes("PROXY_READONLY_TOKEN"), "a missing variable is named");
   assert.ok(!problem.includes(READONLY_TOKEN), "the problem text must not carry a value");
   assert.ok(!problem.includes("https://"), "the problem text must not carry an address");

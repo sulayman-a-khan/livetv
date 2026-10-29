@@ -35,6 +35,11 @@
  *      channel that is gone and survives it as a count — is measured by
  *      tests/premium-fixtures.test.ts, because the local store clears a deleted channel's links on
  *      the way out, which is a thing this run is not allowed to undo from outside the validator.
+ *  11. the site is started with **no address at all**, and every claim above is therefore measured
+ *      against an address the box published rather than one the site was configured with: a
+ *      registration without the site's credential is refused, an address that cannot answer as a
+ *      box is refused and does not displace the one that could, and the site then reaches the box
+ *      at the address the box gave it.
  *
  * It writes to no production database: the first thing it does after the server answers is read
  * `dbMode` from the premium admin route, and it aborts before a single write unless that says
@@ -57,6 +62,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -78,6 +84,9 @@ const TUNNEL_WAIT_MS = 45_000;
 // A harness-only key. It is not a secret: it exists so the admin routes can be driven without
 // borrowing the machine's real ADMIN_SECRET_KEY, which this script must never read or print.
 const HARNESS_ADMIN_KEY = "premium-box-e2e-admin-key-not-real";
+// The site's credential for a box's registration, in the same spirit: a value only this run
+// knows, so the box can say where it is without the script holding anything real.
+const REGISTER_TOKEN = "premium-box-e2e-register-token-not-real";
 
 const SEGMENT_MS = 2000;
 const WINDOW = 4;
@@ -415,6 +424,10 @@ async function main() {
   }
 
   const nextBin = path.join(ROOT, "node_modules", "next", "dist", "bin", "next");
+  // Where the site keeps the address a box registered. A throwaway file of this run's own, so
+  // the project tree is left exactly as it was found.
+  const registryDir = fs.mkdtempSync(path.join(os.tmpdir(), "freetv-box-registry-e2e-"));
+  const registryFile = path.join(registryDir, "proxy-box.json");
   const child = spawn(
     process.execPath,
     [nextBin, "start", "-H", "127.0.0.1", "-p", String(APP_PORT)],
@@ -428,9 +441,15 @@ async function main() {
         // .env.local, and dotenv never overwrites a variable that is already defined.
         MONGODB_URI: "",
         ADMIN_SECRET_KEY: HARNESS_ADMIN_KEY,
-        PROXY_BASE_URL: stack.base,
+        // Empty on purpose, and this is the point of the run: the site is given no address at
+        // all, so the only address it can use is the one the box registers below. An empty
+        // value is still a defined one, so .env.local cannot put a stale address back.
+        PROXY_BASE_URL: "",
         PROXY_ADMIN_TOKEN: stack.adminToken,
         PROXY_APP_TOKEN: stack.appToken,
+        PROXY_READONLY_TOKEN: stack.readonlyToken,
+        BOX_REGISTER_TOKEN: REGISTER_TOKEN,
+        BOX_REGISTRY_FILE: registryFile,
       },
       stdio: ["ignore", "pipe", "pipe"],
     }
@@ -508,6 +527,72 @@ async function main() {
     gate("a wrong admin key is refused", wrongKey.res.status === 401, `status ${wrongKey.res.status}`);
     const noKey = await getJson(`${site}/api/admin/premium/channels`, {});
     gate("and so is no key at all", noKey.res.status === 401, `status ${noKey.res.status}`);
+
+    /* ---------------- the box says where it is ---------------- */
+
+    section("the box says where it is");
+    // The site was started with no address of its own. Everything below — the push, the
+    // signed URL, the readiness verdict — is therefore measured against an address the site
+    // learned from the box rather than one it was configured with.
+    const noCredential = await postJson(
+      `${site}/api/proxy/box/register`,
+      { baseUrl: stack.base, boxId: "e2e-box" },
+      { authorization: "Bearer not-the-registration-token" }
+    );
+    gate(
+      "a registration without the site's own credential is refused",
+      noCredential.res.status === 401,
+      `${noCredential.res.status} ${noCredential.json.error ?? ""}`
+    );
+
+    const registered = await postJson(
+      `${site}/api/proxy/box/register`,
+      { baseUrl: stack.base, boxId: "e2e-box" },
+      { authorization: `Bearer ${REGISTER_TOKEN}` }
+    );
+    gate(
+      "the box's own address is accepted",
+      registered.res.status === 200 && registered.json.success === true && registered.json.box?.id === "e2e-box",
+      `${registered.res.status} ${JSON.stringify(registered.json).slice(0, 140)}`
+    );
+    gate(
+      "and the answer never repeats the address it was given",
+      !JSON.stringify(registered.json).includes("127.0.0.1"),
+      JSON.stringify(registered.json)
+    );
+
+    // An address that cannot answer as a box is refused, and the one that could is kept:
+    // a registration nobody can prove must never become the address the site sends a token to.
+    const impostor = await postJson(
+      `${site}/api/proxy/box/register`,
+      { baseUrl: "http://127.0.0.1:9", boxId: "e2e-impostor" },
+      { authorization: `Bearer ${REGISTER_TOKEN}` }
+    );
+    gate(
+      "an address that cannot answer as a box is refused",
+      impostor.res.status === 502,
+      `${impostor.res.status} ${impostor.json.error ?? ""}`
+    );
+    const kept = fs.existsSync(registryFile) ? fs.readFileSync(registryFile, "utf8") : "";
+    gate(
+      "and the address the site keeps is still the box's",
+      kept.includes(stack.base) && !kept.includes("impostor"),
+      kept.slice(0, 160)
+    );
+
+    const reached = await getJson(`${site}/api/admin/proxy/status`, admin);
+    gate(
+      "the site reaches the box at the address the box gave it",
+      reached.res.status === 200 &&
+        reached.json.snapshot?.reachable === true &&
+        reached.json.snapshot?.service === "soluplay-stream-proxy",
+      `${reached.res.status} ${JSON.stringify(reached.json.snapshot ?? reached.json).slice(0, 200)}`
+    );
+    gate(
+      "and the status it reports names no address",
+      !JSON.stringify(reached.json).includes("127.0.0.1"),
+      JSON.stringify(reached.json).slice(0, 200)
+    );
 
     /* ---------------- a row with nothing on the box ---------------- */
 
@@ -1174,6 +1259,10 @@ async function main() {
     // The edge keeps its own connection to the port, so it goes down last and by name: a stray
     // quick tunnel left running would advertise a dead box to whoever found the address.
     tunnel?.child.kill();
+
+    // The registration this run made lives in a throwaway file of its own, so it goes with
+    // the run: the project's own data directory is left exactly as it was found.
+    fs.rmSync(registryDir, { recursive: true, force: true });
 
     const storeNow = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
     if (storeBefore === null) {

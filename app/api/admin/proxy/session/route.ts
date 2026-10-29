@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const problem = proxyControlConfigProblem();
+  const problem = await proxyControlConfigProblem();
   return NextResponse.json(
     {
       success: true,

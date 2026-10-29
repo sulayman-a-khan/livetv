@@ -60,6 +60,10 @@ scratch_channels.json
 # admin-supplied source URLs, so it stays out of the public repository too.
 /data/premium-store.json
 
+# The address a local box registered with this site. Runtime state, not source:
+# a deployment keeps the address in the site's own environment.
+/data/proxy-box.json
+
 # Throwaway verification scripts
 /.tmp-verify
 

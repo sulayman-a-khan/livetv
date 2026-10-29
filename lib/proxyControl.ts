@@ -16,11 +16,12 @@
  *     a field the box grows tomorrow — or an error string that names a host — cannot reach
  *     a browser by accident.
  *
- * The site keeps `PROXY_BASE_URL` in its own environment and never in a request, so nothing
- * here builds a URL out of anything a caller supplied: the threat `lib/safeFetch.ts` guards
- * against is not present on this path.
+ * The site keeps the box's address in its own environment — or learns it from a box that
+ * registered itself — and never in a request, so nothing here builds a URL out of anything a
+ * caller supplied: the threat `lib/safeFetch.ts` guards against is not present on this path.
  */
 import { safeEquals } from "./adminAuth";
+import { resolveBoxAddress } from "./boxRegistry";
 
 /**
  * How long the box has to answer. The health route does no work, so this is only ever the
@@ -307,7 +308,9 @@ export async function readProxyBoxSnapshot(
 ): Promise<ProxyBoxSnapshot> {
   const clock = deps.now ?? Date.now;
   const now = clock();
-  const baseUrl = (deps.baseUrl ?? process.env.PROXY_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
   if (!baseUrl) {
     return snapshotFromHealth({ status: 0, body: null }, now, slot().lastSuccessAt);
   }
@@ -382,13 +385,15 @@ export function isProxyAdminSecretValid(presented: string | null | undefined): b
   return safeEquals(raw, expected);
 }
 /**
- * What the server is missing, by name only. `PROXY_BASE_URL` unset means the box is not
- * configured here — which is a different problem from the box being down, and the panel
- * says so instead of guessing.
+ * What the server is missing, by name only. No address means the box is not configured
+ * here — which is a different problem from the box being down, and the panel says so
+ * instead of guessing. An address can come from this server's environment or from a box
+ * that registered itself, so the question is asked of the resolver rather than of one
+ * variable.
  */
-export function proxyControlConfigProblem(): string | null {
+export async function proxyControlConfigProblem(): Promise<string | null> {
   const missing: string[] = [];
-  if (!(process.env.PROXY_BASE_URL || "").trim()) missing.push("PROXY_BASE_URL");
+  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
   if (!(process.env.ADMIN_SECRET_KEY || "").trim()) missing.push("ADMIN_SECRET_KEY");
   return missing.length ? missing.join(", ") : null;
 }
@@ -756,7 +761,9 @@ export async function readProxyInspection(
   deps: ProxyControlDeps = {}
 ): Promise<ProxyInspectSnapshot> {
   const clock = deps.now ?? Date.now;
-  const baseUrl = (deps.baseUrl ?? process.env.PROXY_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
   const token = (deps.token ?? process.env.PROXY_READONLY_TOKEN ?? "").trim();
   if (!baseUrl || !token) {
     // Nothing is asked: a server with no read-only token has no reason to talk to the box,
@@ -883,9 +890,9 @@ export async function readProxyInspection(
  * from the box's admin token, so a deployment can have a working health panel and no
  * inspection at all — and the panel has to be able to say which of the two it is.
  */
-export function proxyInspectionConfigProblem(): string | null {
+export async function proxyInspectionConfigProblem(): Promise<string | null> {
   const missing: string[] = [];
-  if (!(process.env.PROXY_BASE_URL || "").trim()) missing.push("PROXY_BASE_URL");
+  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
   if (!(process.env.PROXY_READONLY_TOKEN || "").trim()) missing.push("PROXY_READONLY_TOKEN");
   return missing.length ? missing.join(", ") : null;
 }

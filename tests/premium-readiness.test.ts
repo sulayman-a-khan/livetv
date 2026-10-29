@@ -13,7 +13,14 @@
  */
 
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { after, test } from "node:test";
+
+// The box registry keeps a local registration in a file. These cases are about a box that
+// has no address at all, so the file is pointed at a path that does not exist: the site then
+// has no registered box, whatever this machine happens to hold.
+process.env.BOX_REGISTRY_FILE = path.join(os.tmpdir(), "freetv-premium-readiness-registry", "proxy-box.json");
 
 type Readiness = typeof import("../lib/premiumReadiness");
 const readiness: Readiness = require("../lib/premiumReadiness");

@@ -8,15 +8,20 @@
  * it is pushed straight to the box and discarded here, and a viewer's playlist URL is
  * signed by the proxy and read by this module on the server, never by a browser.
  *
- * Three environment names, none of them with a default and none of them public:
- * `PROXY_BASE_URL`, `PROXY_ADMIN_TOKEN` (push/retract), `PROXY_APP_TOKEN` (sign).
+ * Two environment names, neither of them with a default and neither of them public:
+ * `PROXY_ADMIN_TOKEN` (push/retract) and `PROXY_APP_TOKEN` (sign). The box's address is
+ * resolved rather than read: it is the one this server's environment names, or the one a
+ * box registered because its own address is not knowable in advance (`lib/boxRegistry.ts`).
  * Missing configuration fails closed with the names, never the values.
  *
  * Why this file does not use `lib/safeFetch.ts`: the base URL is not request input, it is
- * the operator's own environment, and the SSRF guard would — correctly, for URLs a caller
- * supplies — refuse the loopback address the local end-to-end run needs. Nothing here ever
- * builds a URL out of a request body, so the guard's threat is not present on this path.
+ * the operator's own environment or an address the site proved was a box, and the SSRF
+ * guard would — correctly, for URLs a caller supplies — refuse the loopback address the
+ * local end-to-end run needs. Nothing here ever builds a URL out of a request body, so the
+ * guard's threat is not present on this path.
  */
+
+import { resolveBoxAddress } from "./boxRegistry";
 
 const PROVIDER_LABEL_LIMIT = 60;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -42,16 +47,24 @@ export function proxyKeyForRow(rowId: string): string {
   return `prem-${slug}`.slice(0, 64);
 }
 
-function readEnv() {
-  const baseUrl = (process.env.PROXY_BASE_URL || "").trim().replace(/\/+$/, "");
+/**
+ * The address of the box and the two credentials the site holds for it.
+ *
+ * The address is resolved rather than read: it may be the one this server's environment
+ * names, or the one a box registered because its own address is not knowable in advance (a
+ * quick tunnel's hostname is minted at boot). The tokens are the site's own environment and
+ * are never anything else.
+ */
+async function readEnv() {
+  const baseUrl = (await resolveBoxAddress())?.baseUrl ?? "";
   const adminToken = (process.env.PROXY_ADMIN_TOKEN || "").trim();
   const appToken = (process.env.PROXY_APP_TOKEN || "").trim();
   return { baseUrl, adminToken, appToken };
 }
 
 /** The names of whatever is missing. A viewer-facing path never calls this. */
-export function proxyConfigProblem(): string | null {
-  const { baseUrl, adminToken, appToken } = readEnv();
+export async function proxyConfigProblem(): Promise<string | null> {
+  const { baseUrl, adminToken, appToken } = await readEnv();
   const missing: string[] = [];
   if (!baseUrl) missing.push("PROXY_BASE_URL");
   if (!adminToken) missing.push("PROXY_ADMIN_TOKEN");
@@ -69,7 +82,7 @@ async function call(
   token: string,
   init: { method: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown }
 ): Promise<ProxyReply | { ok: false; error: string }> {
-  const { baseUrl } = readEnv();
+  const { baseUrl } = await readEnv();
   if (!baseUrl) return { ok: false, error: "PROXY_BASE_URL is not set" };
   try {
     const res = await fetch(`${baseUrl}${path}`, {
@@ -116,7 +129,7 @@ function proxyError(json: Record<string, unknown>, fallback: string): string {
 export async function pushPremiumSource(
   input: ProxySourceInput
 ): Promise<ProxyOutcome<{ channelKey: string; pushedAt: string }>> {
-  const { adminToken } = readEnv();
+  const { adminToken } = await readEnv();
   if (!adminToken) return { ok: false, error: "PROXY_ADMIN_TOKEN is not set" };
 
   const providerBody = {
@@ -183,7 +196,7 @@ export async function pushPremiumSource(
 export async function retractPremiumSource(
   channelKey: string
 ): Promise<ProxyOutcome<{ channelKey: string }>> {
-  const { adminToken } = readEnv();
+  const { adminToken } = await readEnv();
   if (!adminToken) return { ok: false, error: "PROXY_ADMIN_TOKEN is not set" };
   const key = encodeURIComponent(channelKey);
 
@@ -211,7 +224,7 @@ export interface SignedEntry {
  * (or was retracted), which is an admin action, not a network fault.
  */
 export async function signPremiumEntry(channelKey: string): Promise<ProxyOutcome<SignedEntry>> {
-  const { appToken } = readEnv();
+  const { appToken } = await readEnv();
   if (!appToken) return { ok: false, error: "PROXY_APP_TOKEN is not set" };
 
   const reply = await call("/app/sign", appToken, { method: "POST", body: { channelKeys: [channelKey] } });

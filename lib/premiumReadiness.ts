@@ -23,6 +23,8 @@
  * A viewer is never handed a link that depends on optimism.
  */
 
+import { resolveBoxAddress } from "./boxRegistry";
+
 export type ReadinessState = "ready" | "unavailable" | "unknown";
 
 export interface ReadinessVerdict {
@@ -49,7 +51,10 @@ const FRESH_MS = 15_000;
 const MAX_USEFUL_AGE_MS = 45_000;
 
 export interface ReadinessProbeDeps {
-  /** Defaults to `PROXY_BASE_URL`, so a route never has to pass the operator's address. */
+  /**
+   * Defaults to the address the site resolves — this server's own environment, or the one a
+   * box registered — so a route never has to pass the operator's address.
+   */
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -105,7 +110,9 @@ export async function probePremiumReadiness(
 ): Promise<ReadinessVerdict> {
   const clock = deps.now ?? Date.now;
   const now = clock();
-  const baseUrl = (deps.baseUrl ?? process.env.PROXY_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
   if (!baseUrl) return { state: "unknown", checkedAt: now, lanesOnBox: 0 };
 
   const send = deps.fetchImpl ?? fetch;

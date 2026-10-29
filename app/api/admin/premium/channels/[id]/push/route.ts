@@ -33,7 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    const problem = proxyConfigProblem();
+    const problem = await proxyConfigProblem();
     if (problem) return NextResponse.json({ success: false, error: problem }, { status: 503 });
 
     const { value, errors } = validatePremiumSourcePush(auth.body);
@@ -106,7 +106,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       return NextResponse.json({ success: true, channelKey: "", already: true });
     }
 
-    const problem = proxyConfigProblem();
+    const problem = await proxyConfigProblem();
     if (problem) return NextResponse.json({ success: false, error: problem }, { status: 503 });
 
     const retracted = await retractPremiumSource(channel.proxyChannelKey);

@@ -30,6 +30,7 @@
     "test:premium-store": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/premium-store.test.js",
     "test:proxy-control": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/proxy-control.test.js",
     "test:proxy-actions": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/proxy-actions.test.js",
+    "test:box-registry": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/box-registry.test.js",
     "test:all": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/*.test.js",
     "test:premium-box": "node scripts/premium-box-e2e.mjs",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",

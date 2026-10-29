@@ -69,7 +69,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
 
     const row = (await listPremiumChannels()).find((channel) => channel._id === params.id);
     if (row?.proxyChannelKey) {
-      const problem = proxyConfigProblem();
+      const problem = await proxyConfigProblem();
       if (problem) {
         return NextResponse.json(
           {

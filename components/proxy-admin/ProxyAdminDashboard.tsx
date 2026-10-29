@@ -43,13 +43,13 @@ const REFRESH_MS = 30_000;
 
 function timeAgo(ts: number, now: number): string {
   const seconds = Math.max(0, Math.round((now - ts) / 1000));
-  if (seconds < 10) return "এইমাত্র";
-  if (seconds < 60) return `${seconds} সেকেন্ড আগে`;
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds} seconds ago`;
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} মিনিট আগে`;
+  if (minutes < 60) return `${minutes} minutes ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ঘণ্টা আগে`;
-  return `${Math.round(hours / 24)} দিন আগে`;
+  if (hours < 24) return `${hours} hours ago`;
+  return `${Math.round(hours / 24)} days ago`;
 }
 
 function formatDuration(ms: number): string {
@@ -57,57 +57,57 @@ function formatDuration(ms: number): string {
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days} দিন ${hours} ঘণ্টা`;
-  if (hours > 0) return `${hours} ঘণ্টা ${minutes} মিনিট`;
-  return `${minutes} মিনিট`;
+  if (days > 0) return `${days} days ${hours} hours`;
+  if (hours > 0) return `${hours} hours ${minutes} minutes`;
+  return `${minutes} minutes`;
 }
 
 function driverLabel(driver: string | null): string {
   if (driver === "mongo") return "MongoDB";
-  if (driver === "memory") return "মেমোরি (প্রসেস চালু থাকলেই থাকে)";
-  if (driver === "config") return "কনফিগ (আলাদা ভল্ট নেই)";
-  if (driver === "none") return "ভল্ট নেই (এখনো খোলা হয়নি)";
-  return "জানা নেই";
+  if (driver === "memory") return "Memory (lives only while the process runs)";
+  if (driver === "config") return "Config (no separate vault)";
+  if (driver === "none") return "No vault (it has not been opened yet)";
+  return "Unknown";
 }
 
 function ownershipLabel(mode: "process-local" | "shared-filesystem" | null): string {
-  if (mode === "process-local") return "শুধু এই প্রসেসের মধ্যে";
-  if (mode === "shared-filesystem") return "এই মেশিনের ফাইল লকের মাধ্যমে";
-  return "জানা নেই";
+  if (mode === "process-local") return "Inside this process only";
+  if (mode === "shared-filesystem") return "Through a file lock on this machine";
+  return "Unknown";
 }
 
 function guardLabel(mode: "permissive" | "strict" | null): string {
-  if (mode === "strict") return "strict — Origin না থাকলেও প্রত্যাখ্যান করে";
-  if (mode === "permissive") return "permissive — অচেনা Origin প্রত্যাখ্যান করে";
-  return "জানা নেই";
+  if (mode === "strict") return "strict — refuses even without an Origin header";
+  if (mode === "permissive") return "permissive — refuses an unknown Origin";
+  return "Unknown";
 }
 
 function stateLabel(state: "serving" | "inactive" | "unusable" | null): string {
-  if (state === "serving") return "খোলা যাচ্ছে";
-  if (state === "inactive") return "বন্ধ";
-  if (state === "unusable") return "খোলা যাচ্ছে না";
-  return "জানা নেই";
+  if (state === "serving") return "Openable";
+  if (state === "inactive") return "Off";
+  if (state === "unusable") return "Not openable";
+  return "Unknown";
 }
 
 /** What the site thinks of a box's enrollment, in the panel's words. */
 function boxStateLabel(state: "pending" | "enrolled" | "revoked"): string {
-  if (state === "enrolled") return "এনরোল করা";
-  if (state === "revoked") return "বাতিল করা";
-  return "অপেক্ষমাণ";
+  if (state === "enrolled") return "Enrolled";
+  if (state === "revoked") return "Revoked";
+  return "Pending";
 }
 
 function providerProblemLabel(problem: string | null): string {
-  if (problem === "undecryptable") return "পাসওয়ার্ড খোলা যাচ্ছে না";
-  if (problem === "unreadable") return "সংরক্ষিত তথ্য ঠিক নেই";
-  return "নেই";
+  if (problem === "undecryptable") return "The password cannot be opened";
+  if (problem === "unreadable") return "The stored details are not right";
+  return "None";
 }
 
 function channelProblemLabel(problem: string | null): string {
-  if (problem === "provider_disabled") return "প্রোভাইডার বন্ধ";
-  if (problem === "provider_unusable") return "প্রোভাইডার চালু করা যায়নি";
-  if (problem === "row_unusable") return "চ্যানেলের তথ্য ঠিক নেই";
-  if (problem === "unusable") return "ব্যবহারযোগ্য নয়";
-  return "নেই";
+  if (problem === "provider_disabled") return "Provider is off";
+  if (problem === "provider_unusable") return "Provider could not be started";
+  if (problem === "row_unusable") return "The channel's details are not right";
+  if (problem === "unusable") return "Not usable";
+  return "None";
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -241,11 +241,11 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         setError(
           typeof data?.error === "string"
             ? data.error
-            : "স্ট্রিম বক্সের অবস্থা পড়া যায়নি।"
+            : "The stream box's state could not be read."
         );
       }
     } catch {
-      setError("স্ট্রিম বক্সের অবস্থা পড়া যায়নি।");
+      setError("The stream box's state could not be read.");
     } finally {
       setLoading(false);
       setNow(Date.now());
@@ -271,11 +271,11 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         setInspectionError(null);
       } else {
         setInspectionError(
-          typeof data?.error === "string" ? data.error : "ভল্টের বিস্তারিত পড়া যায়নি।"
+          typeof data?.error === "string" ? data.error : "The vault details could not be read."
         );
       }
     } catch {
-      setInspectionError("ভল্টের বিস্তারিত পড়া যায়নি।");
+      setInspectionError("The vault details could not be read.");
     }
   }, [secretKey]);
 
@@ -300,11 +300,11 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         setBoxesError(null);
       } else {
         setBoxesError(
-          typeof data?.error === "string" ? data.error : "বক্সের তালিকা পড়া যায়নি।"
+          typeof data?.error === "string" ? data.error : "The box list could not be read."
         );
       }
     } catch {
-      setBoxesError("বক্সের তালিকা পড়া যায়নি।");
+      setBoxesError("The box list could not be read.");
     }
   }, [secretKey]);
 
@@ -341,17 +341,17 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         setBoxIdInput("");
         setOutcome({
           tone: "green",
-          text: `"${boxId}" বক্সের এনরোলমেন্ট তৈরি হয়েছে। কোডটি একবারই দেখা যাবে — এখনই নিয়ে রাখুন।`,
+          text: `Enrollment created for box "${boxId}". The code is shown only once — take it now.`,
         });
         await loadBoxes();
       } else {
         setOutcome({
           tone: "red",
-          text: typeof data?.error === "string" ? data.error : "এনরোলমেন্ট তৈরি হয়নি।",
+          text: typeof data?.error === "string" ? data.error : "The enrollment could not be created.",
         });
       }
     } catch {
-      setOutcome({ tone: "red", text: "এনরোলমেন্ট তৈরি হয়নি।" });
+      setOutcome({ tone: "red", text: "The enrollment could not be created." });
     } finally {
       setBusyBox(null);
     }
@@ -367,7 +367,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     async (boxId: string) => {
       if (
         !window.confirm(
-          `"${boxId}" বক্সটি বাতিল করবেন? সাইট আর এই বক্সের সাথে কথা বলবে না।`
+          `Revoke box "${boxId}"? The site will stop talking to this box.`
         )
       ) {
         return;
@@ -383,17 +383,17 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         if (data?.success === true) {
           setOutcome({
             tone: "green",
-            text: `"${boxId}" বক্স বাতিল হয়েছে। সাইট আর এই বক্সের সাথে কথা বলবে না।`,
+            text: `Box "${boxId}" revoked. The site will stop talking to this box.`,
           });
           await loadBoxes();
         } else {
           setOutcome({
             tone: "red",
-            text: typeof data?.error === "string" ? data.error : "বক্স বাতিল হয়নি।",
+            text: typeof data?.error === "string" ? data.error : "The box could not be revoked.",
           });
         }
       } catch {
-        setOutcome({ tone: "red", text: "বক্স বাতিল হয়নি।" });
+        setOutcome({ tone: "red", text: "The box could not be revoked." });
       } finally {
         setBusyBox(null);
       }
@@ -452,7 +452,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
           );
         }
       } catch {
-        setOutcome({ tone: "red", text: "সার্ভারের কাজটি শেষ হয়নি।" });
+        setOutcome({ tone: "red", text: "The server did not finish the action." });
       } finally {
         setBusyAction(null);
       }
@@ -491,15 +491,15 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     if (loading && !snapshot) {
       return {
         tone: "slate",
-        title: "স্ট্রিম বক্সের অবস্থা যাচাই করা হচ্ছে...",
-        body: "এখন পর্যন্ত কোনো উত্তর পাওয়া যায়নি।",
+        title: "Checking the stream box's state...",
+        body: "No answer has come back yet.",
       };
     }
     if (error) {
       return {
         tone: "red",
-        title: "স্ট্রিম বক্সে এখন পৌঁছানো যাচ্ছে না।",
-        body: "বাক্স থেকে কোনো উত্তর আসেনি। বাক্স চালু আছে কি না এবং টানেল ঠিক আছে কি না আলাদাভাবে দেখুন।",
+        title: "The stream box cannot be reached right now.",
+        body: "No answer came back from the box. Check separately whether the box is running and whether the tunnel is up.",
       };
     }
     return proxyStateBanner(state);
@@ -528,53 +528,53 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     if (inspectionError) {
       return {
         tone: "red",
-        title: "ভল্টের বিস্তারিত পড়া যায়নি।",
-        body: "প্যানেল বাক্সের read-only সারফেস থেকে তথ্য নিতে পারেনি।",
+        title: "The vault details could not be read.",
+        body: "The panel could not get the details from the box's read-only surface.",
       };
     }
     if (!inspection) {
       return {
         tone: "slate",
-        title: "ভল্টের বিস্তারিত আসছে...",
-        body: "বাক্সের read-only সারফেস থেকে তথ্য আসছে।",
+        title: "The vault details are coming...",
+        body: "The details are coming from the box's read-only surface.",
       };
     }
     switch (inspection.refusal) {
       case "unreachable":
         return {
           tone: "red",
-          title: "বাক্সের read-only সারফেসে পৌঁছানো যাচ্ছে না।",
-          body: "উপরের স্বাস্থ্যের খবর আলাদা বিষয় — বাক্স চালু থাকলেও এই সারফেসে ঢোকা যাচ্ছে না।",
+          title: "The box's read-only surface cannot be reached.",
+          body: "This is separate from the health report above - the box may be running and this surface still may not be enterable.",
         };
       case "unauthorized":
         return {
           tone: "amber",
-          title: "বাক্স read-only কী মেনে নিচ্ছে না।",
-          body: "বাক্সের READONLY_SERVICE_TOKEN আর এই সার্ভারের বাক্স-কী এক হতে হবে — অর্থাৎ PROXY_BOX_SECRET থেকে বের হওয়া ঐ বাক্সের নিজস্ব read-only কী।",
+          title: "The box does not accept the read-only key.",
+          body: "The box's READONLY_SERVICE_TOKEN and this server's box key have to be the same one - that is, the box's own read-only key derived from PROXY_BOX_SECRET.",
         };
       case "not_found":
         return {
           tone: "amber",
-          title: "বাক্সে read-only সারফেস নেই।",
-          body: "বাক্সে READONLY_SERVICE_TOKEN বসালে /readonly সারফেস চালু হবে।",
+          title: "The box has no read-only surface.",
+          body: "Put READONLY_SERVICE_TOKEN on the box and the /readonly surface comes up.",
         };
       case "not_configured":
         return {
           tone: "amber",
-          title: "এখানে বাক্সের কী বের করা যায়নি।",
-          body: "এই সার্ভারে PROXY_BOX_SECRET নেই, বা কোনো বাক্স এনরোল করা নেই, বা বাক্সের ঠিকানা নেই — তাই বাক্সের বিস্তারিত পড়া হয়নি। স্বাস্থ্যের খবর উপরে আলাদা বিষয় — সেটা আপনার read-only কীর উপর নির্ভর করে না।",
+          title: "This server cannot work out the box's key.",
+          body: "There is no PROXY_BOX_SECRET on this server, or no box is enrolled, or the box has no address - so the box's details were not read. The health report above is a separate matter - it does not depend on your read-only key.",
         };
       case "error":
         return {
           tone: "red",
-          title: "বাক্সের উত্তর বোঝা গেল না।",
-          body: "বাক্স উত্তর দিয়েছে, কিন্তু এই প্যানেল তা পড়তে পারেনি।",
+          title: "The box's answer could not be understood.",
+          body: "The box answered, but this panel could not read the answer.",
         };
       default:
         return {
           tone: "green",
-          title: "ভল্টের বিস্তারিত পাওয়া গেছে।",
-          body: "বাক্সের read-only সারফেস উত্তর দিয়েছে।",
+          title: "The vault details were received.",
+          body: "The box's read-only surface answered.",
         };
     }
   })();
@@ -594,9 +594,9 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
             <Server className="w-5 h-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-base font-bold text-white">২৪/৭ প্রক্সি কন্ট্রোল প্যানেল</h1>
+            <h1 className="text-base font-bold text-white">24/7 Proxy Control Panel</h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              স্ট্রিম বক্সের নিজের স্বাস্থ্যের খবর ও দৈনন্দিন কাজ।
+              The stream box&apos;s own health report and daily operations.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -611,13 +611,13 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
               ) : (
                 <RefreshCw className="w-3.5 h-3.5" />
               )}
-              <span>এখনই দেখুন</span>
+              <span>Refresh now</span>
             </button>
             <Link
               href="/admin-secret-gate"
               className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white hover:border-brand-500/40 transition-all"
             >
-              প্যানেল বদলান
+              Switch panel
             </Link>
           </div>
         </div>
@@ -625,21 +625,21 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[11px] text-slate-400">
           <span className="flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" />
-            সর্বশেষ পরীক্ষা:{" "}
+            Last check:{" "}
             <span className="font-bold text-slate-200">
               {snapshot ? timeAgo(snapshot.checkedAt, now) : "—"}
             </span>
           </span>
           <span className="flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            সর্বশেষ সফল স্ন্যাপশট:{" "}
+            Last successful snapshot:{" "}
             <span className="font-bold text-slate-200">
-              {lastSuccessAt ? timeAgo(lastSuccessAt, now) : "এখনো কোনোটি নয়"}
+              {lastSuccessAt ? timeAgo(lastSuccessAt, now) : "none yet"}
             </span>
           </span>
           <span className="flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5" />
-            প্রতি {REFRESH_MS / 1000} সেকেন্ডে নিজে থেকে হালনাগাদ হয়
+            Refreshes itself every {REFRESH_MS / 1000} seconds
           </span>
         </div>
 
@@ -672,12 +672,12 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Card icon={<KeyRound className="w-4 h-4" />} title="বক্স তালিকা ও এনরোলমেন্ট">
+        <Card icon={<KeyRound className="w-4 h-4" />} title="Box list and enrollment">
           {boxesError ? (
             <p className="text-[11px] text-red-300">{boxesError}</p>
           ) : boxes.length === 0 ? (
             <p className="text-[11px] text-slate-400">
-              এই সাইট এখনো কোনো বক্সকে এনরোল করেনি।
+              This site has not enrolled any box yet.
             </p>
           ) : (
             <div className="space-y-2">
@@ -703,27 +703,27 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                     </span>
                   </div>
                   <p className="mt-1 text-[10px] text-slate-500 break-all">
-                    {box.baseUrl || "ঠিকানা এখনো জানা নেই"}
+                    {box.baseUrl || "address not known yet"}
                   </p>
                   <div className="mt-1.5 flex items-center justify-between gap-2">
                     <span className="text-[10px] text-slate-500 truncate">
                       {box.enrolledAt
-                        ? `এনরোল: ${new Date(box.enrolledAt).toLocaleString("bn-BD")}`
-                        : "এনরোল হয়নি"}
+                        ? `Enrolled: ${new Date(box.enrolledAt).toLocaleString("en-GB")}`
+                        : "Not enrolled"}
                     </span>
                     {box.state === "enrolled" && (
                       <RowButton
                         onClick={() => revokeBox(box.boxId)}
                         disabled={busyBox !== null}
                         tone="amber"
-                        title="বক্সটি বাতিল করুন"
+                        title="Revoke this box"
                       >
                         {busyBox === `revoke:${box.boxId}` ? (
                           <Loader2 className="w-3 h-3 animate-spin" />
                         ) : (
                           <ShieldOff className="w-3 h-3" />
                         )}
-                        <span>বাতিল</span>
+                        <span>Revoke</span>
                       </RowButton>
                     )}
                   </div>
@@ -733,13 +733,13 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
           )}
 
           <div className="mt-3 pt-3 border-t border-slate-800/60">
-            <p className="text-[11px] font-bold text-slate-300">নতুন বক্স এনরোল করুন</p>
+            <p className="text-[11px] font-bold text-slate-300">Enroll a new box</p>
             <div className="mt-2 flex items-center gap-2">
               <input
                 value={boxIdInput}
                 onChange={(event) => setBoxIdInput(event.target.value)}
-                placeholder="বক্সের আইডি"
-                aria-label="বক্সের আইডি"
+                placeholder="Box id"
+                aria-label="Box id"
                 className="flex-1 min-w-0 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-cyan-500/50"
               />
               <button
@@ -753,60 +753,60 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                 ) : (
                   <KeyRound className="w-3 h-3" />
                 )}
-                <span>তৈরি করুন</span>
+                <span>Create</span>
               </button>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
-              বক্সের নিজের আইডি লিখুন — বক্সের কনফিগে লেখা{" "}
-              <span className="text-slate-300">BOX_ID</span>। সাইট একটি একবারের কোড দেবে;
-              সেই কোড বক্সের <span className="text-slate-300">config\enroll.code</span>{" "}
-              ফাইলে বসিয়ে বক্সটি বন্ধ করে চালু করুন।
+              Write the box&apos;s own id - the one in the box&apos;s config as{" "}
+              <span className="text-slate-300">BOX_ID</span>. The site will give a one-time code;
+              put that code in the box&apos;s <span className="text-slate-300">config\enroll.code</span>{" "}
+              file, then stop the box and start it again.
             </p>
           </div>
         </Card>
 
         {enrollment && (
-          <Card icon={<KeyRound className="w-4 h-4" />} title="এনরোলমেন্ট কোড — একবারই দেখা যাবে">
+          <Card icon={<KeyRound className="w-4 h-4" />} title="Enrollment code - shown only once">
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
               <p className="text-[11px] font-bold text-amber-300">{enrollment.boxId}</p>
               <div className="mt-2 flex items-center gap-2">
                 <input
                   readOnly
                   value={enrollment.code}
-                  aria-label="এনরোলমেন্ট কোড"
+                  aria-label="Enrollment code"
                   onFocus={(event) => event.currentTarget.select()}
                   className="flex-1 min-w-0 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] text-slate-100 outline-none"
                 />
-                <RowButton onClick={copyEnrollment} title="কোড কপি করুন">
+                <RowButton onClick={copyEnrollment} title="Copy the code">
                   {copied ? (
                     <Check className="w-3 h-3" />
                   ) : (
                     <Copy className="w-3 h-3" />
                   )}
-                  <span>{copied ? "কপি হয়েছে" : "কপি"}</span>
+                  <span>{copied ? "Copied" : "Copy"}</span>
                 </RowButton>
               </div>
             </div>
             <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
-              কোডটি শুধু এই একবারই দেখা যাবে — সাইট শুধু তার ছাপ রাখে, কোডটি নিজে নয়। বক্সের{" "}
-              <span className="text-slate-300">config\enroll.code</span> ফাইলে কোডটি লিখে
-              বক্সটি বন্ধ করে চালু করুন; বক্স নিজে সাইটের সাথে কথা বলে নিজের তিনটি
-              ক্রেডেনশিয়াল নেবে, আর কোডটি একবার ব্যবহার হয়েই ফোঁটা হয়ে যাবে।
+              The code is shown only this one time - the site keeps only its hash, not the code. Write the code into the box&apos;s{" "}
+              <span className="text-slate-300">config\enroll.code</span> file and
+              stop the box and start it again; the box talks to the site itself and takes its three
+              credentials, and the code is spent the moment it is used.
               {enrollment.expiresAt ? (
                 <>
                   {" "}
-                  কোডটির মেয়াদ শেষ হবে{" "}
+                  The code expires at{" "}
                   <span className="text-slate-300">
-                    {new Date(enrollment.expiresAt).toLocaleString("bn-BD")}
+                    {new Date(enrollment.expiresAt).toLocaleString("en-GB")}
                   </span>
                   {" "}
-                  তার আগে।
+                  at the latest.
                 </>
               ) : null}
             </p>
             <div className="mt-2">
-              <RowButton onClick={() => setEnrollment(null)} title="কোডটি লুকান">
-                কোডটি লুকান
+              <RowButton onClick={() => setEnrollment(null)} title="Hide the code">
+                Hide the code
               </RowButton>
             </div>
           </Card>
@@ -815,82 +815,82 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
 
       {snapshot && (
         <div className="grid lg:grid-cols-2 gap-4">
-          <Card icon={<Server className="w-4 h-4" />} title="বক্স">
-            <Row label="সার্ভিস" value={snapshot.service ?? "জানা নেই"} />
+          <Card icon={<Server className="w-4 h-4" />} title="Box">
+            <Row label="Service" value={snapshot.service ?? "Unknown"} />
             <Row
-              label="চালু থাকার সময়"
-              value={snapshot.uptimeMs !== null ? formatDuration(snapshot.uptimeMs) : "জানা নেই"}
+              label="Uptime"
+              value={snapshot.uptimeMs !== null ? formatDuration(snapshot.uptimeMs) : "Unknown"}
             />
-            <Row label="কনফিগ করা সোর্স" value={snapshot.counters.sourcesConfigured} />
-            <Row label="চলমান সেশন" value={snapshot.counters.sessions} />
-            <Row label="সর্বোচ্চ একসাথে আপস্ট্রিম" value={snapshot.counters.maxConcurrentUpstream} />
-            <Row label="মোট আপস্ট্রিম রান" value={snapshot.counters.upstreamRuns} />
-            <Row label="অ্যাডমিন সারফেস" value={snapshot.surfaces.admin ? "মounted" : "নেই"} />
-            <Row label="সাইনিং সারফেস" value={snapshot.surfaces.appApi ? "mounted" : "নেই"} />
+            <Row label="Configured sources" value={snapshot.counters.sourcesConfigured} />
+            <Row label="Live sessions" value={snapshot.counters.sessions} />
+            <Row label="Max concurrent upstream" value={snapshot.counters.maxConcurrentUpstream} />
+            <Row label="Total upstream runs" value={snapshot.counters.upstreamRuns} />
+            <Row label="Admin surface" value={snapshot.surfaces.admin ? "mounted" : "not present"} />
+            <Row label="Signing surface" value={snapshot.surfaces.appApi ? "mounted" : "not present"} />
           </Card>
 
           <Card
             icon={<Database className="w-4 h-4" />}
-            title="ভল্ট"
+            title="Vault"
             aside={
               <RowButton
                 onClick={() => runAction("refresh_vault", null, undefined, null)}
                 disabled={busyAction !== null}
-                title="বাক্সকে তার ভল্ট আবার পড়তে বলুন"
+                title="Ask the box to read its vault again"
               >
                 {busyAction === "refresh_vault:" ? (
                   <Loader2 className="w-3 h-3 animate-spin" />
                 ) : (
                   <RefreshCw className="w-3 h-3" />
                 )}
-                <span>রিফ্রেশ</span>
+                <span>Refresh</span>
               </RowButton>
             }
           >
-            <Row label="ড্রাইভার" value={driverLabel(snapshot.vault.driver)} />
+            <Row label="Driver" value={driverLabel(snapshot.vault.driver)} />
             <Row
-              label="প্রস্তুত"
+              label="Ready"
               value={
                 snapshot.vault.ready ? (
-                  <span className="text-emerald-300">হ্যাঁ</span>
+                  <span className="text-emerald-300">Yes</span>
                 ) : (
-                  <span className="text-amber-300">না</span>
+                  <span className="text-amber-300">No</span>
                 )
               }
             />
-            <Row label="সংরক্ষিত প্রোভাইডার" value={snapshot.vault.stored} />
-            <Row label="খোলা যায় এমন লেন" value={snapshot.vault.resolvable} />
-            <Row label="পড়া যায়নি এমন প্রোভাইডার" value={snapshot.vault.unreadable} />
+            <Row label="Stored providers" value={snapshot.vault.stored} />
+            <Row label="Resolvable lanes" value={snapshot.vault.resolvable} />
+            <Row label="Unreadable providers" value={snapshot.vault.unreadable} />
             <Row
-              label="ভল্টে সমস্যা"
+              label="Vault problem"
               value={
                 snapshot.vault.hasError ? (
-                  <span className="text-red-300">হ্যাঁ — বাক্সের লগে বিস্তারিত</span>
+                  <span className="text-red-300">Yes - see the box&apos;s log</span>
                 ) : (
-                  "নেই"
+                  "None"
                 )
               }
             />
           </Card>
 
-          <Card icon={<ShieldAlert className="w-4 h-4" />} title="সেশনের মালিকানা">
-            <Row label="ধরন" value={ownershipLabel(snapshot.ownership.mode)} />
-            <Row label="এখন ধরে রাখা ক্লেইম" value={snapshot.ownership.held} />
-            <Row label="মালিকানা প্রত্যাখ্যান" value={snapshot.ownership.refusals} />
+          <Card icon={<ShieldAlert className="w-4 h-4" />} title="Session ownership">
+            <Row label="Kind" value={ownershipLabel(snapshot.ownership.mode)} />
+            <Row label="Claims held now" value={snapshot.ownership.held} />
+            <Row label="Ownership refusals" value={snapshot.ownership.refusals} />
             <p className="text-[11px] text-slate-400 mt-3 leading-relaxed">
               {snapshot.ownership.mode === "shared-filesystem"
-                ? "এই মেশিনের সব প্রক্সি প্রসেস একই ফাইল লক মানে, তাই একই মেশিনে দ্বিতীয় প্রসেস চালু করলেও লেন দুইবার খোলা হবে না।"
-                : "লকটি শুধু এই প্রসেসের মধ্যে। এই মেশিনে আরেকটি প্রক্সি প্রসেস চালু করলে সে নিজের আলাদা লেন খুলে নেবে।"}
+                ? "Every proxy process on this machine obeys the same file lock, so a second process on the same machine will not open a lane twice."
+                : "The lock is inside this process only. If another proxy process runs on this machine, it will open its own separate lane."}
             </p>
             <p className="text-[11px] text-amber-300/90 mt-2 leading-relaxed">
-              দুটি আলাদা মেশিনের মধ্যে এই সীমা প্রয়োগ করা হয় না। সেটি এখনো বাস্তবায়িত নয়, তাই এখানে
-              “নিরাপদ” বলে কিছু দেখানো হচ্ছে না।
+              This limit is not enforced between two separate machines. That is not implemented yet, so nothing here is
+              called &quot;safe&quot;.
             </p>
           </Card>
 
-          <Card icon={<Activity className="w-4 h-4" />} title="ক্যাপাসিটি ও প্রত্যাখ্যান">
-            <Row label="মোট প্রত্যাখ্যান" value={snapshot.capacity.refusals} />
-            <Row label="লেন সংখ্যা" value={snapshot.capacity.lanes.length} />
+          <Card icon={<Activity className="w-4 h-4" />} title="Capacity and refusals">
+            <Row label="Total refusals" value={snapshot.capacity.refusals} />
+            <Row label="Number of lanes" value={snapshot.capacity.lanes.length} />
             {snapshot.capacity.lanes.length > 0 && (
               <div className="mt-2 space-y-1">
                 {snapshot.capacity.lanes.map((lane, index) => (
@@ -898,9 +898,9 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                     key={index}
                     className="flex items-center justify-between text-[11px] text-slate-300"
                   >
-                    <span>লেন {index + 1}</span>
+                    <span>Lane {index + 1}</span>
                     <span className="font-bold">
-                      {lane.channels} চ্যানেল / সর্বোচ্চ {lane.maxConnections}
+                      {lane.channels} channels / max {lane.maxConnections}
                     </span>
                   </div>
                 ))}
@@ -908,48 +908,48 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
             )}
             {snapshot.capacity.last && (
               <div className="mt-3 pt-3 border-t border-slate-800/60 text-[11px] text-slate-400 space-y-1">
-                <p className="font-bold text-slate-300">সর্বশেষ প্রত্যাখ্যান</p>
+                <p className="font-bold text-slate-300">Last refusal</p>
                 {snapshot.capacity.last.channelKey && (
-                  <p>চ্যানেল: {snapshot.capacity.last.channelKey}</p>
+                  <p>Channel: {snapshot.capacity.last.channelKey}</p>
                 )}
-                {snapshot.capacity.last.code && <p>কোড: {snapshot.capacity.last.code}</p>}
+                {snapshot.capacity.last.code && <p>Code: {snapshot.capacity.last.code}</p>}
                 <p>
-                  ধরে রাখা: {snapshot.capacity.last.holders} / সর্বোচ্চ{" "}
+                  Held: {snapshot.capacity.last.holders} / max{" "}
                   {snapshot.capacity.last.maxConnections}
                 </p>
               </div>
             )}
           </Card>
 
-          <Card icon={<ShieldAlert className="w-4 h-4" />} title="সাইট গেট">
-            <Row label="মোড" value={guardLabel(snapshot.guard.mode)} />
+          <Card icon={<ShieldAlert className="w-4 h-4" />} title="Site gate">
+            <Row label="Mode" value={guardLabel(snapshot.guard.mode)} />
             <Row
-              label="গেট সক্রিয়"
-              value={snapshot.guard.siteGateActive ? "হ্যাঁ" : "না"}
+              label="Gate active"
+              value={snapshot.guard.siteGateActive ? "Yes" : "No"}
             />
-            <Row label="তালিকাভুক্ত অনুরোধ" value={snapshot.guard.listed} />
-            <Row label="ওয়াইল্ডকার্ড" value={snapshot.guard.wildcard} />
-            <Row label="Origin ছাড়া" value={snapshot.guard.absent} />
-            <Row label="বিদেশি Origin" value={snapshot.guard.foreign} />
-            <Row label="Origin ছাড়া প্রত্যাখ্যান" value={snapshot.guard.absentRefused} />
+            <Row label="Listed requests" value={snapshot.guard.listed} />
+            <Row label="Wildcard" value={snapshot.guard.wildcard} />
+            <Row label="No Origin" value={snapshot.guard.absent} />
+            <Row label="Foreign Origin" value={snapshot.guard.foreign} />
+            <Row label="Refused without Origin" value={snapshot.guard.absentRefused} />
           </Card>
 
-          <Card icon={<Clock className="w-4 h-4" />} title="সময়">
+          <Card icon={<Clock className="w-4 h-4" />} title="Time">
             <Row
-              label="এই পরীক্ষা"
-              value={new Date(snapshot.checkedAt).toLocaleString("bn-BD")}
+              label="This check"
+              value={new Date(snapshot.checkedAt).toLocaleString("en-GB")}
             />
             <Row
-              label="সর্বশেষ সফল উত্তর"
+              label="Last successful answer"
               value={
                 snapshot.lastSuccessAt
-                  ? new Date(snapshot.lastSuccessAt).toLocaleString("bn-BD")
-                  : "সার্ভারে নেই"
+                  ? new Date(snapshot.lastSuccessAt).toLocaleString("en-GB")
+                  : "Not on the server"
               }
             />
             <Row
-              label="ব্রাউজারে সর্বশেষ সফল"
-              value={lastSuccessAt ? new Date(lastSuccessAt).toLocaleString("bn-BD") : "নেই"}
+              label="Last success in this browser"
+              value={lastSuccessAt ? new Date(lastSuccessAt).toLocaleString("en-GB") : "None"}
             />
           </Card>
         </div>
@@ -973,59 +973,59 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
 
           {inspection && (
             <div className="grid lg:grid-cols-2 gap-4">
-              <Card icon={<Database className="w-4 h-4" />} title="ভল্টের প্রস্তুতি">
+              <Card icon={<Database className="w-4 h-4" />} title="Vault readiness">
                 <Row
-                  label="সারফেসে পৌঁছানো"
+                  label="Surface reachable"
                   value={
                     inspection.reachable ? (
-                      <span className="text-emerald-300">হ্যাঁ</span>
+                      <span className="text-emerald-300">Yes</span>
                     ) : (
-                      <span className="text-amber-300">না</span>
+                      <span className="text-amber-300">No</span>
                     )
                   }
                 />
-                <Row label="ড্রাইভার" value={driverLabel(inspection.vault.driver)} />
+                <Row label="Driver" value={driverLabel(inspection.vault.driver)} />
                 <Row
-                  label="প্রস্তুত"
+                  label="Ready"
                   value={
                     inspection.vault.ready ? (
-                      <span className="text-emerald-300">হ্যাঁ</span>
+                      <span className="text-emerald-300">Yes</span>
                     ) : (
-                      <span className="text-amber-300">না</span>
+                      <span className="text-amber-300">No</span>
                     )
                   }
                 />
-                <Row label="প্রোভাইডার সংখ্যা" value={inspection.vault.providers} />
-                <Row label="সংরক্ষিত চ্যানেল" value={inspection.vault.stored} />
-                <Row label="খোলা যায় এমন চ্যানেল" value={inspection.vault.resolvable} />
-                <Row label="পড়া যায়নি এমন চ্যানেল" value={inspection.vault.unreadable} />
+                <Row label="Providers" value={inspection.vault.providers} />
+                <Row label="Stored channels" value={inspection.vault.stored} />
+                <Row label="Openable channels" value={inspection.vault.resolvable} />
+                <Row label="Unreadable channels" value={inspection.vault.unreadable} />
                 <Row
-                  label="ভল্টে সমস্যা"
+                  label="Vault problem"
                   value={
                     inspection.vault.hasError ? (
-                      <span className="text-red-300">হ্যাঁ — বাক্সের লগে বিস্তারিত</span>
+                      <span className="text-red-300">Yes - see the box&apos;s log</span>
                     ) : (
-                      "নেই"
+                      "None"
                     )
                   }
                 />
                 <Row
-                  label="সর্বশেষ রিফ্রেশ"
+                  label="Last refresh"
                   value={
                     inspection.vault.lastRefreshAt
-                      ? new Date(inspection.vault.lastRefreshAt).toLocaleString("bn-BD")
-                      : "জানা নেই"
+                      ? new Date(inspection.vault.lastRefreshAt).toLocaleString("en-GB")
+                      : "Unknown"
                   }
                 />
               </Card>
 
-              <Card icon={<Layers className="w-4 h-4" />} title="লেন ও ক্যাপাসিটি">
-                <Row label="প্রোভাইডার ব্যস্ত প্রত্যাখ্যান" value={inspection.capacity.providerBusy} />
-                <Row label="সর্বোচ্চ একসাথে আপস্ট্রিম" value={inspection.capacity.maxConcurrentUpstream} />
-                <Row label="কনফিগ করা সোর্স" value={inspection.capacity.sourcesConfigured} />
-                <Row label="মোট আপস্ট্রিম রান" value={inspection.capacity.upstreamRuns} />
-                <Row label="এখন ধরে রাখা ক্লেইম" value={inspection.ownership.held} />
-                <Row label="মালিকানা প্রত্যাখ্যান" value={inspection.ownership.refusals} />
+              <Card icon={<Layers className="w-4 h-4" />} title="Lanes and capacity">
+                <Row label="Provider-busy refusals" value={inspection.capacity.providerBusy} />
+                <Row label="Max concurrent upstream" value={inspection.capacity.maxConcurrentUpstream} />
+                <Row label="Configured sources" value={inspection.capacity.sourcesConfigured} />
+                <Row label="Total upstream runs" value={inspection.capacity.upstreamRuns} />
+                <Row label="Claims held now" value={inspection.ownership.held} />
+                <Row label="Ownership refusals" value={inspection.ownership.refusals} />
                 {inspection.lanes.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {inspection.lanes.map((lane, index) => (
@@ -1034,10 +1034,10 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                         className="flex items-center justify-between gap-3 text-[11px] text-slate-300"
                       >
                         <span className="truncate">
-                          লেন {index + 1} · {lane.providerId}
+                          Lane {index + 1} · {lane.providerId}
                         </span>
                         <span className="font-bold shrink-0">
-                          {lane.holders.length} চ্যানেল / সর্বোচ্চ {lane.maxConnections}
+                          {lane.holders.length} channels / max {lane.maxConnections}
                         </span>
                       </div>
                     ))}
@@ -1045,22 +1045,22 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                 )}
                 {inspection.capacity.last && (
                   <div className="mt-3 pt-3 border-t border-slate-800/60 text-[11px] text-slate-400 space-y-1">
-                    <p className="font-bold text-slate-300">সর্বশেষ প্রত্যাখ্যান</p>
+                    <p className="font-bold text-slate-300">Last refusal</p>
                     {inspection.capacity.last.channelKey && (
-                      <p>চ্যানেল: {inspection.capacity.last.channelKey}</p>
+                      <p>Channel: {inspection.capacity.last.channelKey}</p>
                     )}
-                    {inspection.capacity.last.code && <p>কোড: {inspection.capacity.last.code}</p>}
+                    {inspection.capacity.last.code && <p>Code: {inspection.capacity.last.code}</p>}
                     <p>
-                      ধরে রাখা: {inspection.capacity.last.holders} / সর্বোচ্চ{" "}
+                      Held: {inspection.capacity.last.holders} / max{" "}
                       {inspection.capacity.last.maxConnections}
                     </p>
                   </div>
                 )}
               </Card>
 
-              <Card icon={<HardDrive className="w-4 h-4" />} title="প্রোভাইডার">
+              <Card icon={<HardDrive className="w-4 h-4" />} title="Providers">
                 {inspection.providers.length === 0 ? (
-                  <p className="text-[11px] text-slate-400">কোনো প্রোভাইডার নেই।</p>
+                  <p className="text-[11px] text-slate-400">No providers.</p>
                 ) : (
                   <div className="space-y-2">
                     {inspection.providers.slice(0, 50).map((provider) => (
@@ -1079,40 +1079,40 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                                 : "bg-slate-700/40 text-slate-400"
                             }`}
                           >
-                            {provider.active ? "চালু" : "বন্ধ"}
+                            {provider.active ? "On" : "Off"}
                           </span>
                         </div>
                         <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-400">
                           <span className="truncate">
-                            আইডি: <span className="text-slate-300">{provider.providerId}</span>
+                            Id: <span className="text-slate-300">{provider.providerId}</span>
                           </span>
                           <span>
-                            ধরন: <span className="text-slate-300">{provider.kind ?? "—"}</span>
+                            Kind: <span className="text-slate-300">{provider.kind ?? "-"}</span>
                           </span>
                           <span className="truncate">
-                            সার্ভার:{" "}
+                            Server:{" "}
                             <span className="text-slate-300 break-all">
                               {provider.server || "—"}
                             </span>
                           </span>
                           <span className="truncate">
-                            ইউজার:{" "}
+                            User:{" "}
                             <span className="text-slate-300">
                               {provider.usernameHint || "—"}
                             </span>
                           </span>
                           <span>
-                            সর্বোচ্চ সংযোগ:{" "}
+                            Max connections:{" "}
                             <span className="text-slate-300">{provider.maxConnections}</span>
                           </span>
                           <span>
-                            চ্যানেল:{" "}
+                            Channels:{" "}
                             <span className="text-slate-300">{provider.channels.length}</span>
                           </span>
                         </div>
                         {provider.problem && (
                           <p className="mt-1.5 text-[11px] text-amber-300">
-                            সমস্যা: {providerProblemLabel(provider.problem)}
+                            Problem: {providerProblemLabel(provider.problem)}
                           </p>
                         )}
                         <div className="mt-2 flex items-center gap-1.5">
@@ -1123,20 +1123,20 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                                 provider.providerId,
                                 !provider.active,
                                 provider.active
-                                  ? `প্রোভাইডার "${provider.label || provider.providerId}" বন্ধ করবেন? এর নিচের সব চ্যানেল আর খুলবে না।`
-                                  : `প্রোভাইডার "${provider.label || provider.providerId}" চালু করবেন?`
+                                  ? `Turn provider "${provider.label || provider.providerId}" off? Every channel under it will stop opening.`
+                                  : `Turn provider "${provider.label || provider.providerId}" on?`
                               )
                             }
                             disabled={busyAction !== null}
                             tone={provider.active ? "amber" : "slate"}
                             title={
                               provider.active
-                                ? "প্রোভাইডার বন্ধ করুন"
-                                : "প্রোভাইডার চালু করুন"
+                                ? "Turn the provider off"
+                                : "Turn the provider on"
                             }
                           >
                             <Power className="w-3 h-3" />
-                            <span>{provider.active ? "বন্ধ করুন" : "চালু করুন"}</span>
+                            <span>{provider.active ? "Turn off" : "Turn on"}</span>
                           </RowButton>
                           {busyAction === `set_provider_active:${provider.providerId}` && (
                             <Loader2 className="w-3 h-3 animate-spin text-cyan-300" />
@@ -1148,9 +1148,9 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                 )}
               </Card>
 
-              <Card icon={<Tv className="w-4 h-4" />} title="চ্যানেল ও প্রোভাইডার">
+              <Card icon={<Tv className="w-4 h-4" />} title="Channels and providers">
                 {inspection.channels.length === 0 ? (
-                  <p className="text-[11px] text-slate-400">কোনো চ্যানেল নেই।</p>
+                  <p className="text-[11px] text-slate-400">No channels.</p>
                 ) : (
                   <div className="space-y-1.5">
                     {inspection.channels.slice(0, 100).map((channel) => (
@@ -1192,18 +1192,18 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                                 channel.channelKey,
                                 !channel.active,
                                 channel.active
-                                  ? `চ্যানেল "${channel.displayName || channel.channelKey}" বন্ধ করবেন? এটি আর খুলবে না।`
-                                  : `চ্যানেল "${channel.displayName || channel.channelKey}" চালু করবেন?`
+                                  ? `Turn channel "${channel.displayName || channel.channelKey}" off? It will stop opening.`
+                                  : `Turn channel "${channel.displayName || channel.channelKey}" on?`
                               )
                             }
                             disabled={busyAction !== null}
                             tone={channel.active ? "amber" : "slate"}
                             title={
-                              channel.active ? "চ্যানেল বন্ধ করুন" : "চ্যানেল চালু করুন"
+                              channel.active ? "Turn the channel off" : "Turn the channel on"
                             }
                           >
                             <Power className="w-3 h-3" />
-                            <span>{channel.active ? "বন্ধ" : "চালু"}</span>
+                            <span>{channel.active ? "Off" : "On"}</span>
                           </RowButton>
                           <RowButton
                             onClick={() =>
@@ -1211,14 +1211,14 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                                 "probe_channel",
                                 channel.channelKey,
                                 undefined,
-                                `চ্যানেল "${channel.displayName || channel.channelKey}" যাচাই করতে একটি সংযোগ খোলা হবে — প্রোভাইডারের সংযোগ সীমার একটি জায়গা নেয়।`
+                                `Probing channel "${channel.displayName || channel.channelKey}" opens one connection - it takes one slot of the provider's connection limit.`
                               )
                             }
                             disabled={busyAction !== null}
-                            title="চ্যানেলের সোর্স যাচাই করুন"
+                            title="Check the channel's source"
                           >
                             <Radio className="w-3 h-3" />
-                            <span>যাচাই</span>
+                            <span>Probe</span>
                           </RowButton>
                         </div>
                       </div>

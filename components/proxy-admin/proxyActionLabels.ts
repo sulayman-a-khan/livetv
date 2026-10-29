@@ -1,5 +1,5 @@
 /**
- * The panel's Bengali vocabulary for the write half of the control tier.
+ * The panel's vocabulary for the write half of the control tier.
  *
  * The server answers an action in machine words — a code from this server, and the box's own
  * refusal code when there is one — because a code can be acted on and a sentence cannot be
@@ -20,69 +20,69 @@ export interface ProxyActionLine {
 export function proxyActionLabel(action: string | null | undefined): string {
   switch (action) {
     case "refresh_vault":
-      return "ভল্ট রিফ্রেশ";
+      return "Refresh vault";
     case "set_provider_active":
-      return "প্রোভাইডারের অবস্থা বদল";
+      return "Turn provider on/off";
     case "set_channel_active":
-      return "চ্যানেলের অবস্থা বদল";
+      return "Turn channel on/off";
     case "probe_channel":
-      return "চ্যানেল যাচাই";
+      return "Probe channel";
     case "create_provider":
-      return "প্রোভাইডার যোগ";
+      return "Add provider";
     case "update_provider":
-      return "প্রোভাইডার বদল";
+      return "Edit provider";
     case "delete_provider":
-      return "প্রোভাইডার মুছে ফেলা";
+      return "Delete provider";
     case "create_channel":
-      return "চ্যানেল যোগ";
+      return "Add channel";
     case "update_channel":
-      return "চ্যানেল বদল";
+      return "Edit channel";
     case "delete_channel":
-      return "চ্যানেল মুছে ফেলা";
+      return "Delete channel";
     default:
-      return "কাজ";
+      return "Action";
   }
 }
 
 /** Why this server could not perform the action at all. */
 const SITE_FAILURES: Record<string, string> = {
-  unauthorized: "অ্যাডমিন কী মিলছে না।",
-  unknown_action: "এই কাজটি প্যানেল করে না।",
-  invalid_target: "আইডিটি বাক্সের নিয়ম মেনে চলছে না।",
-  invalid_active: "চালু না বন্ধ, তা পাঠানো হয়নি।",
-  invalid_argument: "দেওয়া তথ্য বাক্সের নিয়ম মেনে চলছে না।",
-  not_configured: "এই সার্ভারে বাক্সের লেখার কী নেই।",
-  unreachable: "বাক্সে পৌঁছানো যায়নি।",
-  unreadable_answer: "বাক্সের উত্তর পড়া যায়নি।",
-  refused: "বাক্স পরিবর্তনটি গ্রহণ করেনি।",
-  unknown_row: "বাক্সে এই সারি নেই।",
-  conflict: "বাক্সে এই সারি আগে থেকেই আছে, কিংবা এখনো ব্যবহারে আছে।",
-  refused_credential: "বাক্স এই সার্ভারের কী মেনে নিচ্ছে না।",
-  box_error: "বাক্স কাজটি করতে পারেনি।",
+  unauthorized: "The admin key does not match.",
+  unknown_action: "This panel does not perform that action.",
+  invalid_target: "The id does not follow the box's rule.",
+  invalid_active: "On/off was not sent.",
+  invalid_argument: "The given values do not follow the box's rule.",
+  not_configured: "This server has no key for the box.",
+  unreachable: "The box could not be reached.",
+  unreadable_answer: "The box's answer could not be read.",
+  refused: "The box did not accept the change.",
+  unknown_row: "The box has no such row.",
+  conflict: "That row already exists on the box, or is still in use.",
+  refused_credential: "The box does not accept this server's key.",
+  box_error: "The box could not do the action.",
 };
 
 /** Why the box itself refused. */
 const BOX_FAILURES: Record<string, string> = {
-  unknown_channel: "বাক্সে এই চ্যানেলটি নেই।",
-  unknown_provider: "বাক্সে এই প্রোভাইডারটি নেই।",
-  invalid_channelKey: "চ্যানেল আইডি বাক্সের নিয়ম মেনে চলছে না।",
-  invalid_providerId: "প্রোভাইডার আইডি বাক্সের নিয়ম মেনে চলছে না।",
-  invalid_kind: "এই প্রোভাইডারের ধরন বদলানো যায় না।",
-  invalid_credential: "ক্রেডেনশিয়াল নিয়ে সমস্যা।",
-  unauthorized: "বাক্স এই সার্ভারের কী মেনে নিচ্ছে না।",
-  admin_disabled: "বাক্সে অ্যাডমিন সারফেস চালু নেই।",
-  vault_disabled: "বাক্সে ভল্ট চালু নেই।",
-  vault_failed: "ভল্ট খোলা যায়নি।",
-  vault_write_failed: "ভল্টে লেখা যায়নি।",
-  registry_unavailable: "বাক্সের রেজিস্ট্রি পাওয়া যায়নি।",
-  provider_busy: "প্রোভাইডারের সব সংযোগ ব্যবহারে আছে।",
-  provider_in_use: "প্রোভাইডারটি ব্যবহারে আছে।",
-  provider_exists: "বাক্সে এই প্রোভাইডারটি আগে থেকেই আছে।",
-  channel_exists: "বাক্সে এই চ্যানেলটি আগে থেকেই আছে।",
-  duplicate_credential: "এই ক্রেডেনশিয়াল আগে থেকেই আছে।",
-  channel_limit: "বাক্সের চ্যানেল সীমা পূর্ণ।",
-  too_many_channels: "বাক্সের চ্যানেল সীমা পূর্ণ।",
-  invalid_body: "বাক্স বডিটি পড়তে পারেনি।",
+  unknown_channel: "The box has no such channel.",
+  unknown_provider: "The box has no such provider.",
+  invalid_channelKey: "The channel id does not follow the box's rule.",
+  invalid_providerId: "The provider id does not follow the box's rule.",
+  invalid_kind: "This provider's kind cannot be changed.",
+  invalid_credential: "There is a problem with the credential.",
+  unauthorized: "The box does not accept this server's key.",
+  admin_disabled: "The admin surface is off on the box.",
+  vault_disabled: "The vault is off on the box.",
+  vault_failed: "The vault could not be opened.",
+  vault_write_failed: "The vault could not be written.",
+  registry_unavailable: "The box's registry could not be reached.",
+  provider_busy: "Every one of the provider's connections is in use.",
+  provider_in_use: "The provider is in use.",
+  provider_exists: "That provider already exists on the box.",
+  channel_exists: "That channel already exists on the box.",
+  duplicate_credential: "That credential already exists.",
+  channel_limit: "The box's channel limit is full.",
+  too_many_channels: "The box's channel limit is full.",
+  invalid_body: "The box could not read the body.",
 };
 
 /**
@@ -103,10 +103,10 @@ export function proxyActionFailure(
   const boxText = boxCode ? BOX_FAILURES[boxCode] : undefined;
   if (boxText) return { tone: "red", text: boxText };
   if (boxCode && /^invalid_[a-z]{1,30}$/.test(boxCode)) {
-    return { tone: "red", text: "বাক্স দেওয়া তথ্যটি গ্রহণ করেনি — ফিল্ডের নিয়ম মিলছে না।" };
+    return { tone: "red", text: "The box did not accept the given value — a field's rule does not match." };
   }
   if (siteCode && SITE_FAILURES[siteCode]) return { tone: "red", text: SITE_FAILURES[siteCode] };
-  return { tone: "red", text: "বাক্স কাজটি গ্রহণ করেনি।" };
+  return { tone: "red", text: "The box did not accept the action." };
 }
 
 function number(value: unknown): number | null {
@@ -135,56 +135,56 @@ export function proxyActionSuccess(
     const providers = number(data.providers);
     const stored = number(data.stored);
     const summary = parts([
-      providers === null ? null : `${providers} প্রোভাইডার`,
-      stored === null ? null : `${stored} সংরক্ষিত চ্যানেল`,
+      providers === null ? null : `${providers} providers`,
+      stored === null ? null : `${stored} stored channels`,
     ]);
     if (data.hasError === true) {
       return {
         tone: "amber",
-        text: `ভল্ট রিফ্রেশ হয়েছে, কিন্তু ভল্টে সমস্যা আছে — বাক্সের লগ দেখুন।${summary ? ` (${summary})` : ""}`,
+        text: `Vault refresh done, but the vault has a problem — check the box's log.${summary ? ` (${summary})` : ""}`,
       };
     }
-    return { tone: "green", text: `ভল্ট রিফ্রেশ হয়েছে।${summary ? ` ${summary}.` : ""}` };
+    return { tone: "green", text: `Vault refresh done.${summary ? ` ${summary}.` : ""}` };
   }
 
   if (action === "set_channel_active" || action === "set_provider_active") {
-    const noun = action === "set_channel_active" ? "চ্যানেল" : "প্রোভাইডার";
-    const state = data.active === true ? "চালু" : data.active === false ? "বন্ধ" : "অপরিবর্তিত";
-    return { tone: "green", text: `${noun} এখন ${state}।` };
+    const noun = action === "set_channel_active" ? "Channel" : "Provider";
+    const state = data.active === true ? "on" : data.active === false ? "off" : "unchanged";
+    return { tone: "green", text: `${noun} is now ${state}.` };
   }
 
   if (action === "create_provider") {
-    return { tone: "green", text: "প্রোভাইডার বাক্সে যোগ হয়েছে।" };
+    return { tone: "green", text: "Provider added to the box." };
   }
 
   if (action === "update_provider") {
-    return { tone: "green", text: "প্রোভাইডারের তথ্য বদল হয়েছে।" };
+    return { tone: "green", text: "Provider details changed." };
   }
 
   if (action === "delete_provider") {
-    return { tone: "green", text: "প্রোভাইডার বাক্স থেকে মুছে ফেলা হয়েছে।" };
+    return { tone: "green", text: "Provider deleted from the box." };
   }
 
   if (action === "create_channel") {
     const backups = number(data.backupCount);
-    const summary = backups === null ? null : `${backups} ব্যাকআপ স্ট্রিম`;
+    const summary = backups === null ? null : `${backups} backup streams`;
     return {
       tone: "green",
-      text: `চ্যানেল বাক্সে যোগ হয়েছে।${summary ? ` ${summary}।` : ""}`,
+      text: `Channel added to the box.${summary ? ` ${summary}.` : ""}`,
     };
   }
 
   if (action === "update_channel") {
     const backups = number(data.backupCount);
-    const summary = backups === null ? null : `${backups} ব্যাকআপ স্ট্রিম`;
+    const summary = backups === null ? null : `${backups} backup streams`;
     return {
       tone: "green",
-      text: `চ্যানেলের তথ্য বদল হয়েছে।${summary ? ` ${summary}।` : ""}`,
+      text: `Channel details changed.${summary ? ` ${summary}.` : ""}`,
     };
   }
 
   if (action === "delete_channel") {
-    return { tone: "green", text: "চ্যানেল বাক্স থেকে মুছে ফেলা হয়েছে।" };
+    return { tone: "green", text: "Channel deleted from the box." };
   }
 
   if (action === "probe_channel") {
@@ -194,18 +194,18 @@ export function proxyActionSuccess(
     const tookMs = number(data.tookMs);
     const summary = parts([
       http === null ? null : `HTTP ${http}`,
-      levels === null ? null : `${levels} লেভেল`,
-      segments === null ? null : `${segments} সেগমেন্ট`,
-      tookMs === null ? null : `${(tookMs / 1000).toFixed(1)} সেকেন্ড`,
+      levels === null ? null : `${levels} levels`,
+      segments === null ? null : `${segments} segments`,
+      tookMs === null ? null : `${(tookMs / 1000).toFixed(1)} seconds`,
     ]);
     if (data.probeOk === true) {
-      return { tone: "green", text: `যাচাই সফল।${summary ? ` ${summary}.` : ""}` };
+      return { tone: "green", text: `Probe succeeded.${summary ? ` ${summary}.` : ""}` };
     }
     return {
       tone: "amber",
-      text: `যাচাই চলেছে, কিন্তু সোর্স সাড়া দেয়নি।${summary ? ` ${summary}.` : ""}`,
+      text: `Probe ran, but the source did not answer.${summary ? ` ${summary}.` : ""}`,
     };
   }
 
-  return { tone: "green", text: "কাজটি হয়েছে।" };
+  return { tone: "green", text: "The action was done." };
 }

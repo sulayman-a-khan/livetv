@@ -23,32 +23,32 @@ export function proxyStateBanner(state: BoxState | null | undefined): ProxyState
     case "usable":
       return {
         tone: "green",
-        title: "স্ট্রিম বক্স চালু আছে এবং ভল্ট প্রস্তুত।",
-        body: "বাক্স উত্তর দিয়েছে, ভল্ট পড়া যাচ্ছে এবং দেওয়া ফলে চ্যানেল খোলা আছে।",
+        title: "The stream box is running and the vault is ready.",
+        body: "The box answered, the vault can be read, and the channels it was given are open.",
       };
     case "degraded":
       return {
         tone: "amber",
-        title: "স্ট্রিম বক্স চালু আছে, কিন্তু ভল্ট প্রস্তুত নয়।",
-        body: "বাক্স নিজেকে সুস্থ বলছে, তবে ভল্ট এখনো প্রস্তুত নয় বা ভল্টে সমস্যা দেখা যাচ্ছে। এই অবস্থায় চ্যানেল খুলবে না। বিস্তারিত বাক্সের নিজস্ব লগে আছে।",
+        title: "The stream box is running, but the vault is not ready.",
+        body: "The box calls itself healthy, but the vault is not ready yet or the vault shows a problem. In this state the channels will not open. The details are in the box's own log.",
       };
     case "unusable":
       return {
         tone: "red",
-        title: "স্ট্রিম বক্স উত্তর দিচ্ছে, কিন্তু নিজেকে সুস্থ বলছে না।",
-        body: "বাক্স জীবিত আছে, কিন্তু নিজের স্বাস্থ্যের খবরে সমস্যা জানিয়েছে।",
+        title: "The stream box is answering, but does not call itself healthy.",
+        body: "The box is alive, but it reported a problem in its own health check.",
       };
     case "unreachable":
       return {
         tone: "red",
-        title: "স্ট্রিম বক্সে এখন পৌঁছানো যাচ্ছে না।",
-        body: "বাক্স থেকে কোনো উত্তর আসেনি। বাক্স চালু আছে কি না এবং টানেল ঠিক আছে কি না আলাদাভাবে দেখুন।",
+        title: "The stream box cannot be reached right now.",
+        body: "No answer came back from the box. Check separately whether the box is running and whether the tunnel is up.",
       };
     default:
       return {
         tone: "slate",
-        title: "স্ট্রিম বক্সের অবস্থা এখনো জানা নেই।",
-        body: "এখনো কোনো উত্তর পাওয়া যায়নি।",
+        title: "The stream box's state is not known yet.",
+        body: "No answer has come back yet.",
       };
   }
 }

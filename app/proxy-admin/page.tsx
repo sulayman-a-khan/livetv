@@ -91,8 +91,8 @@ export default function ProxyAdminPage() {
           <div className="max-w-md mx-auto my-12 text-center">
             <div className="glass-panel p-8 rounded-3xl border border-slate-800 shadow-2xl">
               <RefreshCw className="w-8 h-8 text-brand-500 animate-spin mx-auto mb-3" />
-              <p className="text-sm font-bold text-white">সেশন ফিরিয়ে আনা হচ্ছে...</p>
-              <p className="text-xs text-slate-400 mt-1">আগের কী যাচাই করা হচ্ছে</p>
+              <p className="text-sm font-bold text-white">Restoring the session...</p>
+              <p className="text-xs text-slate-400 mt-1">Checking the previous key</p>
             </div>
           </div>
         ) : !isAuthorized ? (
@@ -102,10 +102,11 @@ export default function ProxyAdminPage() {
                 <Lock className="w-7 h-7" />
               </div>
 
-              <h1 className="text-xl font-bold text-white mb-2">২৪/৭ প্রক্সি কন্ট্রোল</h1>
+              <h1 className="text-xl font-bold text-white mb-2">24/7 Proxy Control</h1>
               <p className="text-xs text-slate-400 mb-6">
-                স্ট্রিম বক্সের অবস্থা দেখতে{" "}
-                <code className="text-brand-400 font-mono">ADMIN_SECRET_KEY</code> দিন।
+                Give{" "}
+                <code className="text-brand-400 font-mono">ADMIN_SECRET_KEY</code> to see the
+                stream box&apos;s state.
               </p>
 
               <form onSubmit={handleVerify} className="space-y-4">

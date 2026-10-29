@@ -1163,7 +1163,7 @@ test("a refresh that found a vault problem is amber, and a clean one is green", 
 
 test("an activation says which state the row is in now", () => {
   const off = proxyActionSuccess("set_channel_active", { active: false });
-  assert.match(off.text, /বন্ধ/);
+  assert.match(off.text, /off/);
   const on = proxyActionSuccess("set_provider_active", { active: true });
-  assert.match(on.text, /চালু/);
+  assert.match(on.text, /on/);
 });

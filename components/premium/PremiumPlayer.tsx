@@ -3,6 +3,7 @@
 import Hls from "hls.js";
 import { useEffect, useRef, useState } from "react";
 import { premiumPlayFailureText } from "@/lib/premiumPlayFailure";
+import { nextFallbackChannel } from "@/lib/fixtureBoard";
 
 /**
  * The premium tier's own player, deliberately its own file.
@@ -13,12 +14,20 @@ import { premiumPlayFailureText } from "@/lib/premiumPlayFailure";
  * running, and that a refusal here is a decision (the source was never pushed, the box is off, an
  * embed is off-site) rather than a bad mirror to hop away from. So it re-signs on a timer instead
  * of re-ranking, and it stops with a reason instead of trying a next source.
+ *
+ * The one exception is the match card's own order: a card may name several channels for one match,
+ * and the order on it is the priority. When this channel cannot play, the player hands over to the
+ * next one on that card rather than sitting on a dead stream — the same handoff the card's chooser
+ * would make by hand. The Direct tier is not touched by this: a direct channel is handed over to
+ * its own existing watch page, which keeps the failover it already has.
  */
 
 /** Re-sign this long before the URL dies, so a viewer never sees the expiry. */
 const REFRESH_LEAD_MS = 30_000;
 /** Never spin on a URL that was issued to expire sooner than that. */
 const MIN_REFRESH_MS = 5_000;
+/** How long the handover note stays on screen before the next channel is opened. */
+const HANDOVER_DELAY_MS = 1_400;
 
 type Phase = "loading" | "playing" | "blocked";
 
@@ -27,11 +36,52 @@ interface SignedUrl {
   expiresAt: number;
 }
 
-export default function PremiumPlayer({ channelId }: { channelId: string }) {
+/** One channel of a match card, in the order the admin set. */
+export interface PremiumPlayerChannel {
+  channelId: string;
+  sourceType: "secured" | "direct";
+}
+
+/**
+ * A refusal that carries its code.
+ *
+ * The code is what tells a channel-level refusal (this channel is off air, nobody pushed its source)
+ * from a box-level one (the box is down, could not sign): the first is worth trying again on another
+ * channel, the second would answer the same way for every other channel on the same box.
+ */
+class Refusal extends Error {
+  readonly code: string | null;
+
+  constructor(code: string | null) {
+    super(premiumPlayFailureText(code));
+    this.name = "Refusal";
+    this.code = code;
+  }
+}
+
+/** The code a caught error carries, or none when the failure was not the server's answer. */
+function codeOf(error: unknown): string | null {
+  return error instanceof Refusal ? error.code : null;
+}
+
+export default function PremiumPlayer({
+  channelId,
+  channels,
+}: {
+  channelId: string;
+  channels?: PremiumPlayerChannel[];
+}) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  // The card's order is read by the effect below, which must not restart when the page hands over a
+  // fresh array; a ref keeps the order readable without making it a dependency of the effect.
+  const orderRef = useRef<PremiumPlayerChannel[]>(channels ?? []);
   const [phase, setPhase] = useState<Phase>("loading");
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    orderRef.current = channels ?? [];
+  }, [channels]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -55,14 +105,12 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
       } catch {
         // The request never reached this server. That is the network rather than the channel,
         // and it carries no code — so it reads as the generic line instead of blaming the box.
-        throw new Error(premiumPlayFailureText(null));
+        throw new Refusal(null);
       }
       // What the viewer reads is the Bengali line for the code the server sent. The server's own
       // English sentence stays in the response body for the log; putting it on this screen would
       // answer a Bengali question in the wrong language.
-      throw new Error(
-        premiumPlayFailureText(typeof data?.code === "string" ? data.code : null)
-      );
+      throw new Refusal(typeof data?.code === "string" ? data.code : null);
     };
 
     const scheduleRefresh = (expiresAt: number) => {
@@ -87,11 +135,56 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
       }
     };
 
-    const block = (reason: string) => {
+    /** Stop and say why. The last word, when there is nowhere else to go. */
+    const stop = (reason: string) => {
       if (cancelled) return;
       window.clearTimeout(refreshTimer);
       setPhase("blocked");
       setNotice(reason);
+    };
+
+    /**
+     * The next channel on the card, in the card's own order, that is worth trying.
+     *
+     * Only the channels *after* this one count: the walk moves forward along the priority the
+     * admin set, so a handover can never come back to a channel that already failed.
+     */
+    const nextCandidate = (code: string | null): PremiumPlayerChannel | null => {
+      const order = orderRef.current;
+      const at = order.findIndex(
+        (entry) => entry.channelId === channelId && entry.sourceType === "secured"
+      );
+      const remaining =
+        at >= 0
+          ? order.slice(at + 1)
+          : order.filter((entry) => entry.channelId !== channelId);
+      return nextFallbackChannel(remaining, code);
+    };
+
+    /** Where a channel of either tier is watched, on the address its own tier already answers. */
+    const watchPathFor = (entry: PremiumPlayerChannel): string =>
+      entry.sourceType === "secured"
+        ? `/premium/${encodeURIComponent(entry.channelId)}`
+        : `/watch/${encodeURIComponent(entry.channelId)}`;
+
+    /**
+     * Give up on this channel — but only after the card's next channel has had its turn.
+     *
+     * The handover is a real navigation rather than a silent swap, because the two tiers are
+     * separate players with separate pages: a direct channel is watched on the watch page it
+     * already has, and this file never reaches into that player.
+     */
+    const fail = (reason: string, code: string | null) => {
+      if (cancelled) return;
+      const next = nextCandidate(code);
+      if (!next) {
+        stop(reason);
+        return;
+      }
+      window.clearTimeout(refreshTimer);
+      setPhase("blocked");
+      setNotice("চ্যানেলটি চালু হয়নি — পরের চ্যানেলে যাওয়া হচ্ছে…");
+      window.setTimeout(() => window.location.assign(watchPathFor(next)), HANDOVER_DELAY_MS);
     };
 
     const attach = (signed: SignedUrl) => {
@@ -125,7 +218,10 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
                 scheduleRefresh(fresh.expiresAt);
               })
               .catch((error: unknown) => {
-                block(error instanceof Error ? error.message : "স্ট্রিম বক্স সাড়া দেয়নি");
+                fail(
+                  error instanceof Error ? error.message : "স্ট্রিম বক্স সাড়া দেয়নি",
+                  codeOf(error)
+                );
               });
             return;
           }
@@ -135,12 +231,13 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
           }
           // hls.js's own detail is an English phrase for a log, not for this screen.
           console.warn("[premium] hls error", data.type, data.details);
-          block("স্ট্রিম বন্ধ হয়ে গেছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
+          fail("স্ট্রিম বন্ধ হয়ে গেছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।", null);
         });
         return;
       }
       if (!video.canPlayType("application/vnd.apple.mpegurl")) {
-        block("এই ব্রাউজারে HLS চালানো যায় না");
+        // Another channel would not help: this browser cannot play HLS at all.
+        stop("এই ব্রাউজারে HLS চালানো যায় না");
         return;
       }
       // Safari's own HLS player. Without these two listeners nothing here ever reports the frame
@@ -160,7 +257,7 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
         () => {
           // The browser's MediaError message is English and names a code, not a reason.
           console.warn("[premium] media error", video.error?.code);
-          block("স্ট্রিম চালু করা যায়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
+          fail("স্ট্রিম চালু করা যায়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।", null);
         },
         { once: true }
       );
@@ -172,7 +269,10 @@ export default function PremiumPlayer({ channelId }: { channelId: string }) {
         attach(signed);
       })
       .catch((error: unknown) => {
-        block(error instanceof Error ? error.message : "স্ট্রিম বক্স সাড়া দেয়নি");
+        fail(
+          error instanceof Error ? error.message : "স্ট্রিম বক্স সাড়া দেয়নি",
+          codeOf(error)
+        );
       });
 
     return () => {

@@ -2,10 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
-import { unresolvedFixtureRefs } from "@/lib/premiumFixtures";
 import {
-  CheckSquare,
+  endTimeAfter,
+  minutesBetween,
+  toLocalInputValue,
+  unresolvedFixtureRefs,
+} from "@/lib/premiumFixtures";
+import { parseMatchTitle } from "@/lib/teamFlags";
+import {
   CalendarClock,
+  CheckSquare,
+  ChevronDown,
+  ChevronUp,
   Edit2,
   Loader2,
   PlusCircle,
@@ -17,6 +25,7 @@ import {
 
 interface FixtureRow {
   _id: string;
+  title: string;
   sport: "football" | "cricket";
   teamA: string;
   teamB: string;
@@ -48,6 +57,8 @@ interface SourceOption extends ChannelRef {
 const MAX_CHANNELS = 8;
 
 interface FormState {
+  /** The admin's own wording for the match, as the board shows it when it says more than the teams do. */
+  title: string;
   sport: "football" | "cricket";
   teamA: string;
   teamB: string;
@@ -56,12 +67,17 @@ interface FormState {
   competition: string;
   /** Local wall clock as typed into the datetime field. */
   startsAt: string;
+  /** The estimated end, in the same local wall clock the kickoff uses. */
+  endsAt: string;
   durationMinutes: string;
   channels: ChannelRef[];
   visible: boolean;
+  /** Whether the team fields are still following the title rather than the admin's own typing. */
+  autoTeams: boolean;
 }
 
 const EMPTY_FORM: FormState = {
+  title: "",
   sport: "football",
   teamA: "",
   teamB: "",
@@ -69,9 +85,11 @@ const EMPTY_FORM: FormState = {
   teamBLogo: "",
   competition: "",
   startsAt: "",
+  endsAt: "",
   durationMinutes: "120",
   channels: [],
   visible: false,
+  autoTeams: true,
 };
 
 const FIELD_CLASS =
@@ -84,16 +102,7 @@ const PHASE_STYLE: Record<FixtureRow["phase"], string> = {
   finished: "bg-slate-900 text-slate-500 border-slate-800",
 };
 
-/** The value a `datetime-local` input wants: no seconds, no zone. */
-function toInputValue(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
-}
-
+/** How long until a kickoff, as the admin's own list shows it. */
 function countdown(iso: string, now: number): string {
   const ms = new Date(iso).getTime() - now;
   if (ms <= 0) return "now";
@@ -152,6 +161,80 @@ function ChannelSourceGroup({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The channels a card is watched on, in the order they are tried.
+ *
+ * The order is the admin's, and it is the whole of the playback priority: the first channel on
+ * the card is the one a tap opens, and the ones after it are what a fallback moves to when it
+ * cannot play. Moving one here moves it there too, because the card carries one list and the
+ * board reads it in the order it was written.
+ */
+function ChannelOrderList({
+  channels,
+  nameOf,
+  onMove,
+  onRemove,
+}: {
+  channels: ChannelRef[];
+  nameOf: (ref: ChannelRef) => string;
+  onMove: (index: number, delta: number) => void;
+  onRemove: (ref: ChannelRef) => void;
+}) {
+  if (channels.length === 0) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 mb-1">
+        Playback order · the first one is tried first
+      </p>
+      <ol className="space-y-1">
+        {channels.map((ref, index) => (
+          <li
+            key={`${ref.sourceType}:${ref.channelId}`}
+            className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2 py-1.5"
+          >
+            <span className="text-[10px] font-black text-slate-500 w-3 shrink-0 text-center">
+              {index + 1}
+            </span>
+            <span className="text-[11px] text-slate-200 truncate flex-1 min-w-0">{nameOf(ref)}</span>
+            <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500 shrink-0">
+              {ref.sourceType === "secured" ? "Premium" : "Direct"}
+            </span>
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => onMove(index, -1)}
+              title="Try this one earlier"
+              aria-label={`Move ${nameOf(ref)} earlier`}
+              className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 shrink-0"
+            >
+              <ChevronUp size={12} />
+            </button>
+            <button
+              type="button"
+              disabled={index === channels.length - 1}
+              onClick={() => onMove(index, 1)}
+              title="Try this one later"
+              aria-label={`Move ${nameOf(ref)} later`}
+              className="p-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 shrink-0"
+            >
+              <ChevronDown size={12} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onRemove(ref)}
+              title="Take this link off the card"
+              aria-label={`Unlink ${nameOf(ref)}`}
+              className="p-1 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-300 shrink-0"
+            >
+              <X size={12} />
+            </button>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -249,28 +332,113 @@ export default function FixturePanel({
   }, [open]);
 
   function startCreate() {
-    setForm({ ...EMPTY_FORM, startsAt: toInputValue(new Date(Date.now() + 3_600_000).toISOString()) });
+    const kickoff = toLocalInputValue(new Date(Date.now() + 3_600_000).toISOString());
+    setForm({ ...EMPTY_FORM, startsAt: kickoff, endsAt: endTimeAfter(kickoff, 120) });
     setEditingId(null);
     setShowForm(true);
     setMessage(null);
   }
 
   function startEdit(row: FixtureRow) {
+    const startsAt = toLocalInputValue(row.startsAt);
+    const parsed = row.title ? parseMatchTitle(row.title) : null;
     setForm({
+      title: row.title || "",
       sport: row.sport,
       teamA: row.teamA,
       teamB: row.teamB,
       teamALogo: row.teamALogo,
       teamBLogo: row.teamBLogo,
       competition: row.competition,
-      startsAt: toInputValue(row.startsAt),
+      startsAt,
+      endsAt: endTimeAfter(startsAt, row.durationMinutes),
       durationMinutes: String(row.durationMinutes),
       channels: row.channels.map((ref) => ({ ...ref })),
       visible: row.visible,
+      // A card whose title already names its two teams keeps following that title, so a corrected
+      // title corrects the teams with it. One whose teams were typed apart from the title does not.
+      autoTeams: parsed !== null && parsed.teamA === row.teamA && parsed.teamB === row.teamB,
     });
     setEditingId(row._id);
     setShowForm(true);
     setMessage(null);
+  }
+
+  /**
+   * A title that names two teams is the same answer as the two team fields, so it fills them.
+   * A team the admin typed by hand always wins, and from that moment the title stops moving them.
+   */
+  function setTitle(value: string) {
+    setForm((current) => {
+      const parsed = parseMatchTitle(value);
+      if (!parsed || !current.autoTeams) return { ...current, title: value };
+      return { ...current, title: value, teamA: parsed.teamA, teamB: parsed.teamB };
+    });
+  }
+
+  function setTeam(which: "teamA" | "teamB", value: string) {
+    setForm((current) => ({ ...current, [which]: value, autoTeams: false }));
+  }
+
+  /**
+   * Moving a kickoff moves the end with it: a match that was two hours long is still two hours
+   * long an hour later, and an end time left behind would quietly shorten it.
+   */
+  function setStart(value: string) {
+    setForm((current) => {
+      if (!current.endsAt) return { ...current, startsAt: value };
+      const before = new Date(current.startsAt).getTime();
+      const after = new Date(value).getTime();
+      if (Number.isNaN(before) || Number.isNaN(after)) return { ...current, startsAt: value };
+      const shift = after - before;
+      const end = new Date(current.endsAt).getTime();
+      if (Number.isNaN(end)) return { ...current, startsAt: value };
+      return { ...current, startsAt: value, endsAt: toLocalInputValue(new Date(end + shift).toISOString()) };
+    });
+  }
+
+  /** An end time is the same fact as the length, so the length is derived from it. */
+  function setEnd(value: string) {
+    setForm((current) => {
+      const minutes = minutesBetween(current.startsAt, value);
+      if (minutes === null || minutes <= 0) return { ...current, endsAt: value };
+      return { ...current, endsAt: value, durationMinutes: String(Math.min(720, minutes)) };
+    });
+  }
+
+  /** And the other way round, so the two fields can never disagree about the same match. */
+  function setDuration(value: string) {
+    setForm((current) => {
+      const minutes = Number(value);
+      if (!current.startsAt || !Number.isFinite(minutes) || minutes <= 0) {
+        return { ...current, durationMinutes: value };
+      }
+      return { ...current, durationMinutes: value, endsAt: endTimeAfter(current.startsAt, minutes) };
+    });
+  }
+
+  /**
+   * Moves a linked channel up or down the priority order. The card carries one list, so this is
+   * the same order the board offers the channels in and the same order a fallback moves through.
+   */
+  function moveChannel(index: number, delta: number) {
+    setForm((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.channels.length) return current;
+      const channels = [...current.channels];
+      const [moved] = channels.splice(index, 1);
+      channels.splice(target, 0, moved);
+      return { ...current, channels };
+    });
+  }
+
+  function unlinkChannel(ref: ChannelRef) {
+    setForm((current) => ({
+      ...current,
+      channels: current.channels.filter(
+        (entry) => !(entry.channelId === ref.channelId && entry.sourceType === ref.sourceType)
+      ),
+    }));
   }
 
   /**
@@ -303,7 +471,19 @@ export default function FixturePanel({
     setSaving(true);
     setMessage(null);
     try {
+      // The end the admin typed is the same fact as the length, and it is the one the card is
+      // judged by — a match is finished when it reaches its end — so the end wins where the two
+      // can disagree, and the length is what is left when no end was typed.
+      const fromEnd = minutesBetween(form.startsAt, form.endsAt);
+      const typed = Number(form.durationMinutes);
+      const durationMinutes =
+        fromEnd !== null && fromEnd > 0
+          ? Math.min(720, fromEnd)
+          : Number.isFinite(typed) && typed > 0
+            ? Math.min(720, Math.round(typed))
+            : 120;
       const body = {
+        title: form.title,
         sport: form.sport,
         teamA: form.teamA,
         teamB: form.teamB,
@@ -311,7 +491,7 @@ export default function FixturePanel({
         teamBLogo: form.teamBLogo,
         competition: form.competition,
         startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : "",
-        durationMinutes: Number(form.durationMinutes),
+        durationMinutes,
         channels: form.channels,
         visible: form.visible,
       };
@@ -444,6 +624,19 @@ export default function FixturePanel({
         {showForm && (
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <label className={LABEL_CLASS}>Title</label>
+                <input
+                  className={FIELD_CLASS}
+                  value={form.title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Bangladesh vs India · BAN vs IND"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  A title that names two teams fills them in. The board shows it when it says
+                  something the team names do not.
+                </p>
+              </div>
               <div>
                 <label className={LABEL_CLASS}>Sport</label>
                 <select
@@ -469,7 +662,7 @@ export default function FixturePanel({
                 <input
                   className={FIELD_CLASS}
                   value={form.teamA}
-                  onChange={(e) => setForm({ ...form, teamA: e.target.value })}
+                  onChange={(e) => setTeam("teamA", e.target.value)}
                 />
               </div>
               <div>
@@ -477,7 +670,7 @@ export default function FixturePanel({
                 <input
                   className={FIELD_CLASS}
                   value={form.teamB}
-                  onChange={(e) => setForm({ ...form, teamB: e.target.value })}
+                  onChange={(e) => setTeam("teamB", e.target.value)}
                 />
               </div>
               <div>
@@ -504,7 +697,16 @@ export default function FixturePanel({
                   type="datetime-local"
                   className={FIELD_CLASS}
                   value={form.startsAt}
-                  onChange={(e) => setForm({ ...form, startsAt: e.target.value })}
+                  onChange={(e) => setStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={LABEL_CLASS}>End time (estimated)</label>
+                <input
+                  type="datetime-local"
+                  className={FIELD_CLASS}
+                  value={form.endsAt}
+                  onChange={(e) => setEnd(e.target.value)}
                 />
               </div>
               <div>
@@ -515,8 +717,11 @@ export default function FixturePanel({
                   max={720}
                   className={FIELD_CLASS}
                   value={form.durationMinutes}
-                  onChange={(e) => setForm({ ...form, durationMinutes: e.target.value })}
+                  onChange={(e) => setDuration(e.target.value)}
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  The match is finished — and the card disappears — when it reaches its end time.
+                </p>
               </div>
               <div className="sm:col-span-2 space-y-2.5">
                 <p className={LABEL_CLASS}>
@@ -536,6 +741,12 @@ export default function FixturePanel({
                   selected={form.channels}
                   full={form.channels.length >= MAX_CHANNELS}
                   onToggle={toggleChannel}
+                />
+                <ChannelOrderList
+                  channels={form.channels}
+                  nameOf={channelName}
+                  onMove={moveChannel}
+                  onRemove={unlinkChannel}
                 />
                 {missingLinks.length > 0 && (
                   <div>
@@ -624,7 +835,11 @@ export default function FixturePanel({
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold text-white truncate">
-                    {row.teamA} <span className="text-slate-500">v</span> {row.teamB}
+                    {row.title || (
+                      <>
+                        {row.teamA} <span className="text-slate-500">v</span> {row.teamB}
+                      </>
+                    )}
                     <span className="ml-2 text-[10px] font-normal capitalize text-slate-400">{row.sport}</span>
                   </p>
                   <p className="text-[10px] text-slate-500 truncate">

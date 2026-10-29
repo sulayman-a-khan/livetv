@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import { CheckSquare, Crown, Edit2, Loader2, PlusCircle, Save, Square, Trash2, Unlink, Upload, X } from "lucide-react";
+import { useBoxProviders } from "./useBoxProviders";
 
 interface PremiumRow {
   _id: string;
@@ -15,6 +16,11 @@ interface PremiumRow {
   /** The handle this channel's source sits under on the stream box, or "". */
   proxyChannelKey: string;
   proxyPushedAt: string | null;
+  /** The account this channel plays from, or "" when it plays a pushed source. */
+  providerId: string;
+  /** The stream it plays first, and the streams it falls back to. */
+  streamId: string;
+  backupStreamIds: string[];
   updatedAt: string;
 }
 
@@ -26,6 +32,10 @@ interface FormState {
   note: string;
   proxyChannelKey: string;
   active: boolean;
+  providerId: string;
+  streamId: string;
+  backup1: string;
+  backup2: string;
 }
 
 /** The line an admin is about to hand to the box. It exists only inside this dialog. */
@@ -45,6 +55,10 @@ const EMPTY_FORM: FormState = {
   note: "",
   proxyChannelKey: "",
   active: true,
+  providerId: "",
+  streamId: "",
+  backup1: "",
+  backup2: "",
 };
 
 const FIELD_CLASS =
@@ -52,11 +66,23 @@ const FIELD_CLASS =
 const LABEL_CLASS = "block text-[10px] font-bold uppercase tracking-wide text-slate-400 mb-1";
 
 /**
- * The evidence a push leaves on the row: the handle the box filed the source under and the
- * moment it was accepted. Neither is the source — that never comes back from the box, and this
- * panel has no column for it.
+ * The evidence a row carries about where its stream comes from.
+ *
+ * A row that plays from a provider names the account it plays from and the stream it plays —
+ * the box holds the credential and the failover, and this row holds the answer to "which
+ * account was this built on" so the edit form can be filled in again.
+ *
+ * A row that was pushed names the handle its source is filed under and the moment the box
+ * accepted it. Neither is the source: that never comes back from the box, and this panel has
+ * no column for it.
  */
 function boxLabel(row: PremiumRow): string {
+  if (row.providerId) {
+    const backups = row.backupStreamIds?.length ?? 0;
+    return `Plays from ${row.providerId} · stream ${row.streamId}${
+      backups ? ` · ${backups} backup${backups === 1 ? "" : "s"}` : ""
+    }`;
+  }
   if (!row.proxyChannelKey) return "No source on the box yet";
   const pushed = row.proxyPushedAt ? new Date(row.proxyPushedAt).toLocaleString() : "";
   return `On the box as ${row.proxyChannelKey}${pushed ? ` · pushed ${pushed}` : ""}`;
@@ -88,6 +114,9 @@ export default function PremiumChannelPanel({
   const [push, setPush] = useState<PushState | null>(null);
   const [pushing, setPushing] = useState(false);
   const loadSeq = useRef(0);
+  // The accounts the box holds, for the dropdown. A channel that plays from one of them is
+  // built here rather than pushed, so the list is read when this section is open.
+  const { providers, reload: reloadProviders } = useBoxProviders(secretKey, open);
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -139,6 +168,7 @@ export default function PremiumChannelPanel({
     setEditingId(null);
     setShowForm(true);
     setMessage(null);
+    reloadProviders();
   }
 
   function startEdit(row: PremiumRow) {
@@ -150,10 +180,15 @@ export default function PremiumChannelPanel({
       note: row.note,
       proxyChannelKey: row.proxyChannelKey,
       active: row.active,
+      providerId: row.providerId || "",
+      streamId: row.streamId || "",
+      backup1: row.backupStreamIds?.[0] || "",
+      backup2: row.backupStreamIds?.[1] || "",
     });
     setEditingId(row._id);
     setShowForm(true);
     setMessage(null);
+    reloadProviders();
   }
 
   async function submit() {
@@ -168,6 +203,9 @@ export default function PremiumChannelPanel({
         note: form.note,
         proxyChannelKey: form.proxyChannelKey,
         active: form.active,
+        providerId: form.providerId,
+        streamId: form.streamId,
+        backupStreamIds: [form.backup1, form.backup2].map((id) => id.trim()).filter(Boolean),
       };
       const res = await fetch(
         editingId ? `/api/admin/premium/channels/${editingId}` : "/api/admin/premium/channels",
@@ -327,6 +365,36 @@ export default function PremiumChannelPanel({
   const activeCount = rows.filter((r) => r.active).length;
   const pushedCount = rows.filter((r) => r.proxyChannelKey).length;
 
+  /**
+   * The accounts a channel may be built on: the ones in service, plus the one this row is
+   * already on.
+   *
+   * The second one matters because an account can be taken out of service after a channel was
+   * built on it, and a dropdown that no longer listed it would drop the account from the row
+   * the moment the admin opened the form to fix something else.
+   */
+  const providerOptions = useMemo(() => {
+    const options = providers.filter((p) => p.active);
+    if (form.providerId && !options.some((p) => p.providerId === form.providerId)) {
+      const current = providers.find((p) => p.providerId === form.providerId);
+      options.push(
+        current ?? {
+          providerId: form.providerId,
+          label: form.providerId,
+          active: false,
+          kind: null,
+          server: "",
+          usernameHint: "",
+          maxConnections: 0,
+          ownHeaders: false,
+          channels: [],
+          problem: null,
+        }
+      );
+    }
+    return options;
+  }, [providers, form.providerId]);
+
   return (
     <AdminSection
       title="Premium channels"
@@ -409,17 +477,81 @@ export default function PremiumChannelPanel({
             </div>
 
             <div>
-              <label className={LABEL_CLASS}>Stream box handle (optional)</label>
-              <input
+              <label className={LABEL_CLASS}>Provider (plays from a stream box account)</label>
+              <select
                 className={FIELD_CLASS}
-                value={form.proxyChannelKey}
-                onChange={(e) => setForm({ ...form, proxyChannelKey: e.target.value })}
-                placeholder="Leave blank — a push fills it in"
-              />
-              <p className="text-[10px] text-slate-500 mt-1">
-                Only needed for a lane you registered on the box by hand. A source pushed from
-                here is filed under its own handle and this row keeps nothing but that name.
-              </p>
+                value={form.providerId}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    providerId: e.target.value,
+                    // The stream ids belong to the account, so changing the account clears
+                    // the ones that were typed for the previous one.
+                    streamId: "",
+                    backup1: "",
+                    backup2: "",
+                  })
+                }
+              >
+                <option value="">None — push a source to the box instead</option>
+                {providerOptions.map((provider) => (
+                  <option key={provider.providerId} value={provider.providerId}>
+                    {provider.label || provider.providerId}
+                    {provider.active ? "" : " (out of service)"}
+                  </option>
+                ))}
+              </select>
+              {form.providerId ? (
+                <div className="mt-2 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className={LABEL_CLASS}>Primary stream ID</label>
+                      <input
+                        className={FIELD_CLASS}
+                        value={form.streamId}
+                        onChange={(e) => setForm({ ...form, streamId: e.target.value })}
+                        placeholder="12345"
+                      />
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Backup 1 stream ID</label>
+                      <input
+                        className={FIELD_CLASS}
+                        value={form.backup1}
+                        onChange={(e) => setForm({ ...form, backup1: e.target.value })}
+                        placeholder="optional"
+                      />
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Backup 2 stream ID</label>
+                      <input
+                        className={FIELD_CLASS}
+                        value={form.backup2}
+                        onChange={(e) => setForm({ ...form, backup2: e.target.value })}
+                        placeholder="optional"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    The box plays the primary stream and falls back to Backup 1, then Backup 2,
+                    if the one before it fails. All three are streams of the account above.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-2">
+                  <label className={LABEL_CLASS}>Stream box handle (optional)</label>
+                  <input
+                    className={FIELD_CLASS}
+                    value={form.proxyChannelKey}
+                    onChange={(e) => setForm({ ...form, proxyChannelKey: e.target.value })}
+                    placeholder="Leave blank — a push fills it in"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Only needed for a lane you registered on the box by hand. A source pushed from
+                    here is filed under its own handle and this row keeps nothing but that name.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div>
@@ -561,26 +693,37 @@ export default function PremiumChannelPanel({
                   </p>
                   {row.note && <p className="text-[10px] text-slate-400 truncate">{row.note}</p>}
                 </div>
-                <button
-                  type="button"
-                  disabled={busyId === row._id}
-                  onClick={() => startPush(row)}
-                  className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40 shrink-0"
-                  title={row.proxyChannelKey ? "Push a new source over this one" : "Push this channel's source to the box"}
-                >
-                  <Upload size={12} />
-                  {row.proxyChannelKey ? "Re-push" : "Push source"}
-                </button>
-                {row.proxyChannelKey && (
-                  <button
-                    type="button"
-                    disabled={busyId === row._id}
-                    onClick={() => retract(row)}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 shrink-0"
-                    title="Take this source off the box"
-                  >
-                    <Unlink size={12} />
-                  </button>
+                {/* A channel that plays from a provider has its lane on the box already, and
+                    that lane belongs to the account — pushing a source over it would put a
+                    second stream where the failover lives. */}
+                {!row.providerId && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busyId === row._id}
+                      onClick={() => startPush(row)}
+                      className="flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40 shrink-0"
+                      title={
+                        row.proxyChannelKey
+                          ? "Push a new source over this one"
+                          : "Push this channel's source to the box"
+                      }
+                    >
+                      <Upload size={12} />
+                      {row.proxyChannelKey ? "Re-push" : "Push source"}
+                    </button>
+                    {row.proxyChannelKey && (
+                      <button
+                        type="button"
+                        disabled={busyId === row._id}
+                        onClick={() => retract(row)}
+                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 shrink-0"
+                        title="Take this source off the box"
+                      >
+                        <Unlink size={12} />
+                      </button>
+                    )}
+                  </>
                 )}
                 <button
                   type="button"

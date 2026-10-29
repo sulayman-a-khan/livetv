@@ -5,8 +5,14 @@ import {
   listPremiumChannels,
   updatePremiumChannel,
 } from "@/lib/premiumStore";
-import { validatePremiumChannelInput } from "@/lib/premiumFixtures";
-import { proxyConfigProblem, retractPremiumSource } from "@/lib/premiumProxy";
+import { boxLogoProblem, validatePremiumChannelInput } from "@/lib/premiumFixtures";
+import {
+  boxShapeOf,
+  changedBoxFields,
+  rollbackPatch,
+  syncChannelToBox,
+} from "@/lib/premiumBoxSync";
+import { proxyConfigProblem, proxyKeyForRow, retractPremiumSource } from "@/lib/premiumProxy";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +26,21 @@ function fail(error: any, fallback: string) {
  * PATCH /api/admin/premium/channels/[id]
  * Partial edit — only the keys that were sent are touched, so switching a channel
  * off never rewrites its URL or its headers.
+ *
+ * A channel that plays from a provider is a lane on the box, and the two have to agree: the
+ * row is written first and the box second, and a box that refuses the change puts the row
+ * back the way it was. A row that claims a stream the box does not hold would play nothing
+ * and say otherwise.
+ *
+ * Three things are refused rather than allowed:
+ *
+ *   - A provider cannot be taken away from a channel. The box cannot hold a channel with no
+ *     provider, so the row would be describing something that cannot exist.
+ *   - A provider cannot be attached to a channel that already has a lane on the box. That
+ *     lane belongs to the push route, and two owners of one lane is how a channel ends up
+ *     with two streams.
+ *   - The box handle of a provider-backed channel cannot be typed. The handle follows the
+ *     channel, so it is the one the row's id implies.
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -39,11 +60,95 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       );
     }
 
-    const channel = await updatePremiumChannel(params.id, value);
-    if (!channel) {
+    const row = (await listPremiumChannels()).find((channel) => channel._id === params.id);
+    if (!row) {
       return NextResponse.json({ success: false, error: "Premium channel not found" }, { status: 404 });
     }
-    return NextResponse.json({ success: true, channel });
+
+    const namesProvider = Object.prototype.hasOwnProperty.call(auth.body, "providerId");
+    if (namesProvider) {
+      const next = value.providerId ?? "";
+      if (!next && row.providerId) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "A channel that plays from a provider cannot lose it — delete the channel instead",
+          },
+          { status: 400 }
+        );
+      }
+      if (next && !row.providerId && row.proxyChannelKey) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              "This channel already has a lane on the box — take it off the box before attaching a provider",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (
+      row.providerId &&
+      typeof value.proxyChannelKey === "string" &&
+      value.proxyChannelKey !== row.proxyChannelKey
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "The box handle of a channel that plays from a provider follows the channel",
+        },
+        { status: 400 }
+      );
+    }
+
+    const nextRow = { ...row, ...value };
+    const logoProblem = boxLogoProblem(nextRow.logoUrl, nextRow.providerId);
+    if (logoProblem) {
+      return NextResponse.json({ success: false, error: logoProblem }, { status: 400 });
+    }
+
+    const patch = { ...value };
+    // A channel that gains a provider is filed under a handle: the one its own id implies.
+    if (nextRow.providerId && !nextRow.proxyChannelKey) {
+      patch.proxyChannelKey = proxyKeyForRow(row._id);
+    }
+
+    const updated = await updatePremiumChannel(params.id, patch);
+    if (!updated) {
+      return NextResponse.json({ success: false, error: "Premium channel not found" }, { status: 404 });
+    }
+
+    // A row with no provider has no lane on the box. Its stream, if it has one, was pushed
+    // there by the push route, which owns that lane.
+    if (!updated.providerId) {
+      return NextResponse.json({ success: true, channel: updated });
+    }
+
+    const before = boxShapeOf(row);
+    const after = boxShapeOf(updated);
+    const fields = changedBoxFields(before, after);
+    if (fields.length === 0) {
+      return NextResponse.json({ success: true, channel: updated });
+    }
+
+    const outcome = await syncChannelToBox(after, fields);
+    if (!outcome.ok) {
+      const restored = await updatePremiumChannel(params.id, rollbackPatch(before, fields));
+      return NextResponse.json(
+        {
+          success: false,
+          error: restored
+            ? `the change was not kept because the stream box refused it: ${outcome.error}`
+            : `the stream box refused the change and this row could not be put back: ${outcome.error}`,
+          code: outcome.code,
+        },
+        { status: outcome.status }
+      );
+    }
+
+    return NextResponse.json({ success: true, channel: updated });
   } catch (error: any) {
     return fail(error, "Failed to update premium channel");
   }

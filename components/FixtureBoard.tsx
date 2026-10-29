@@ -4,6 +4,7 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
 import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
+import { parseMatchTitle, teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -28,25 +29,55 @@ function initialsOf(name: string): string {
   );
 }
 
-/** Team mark: the logo the admin entered, or its initials when there is none. */
+/**
+ * Team mark: the flag the team is recognised by, the logo the admin entered, or its initials.
+ *
+ * The flag comes first because recognition is the point — a national side is recognised from its
+ * name, so an admin never has to find, crop and upload a picture of a flag. A logo they entered
+ * is the next thing to try and the initials are the last, so a card is never blank, and a
+ * picture that fails to load costs the card its picture and nothing else.
+ */
 function TeamMark({ name, logo }: { name: string; logo: string }) {
-  const [broken, setBroken] = useState(false);
+  const [failed, setFailed] = useState<string[]>([]);
+  const candidates = [teamFlagUrl(name), logo].filter((src): src is string => Boolean(src));
+  const src = candidates.find((candidate) => !failed.includes(candidate));
 
   return (
     <div className="w-9 h-9 rounded-full bg-white/95 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
-      {logo && !broken ? (
+      {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={logo}
+          src={src}
           alt=""
           className="max-w-full max-h-full object-contain"
-          onError={() => setBroken(true)}
+          onError={() => setFailed((list) => (list.includes(src) ? list : [...list, src]))}
         />
       ) : (
         <span className="text-[10px] font-black text-slate-700">{initialsOf(name)}</span>
       )}
     </div>
   );
+}
+
+/** The sport a card is for, in the one word its corner badge shows. */
+const SPORT_LABEL: Record<PublicFixture["sport"], string> = {
+  football: "Football",
+  cricket: "Cricket",
+};
+
+/**
+ * The admin's own wording for the match, when it says something the team names do not.
+ *
+ * "Bangladesh vs India" is what the two team marks already say, so the card does not print it
+ * twice; "BAN vs IND" is the admin naming the same match the way they want it read, and that
+ * is shown.
+ */
+function headingOf(fixture: PublicFixture): string {
+  const title = fixture.title.trim();
+  if (!title) return "";
+  const parsed = parseMatchTitle(title);
+  if (parsed && parsed.teamA === fixture.teamA && parsed.teamB === fixture.teamB) return "";
+  return title;
 }
 
 /**
@@ -77,6 +108,7 @@ function FixtureCard({
 }) {
   const live = fixture.phase === "live";
   const offers = offersOf(fixture.choices);
+  const heading = headingOf(fixture);
   // The card's own line names the channel a tap would reach, so the first offer is the one worth
   // printing — the same answer `watchPath` was built from, not a field carried alongside it.
   const named = offers[0] ?? fixture.choices[0];
@@ -89,9 +121,14 @@ function FixtureCard({
       }`}
     >
       <div className="flex items-center justify-between gap-2 min-w-0">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">
-          {fixture.competition || (fixture.sport === "cricket" ? "Cricket" : "Football")}
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
+            {SPORT_LABEL[fixture.sport]}
+          </span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">
+            {fixture.competition}
+          </span>
+        </div>
         {live ? (
           <span className="flex items-center gap-1 text-[10px] font-black text-red-400 shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -99,6 +136,10 @@ function FixtureCard({
           </span>
         ) : null}
       </div>
+
+      {heading ? (
+        <p className="text-[11px] font-bold text-white truncate">{heading}</p>
+      ) : null}
 
       <div className="flex items-center justify-between gap-2 min-w-0">
         <div className="flex items-center gap-2 min-w-0 flex-1">

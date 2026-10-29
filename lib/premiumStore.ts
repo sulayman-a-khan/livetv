@@ -43,6 +43,15 @@ export interface PremiumChannelRecord {
   proxyChannelKey: string;
   /** When a source was last pushed to the box, so a panel run leaves visible evidence. */
   proxyPushedAt: string | null;
+  /**
+   * The provider account this channel plays from, and the streams it plays and falls back to.
+   *
+   * The box holds the credential; this row holds the handle and the ids, which is what the
+   * edit form has to show and nothing a viewer could play.
+   */
+  providerId: string;
+  streamId: string;
+  backupStreamIds: string[];
   active: boolean;
   sortOrder: number;
   note: string;
@@ -68,6 +77,8 @@ export interface PremiumBoardChannel {
 
 export interface FixtureRecord {
   _id: string;
+  /** The card's title, as the admin wrote it. */
+  title: string;
   sport: "football" | "cricket";
   teamA: string;
   teamB: string;
@@ -130,6 +141,9 @@ function toPremiumRecord(row: {
   headers?: { userAgent?: string; referer?: string };
   proxyChannelKey?: string;
   proxyPushedAt?: Date | null;
+  providerId?: string;
+  streamId?: string;
+  backupStreamIds?: string[];
   active?: boolean;
   sortOrder?: number;
   note?: string;
@@ -145,12 +159,34 @@ function toPremiumRecord(row: {
     headers: { userAgent: row.headers?.userAgent || "", referer: row.headers?.referer || "" },
     proxyChannelKey: row.proxyChannelKey || "",
     proxyPushedAt: row.proxyPushedAt ? new Date(row.proxyPushedAt).toISOString() : null,
+    providerId: row.providerId || "",
+    streamId: row.streamId || "",
+    backupStreamIds: readBackupStreamIds(row.backupStreamIds),
     active: row.active !== false,
     sortOrder: typeof row.sortOrder === "number" ? row.sortOrder : 99,
     note: row.note || "",
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
     updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : "",
   };
+}
+
+/**
+ * The failover order a row was stored with.
+ *
+ * The order is the whole point of the list, so a stored list that names the same stream twice
+ * or holds something that is not a stream id is not repaired here: it is read as it was
+ * written, and the validation on the way in is where such a list is refused.
+ */
+function readBackupStreamIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string") continue;
+    const value = entry.trim();
+    if (!value || out.includes(value)) continue;
+    out.push(value);
+  }
+  return out;
 }
 
 /**
@@ -193,6 +229,7 @@ function readFixtureChannels(row: {
 function toFixtureRecord(
   row: {
     _id: unknown;
+    title?: string;
     sport?: string;
     teamA?: string;
     teamB?: string;
@@ -213,6 +250,7 @@ function toFixtureRecord(
   const duration = typeof row.durationMinutes === "number" ? row.durationMinutes : 120;
   return {
     _id: String(row._id),
+    title: row.title || "",
     sport: row.sport === "cricket" ? "cricket" : "football",
     teamA: row.teamA || "",
     teamB: row.teamB || "",
@@ -307,6 +345,9 @@ export async function createPremiumChannel(
       category: input.category,
       logoUrl: input.logoUrl,
       proxyChannelKey: input.proxyChannelKey,
+      providerId: input.providerId ?? "",
+      streamId: input.streamId ?? "",
+      backupStreamIds: input.backupStreamIds ?? [],
       active: input.active,
       sortOrder: input.sortOrder,
       note: input.note,
@@ -324,6 +365,9 @@ export async function createPremiumChannel(
     headers: { userAgent: "", referer: "" },
     proxyChannelKey: input.proxyChannelKey,
     proxyPushedAt: null,
+    providerId: input.providerId ?? "",
+    streamId: input.streamId ?? "",
+    backupStreamIds: input.backupStreamIds ?? [],
     active: input.active,
     sortOrder: input.sortOrder,
     note: input.note,
@@ -527,6 +571,7 @@ export async function createFixture(input: FixtureInput): Promise<FixtureRecord>
   requirePersistingStore(conn, "nothing was saved");
   if (conn) {
     const created = await FixtureModel.create({
+      title: input.title ?? "",
       sport: input.sport,
       teamA: input.teamA,
       teamB: input.teamB,
@@ -543,6 +588,7 @@ export async function createFixture(input: FixtureInput): Promise<FixtureRecord>
 
   const record: LocalFixture = {
     _id: `fx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    title: input.title ?? "",
     sport: input.sport,
     teamA: input.teamA,
     teamB: input.teamB,

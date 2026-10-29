@@ -16,7 +16,7 @@ import mongoose from "mongoose";
 import Channel from "@/models/Channel";
 import { connectToDatabase } from "./db";
 import { inMemoryDb } from "./inMemoryStore";
-import { existingPremiumChannelIds, requirePersistingStore } from "./premiumStore";
+import { existingPremiumChannelIds, listFixtures, requirePersistingStore } from "./premiumStore";
 import type { FixtureChannelRef, FixtureSourceType } from "./premiumFixtures";
 
 /** One channel an admin may link a match to, as the editor shows it. */
@@ -144,6 +144,38 @@ export interface FixtureRefFinding {
  */
 export function describeUnknownFixtureRefs(unknown: FixtureRefFinding[]): string {
   return unknown.map(({ ref, reason }) => `Linked channel ${ref.channelId} ${reason}.`).join(" ");
+}
+
+/**
+ * The channels of the match card that names a premium channel, in the order the admin set them.
+ *
+ * The order is the priority the card is watched on — the first channel on it is the one that is
+ * tried first, and the ones after it are what a failure moves to — so it is read from the card
+ * rather than rebuilt here. Only a published card that has not finished counts: a card nobody
+ * can see is not a reason to move a viewer anywhere.
+ *
+ * A link that names no channel is left out, because a fallback to a channel that is not there is
+ * not a fallback.
+ */
+export async function listCardChannelsFor(channelId: string): Promise<FixtureChannelRef[]> {
+  if (!channelId) return [];
+  const fixtures = await listFixtures();
+  const cards = fixtures.filter(
+    (fixture) =>
+      fixture.visible &&
+      fixture.phase !== "finished" &&
+      fixture.channels.some(
+        (ref) => ref.sourceType === "secured" && ref.channelId === channelId
+      )
+  );
+  if (cards.length === 0) return [];
+
+  const card = cards[0];
+  const { refused } = await checkFixtureRefs(card.channels);
+  const gone = new Set(
+    refused.map((finding) => `${finding.ref.sourceType}:${finding.ref.channelId}`)
+  );
+  return card.channels.filter((ref) => !gone.has(`${ref.sourceType}:${ref.channelId}`));
 }
 
 /**

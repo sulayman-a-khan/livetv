@@ -185,13 +185,13 @@ test("an unset admin secret locks the write surface in every environment", async
 
 // --- the action list is closed ---
 
-test("only the four named actions are performed", async () => {
+test("only the named actions are performed", async () => {
   configuredEnv();
   const { fetchImpl, box } = stubFetch();
 
   const result = await proxyActionResponse(
     ADMIN_SECRET,
-    { action: "delete_provider", target: "acct0" },
+    { action: "drop_everything", target: "acct0" },
     { fetchImpl }
   );
 
@@ -269,6 +269,79 @@ test("each action reaches exactly the box route the table names", async () => {
       path: "/admin/channels/acct0-ch1/probe",
       body: undefined,
     },
+    {
+      action: "create_provider",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "http://panel.example.com:8080",
+        username: "user1",
+        password: "pass1",
+      },
+      method: "POST",
+      path: "/admin/providers",
+      body: {
+        providerId: "acct0",
+        label: "Account 0",
+        kind: "xtream",
+        serverUrl: "http://panel.example.com:8080",
+        username: "user1",
+        password: "pass1",
+        maxConnections: 1,
+      },
+    },
+    {
+      action: "update_provider",
+      request: { action: "update_provider", target: "acct0", label: "Renamed" },
+      method: "PATCH",
+      path: "/admin/providers/acct0",
+      body: { label: "Renamed" },
+    },
+    {
+      action: "delete_provider",
+      request: { action: "delete_provider", target: "acct0" },
+      method: "DELETE",
+      path: "/admin/providers/acct0",
+      body: undefined,
+    },
+    {
+      action: "create_channel",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4411",
+        backupStreamIds: ["4412", "4413"],
+      },
+      method: "POST",
+      path: "/admin/channels",
+      body: {
+        channelKey: "acct0-ch1",
+        displayName: "Channel 1",
+        category: "premium",
+        logoUrl: "",
+        active: true,
+        providerId: "acct0",
+        streamId: "4411",
+        backupStreamIds: ["4412", "4413"],
+      },
+    },
+    {
+      action: "update_channel",
+      request: { action: "update_channel", target: "acct0-ch1", displayName: "Renamed" },
+      method: "PATCH",
+      path: "/admin/channels/acct0-ch1",
+      body: { displayName: "Renamed" },
+    },
+    {
+      action: "delete_channel",
+      request: { action: "delete_channel", target: "acct0-ch1" },
+      method: "DELETE",
+      path: "/admin/channels/acct0-ch1",
+      body: undefined,
+    },
   ];
 
   for (const testCase of cases) {
@@ -314,6 +387,308 @@ test("a body field the action does not use is never forwarded", async () => {
   const sent = JSON.stringify(box.calls[0]);
   assert.ok(!sent.includes("panel.example.com"), "no upstream address may travel");
   assert.ok(!sent.includes("a-token-the-caller-supplied"), "no caller-supplied token may travel");
+});
+
+// --- the six row-writing actions ---
+
+test("a provider's password travels once, to the box, and is never echoed back", async () => {
+  configuredEnv();
+  const { fetchImpl, box } = stubFetch({
+    status: 201,
+    body: {
+      ok: true,
+      provider: {
+        providerId: "acct0",
+        label: "Account 0",
+        active: true,
+        kind: "xtream",
+        server: "http://panel.example.com:8080",
+        usernameHint: "us***",
+        accountKey: "9f8e7d6c5b4a39281706",
+        channels: [],
+        problem: null,
+      },
+    },
+  });
+
+  const result = await proxyActionResponse(
+    ADMIN_SECRET,
+    {
+      action: "create_provider",
+      target: "acct0",
+      label: "Account 0",
+      serverUrl: "http://panel.example.com:8080",
+      username: "user1",
+      password: "the-password",
+    },
+    { fetchImpl }
+  );
+
+  assert.equal(result.status, 200);
+  assert.equal(box.calls.length, 1);
+
+  // The credential is in the body of the one request that needs it, and nowhere else.
+  const sent = JSON.parse(String(box.calls[0].init?.body));
+  assert.equal(sent.password, "the-password");
+  assert.equal(sent.maxConnections, 1);
+  const headers = (box.calls[0].init?.headers ?? {}) as Record<string, string>;
+  assert.equal(headers.authorization, `Bearer ${BOX_TOKEN}`);
+  assert.ok(!String(box.calls[0].input).includes("the-password"));
+
+  // And nothing that names a credential, a lane or an address comes back to the browser.
+  const answer = JSON.stringify(result.body);
+  for (const secret of ["the-password", "9f8e7d6c5b4a39281706", "panel.example.com", "accountKey"]) {
+    assert.ok(!answer.includes(secret), `${secret} must not reach the browser`);
+  }
+  const detail = (result.body.result as Record<string, unknown>).detail as Record<string, unknown>;
+  assert.deepEqual(detail, { active: true });
+});
+
+test("an edit that does not touch the password does not send one", async () => {
+  configuredEnv();
+  const { fetchImpl, box } = stubFetch({ status: 200, body: { ok: true, provider: { active: true } } });
+
+  await proxyActionResponse(
+    ADMIN_SECRET,
+    { action: "update_provider", target: "acct0", label: "Renamed" },
+    { fetchImpl }
+  );
+
+  const body = JSON.parse(String(box.calls[0].init?.body));
+  assert.deepEqual(body, { label: "Renamed" });
+  assert.ok(!("password" in body), "an unchanged credential must not be sent back to the box");
+});
+
+test("the failover order is the order the backups were given in", async () => {
+  configuredEnv();
+  const { fetchImpl, box } = stubFetch({ status: 201, body: { ok: true, channel: { active: true } } });
+
+  await proxyActionResponse(
+    ADMIN_SECRET,
+    {
+      action: "create_channel",
+      target: "acct0-ch1",
+      displayName: "Channel 1",
+      providerId: "acct0",
+      streamId: "4411",
+      backupStreamIds: ["4413", "4412"],
+    },
+    { fetchImpl }
+  );
+
+  const body = JSON.parse(String(box.calls[0].init?.body));
+  assert.deepEqual(body.backupStreamIds, ["4413", "4412"]);
+  assert.equal(body.streamId, "4411");
+});
+
+test("a rename never drops the failover order, and clearing it is explicit", async () => {
+  configuredEnv();
+  const { fetchImpl, box } = stubFetch({ status: 200, body: { ok: true, channel: { active: true } } });
+
+  await proxyActionResponse(
+    ADMIN_SECRET,
+    { action: "update_channel", target: "acct0-ch1", displayName: "Renamed" },
+    { fetchImpl }
+  );
+  const renamed = JSON.parse(String(box.calls[0].init?.body));
+  assert.deepEqual(renamed, { displayName: "Renamed" });
+  assert.ok(!("backupStreamIds" in renamed), "a rename must not touch the failover order");
+
+  const { fetchImpl: second, box: secondBox } = stubFetch({
+    status: 200,
+    body: { ok: true, channel: { active: true } },
+  });
+  await proxyActionResponse(
+    ADMIN_SECRET,
+    { action: "update_channel", target: "acct0-ch1", backupStreamIds: [] },
+    { fetchImpl: second }
+  );
+  const cleared = JSON.parse(String(secondBox.calls[0].init?.body));
+  assert.deepEqual(cleared, { backupStreamIds: [] });
+});
+
+test("a bad argument is refused here, so the box is never asked", async () => {
+  configuredEnv();
+  const { fetchImpl, box } = stubFetch();
+
+  const bad: { name: string; request: Record<string, unknown> }[] = [
+    {
+      name: "a server URL that is not a URL",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "not-a-url",
+        username: "user1",
+        password: "pass1",
+      },
+    },
+    {
+      name: "a server URL with a query",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "http://panel.example.com/?x=1",
+        username: "user1",
+        password: "pass1",
+      },
+    },
+    {
+      name: "a server URL that embeds a credential",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "http://user:pass@panel.example.com",
+        username: "user1",
+        password: "pass1",
+      },
+    },
+    {
+      name: "a username with a slash",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "http://panel.example.com",
+        username: "user/1",
+        password: "pass1",
+      },
+    },
+    {
+      name: "a missing password",
+      request: {
+        action: "create_provider",
+        target: "acct0",
+        label: "Account 0",
+        serverUrl: "http://panel.example.com",
+        username: "user1",
+      },
+    },
+    {
+      name: "an http logo",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4411",
+        logoUrl: "http://cdn.example.com/logo.png",
+      },
+    },
+    {
+      name: "a stream id that is too long",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4".repeat(33),
+      },
+    },
+    {
+      name: "the same backup twice",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4411",
+        backupStreamIds: ["4412", "4412"],
+      },
+    },
+    {
+      name: "a backup that is the primary",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4411",
+        backupStreamIds: ["4411"],
+      },
+    },
+    {
+      name: "more backups than the box allows",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        providerId: "acct0",
+        streamId: "4411",
+        backupStreamIds: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+      },
+    },
+    {
+      name: "a channel with no provider",
+      request: {
+        action: "create_channel",
+        target: "acct0-ch1",
+        displayName: "Channel 1",
+        streamId: "4411",
+      },
+    },
+    {
+      name: "an edit with nothing in it",
+      request: { action: "update_channel", target: "acct0-ch1" },
+    },
+  ];
+
+  for (const testCase of bad) {
+    const result = await proxyActionResponse(ADMIN_SECRET, testCase.request, { fetchImpl });
+    assert.equal(result.status, 400, `${testCase.name} must be refused`);
+    assert.equal(result.body.success, false);
+    assert.equal(result.body.code, "invalid_argument", `${testCase.name} must name the bad field`);
+    assert.ok(String(result.body.error).length > 0, `${testCase.name} must say what is wrong`);
+  }
+
+  assert.equal(box.calls.length, 0, "a refused argument must not reach the box");
+});
+
+test("a row the box already has is a conflict, not a generic failure", async () => {
+  configuredEnv();
+  const { fetchImpl } = stubFetch({
+    status: 409,
+    body: { ok: false, code: "provider_exists", message: "provider acct0 already exists" },
+  });
+
+  const result = await proxyActionResponse(
+    ADMIN_SECRET,
+    {
+      action: "create_provider",
+      target: "acct0",
+      label: "Account 0",
+      serverUrl: "http://panel.example.com",
+      username: "user1",
+      password: "pass1",
+    },
+    { fetchImpl }
+  );
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.success, false);
+  assert.equal(result.body.code, "conflict");
+  assert.ok(!JSON.stringify(result.body).includes("already exists"));
+});
+
+test("a provider that is still in use is refused by the box, and the site says so", async () => {
+  configuredEnv();
+  const { fetchImpl } = stubFetch({
+    status: 409,
+    body: { ok: false, code: "provider_in_use", message: "channels still point at acct0" },
+  });
+
+  const result = await proxyActionResponse(
+    ADMIN_SECRET,
+    { action: "delete_provider", target: "acct0" },
+    { fetchImpl }
+  );
+
+  assert.equal(result.status, 409);
+  assert.equal(result.body.code, "conflict");
+  const resultBody = result.body.result as Record<string, unknown>;
+  assert.equal(resultBody.code, "provider_in_use");
 });
 
 // --- the credential ---
@@ -694,11 +1069,13 @@ test("every action and every refusal the server can send has a line", () => {
     "unknown_action",
     "invalid_target",
     "invalid_active",
+    "invalid_argument",
     "not_configured",
     "unreachable",
     "unreadable_answer",
     "refused",
     "unknown_row",
+    "conflict",
     "refused_credential",
     "box_error",
   ];
@@ -724,6 +1101,8 @@ test("every action and every refusal the server can send has a line", () => {
     "registry_unavailable",
     "provider_busy",
     "provider_in_use",
+    "provider_exists",
+    "channel_exists",
     "duplicate_credential",
     "channel_limit",
     "too_many_channels",
@@ -734,6 +1113,12 @@ test("every action and every refusal the server can send has a line", () => {
     assert.ok(line.text.length > 0, `${code} must have a line`);
     assert.equal(line.tone, "red");
   }
+
+  // A code that names a field the box refused still has to read as something: the box has
+  // more fields than anyone would want a written line for.
+  const fieldCode = proxyActionFailure(null, "invalid_streamId");
+  assert.ok(fieldCode.text.length > 0);
+  assert.equal(fieldCode.tone, "red");
 
   // A code nobody has seen still has to read as something.
   const unknown = proxyActionFailure("something_new", "also_new");

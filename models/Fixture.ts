@@ -17,6 +17,14 @@ export { FIXTURE_SPORTS, FIXTURE_SOURCE_TYPES, type FixtureSport, type FixtureCh
  * card here is a deliberate entry, and a new one starts unpublished.
  */
 export interface IFixture extends Document {
+  /**
+   * The card's title, as the admin wrote it: "Bangladesh vs India", "BAN vs IND".
+   *
+   * It is kept beside the two team fields rather than instead of them: the card shows the
+   * teams it recognised and the flags that go with them, and the title is what the admin
+   * typed and what a card is called in the panel's own list.
+   */
+  title: string;
   sport: FixtureSport;
   teamA: string;
   teamB: string;
@@ -47,6 +55,7 @@ export interface IFixture extends Document {
 const FixtureSchema = new Schema<IFixture>(
   {
     sport: { type: String, enum: FIXTURE_SPORTS, required: true, index: true },
+    title: { type: String, default: "", trim: true },
     teamA: { type: String, required: true, trim: true },
     teamB: { type: String, required: true, trim: true },
     teamALogo: { type: String, default: "", trim: true },

@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     if (rejected) return rejected;
 
     const fixture = await createFixture({
+      title: value.title ?? "",
       sport: value.sport!,
       teamA: value.teamA!,
       teamB: value.teamB!,

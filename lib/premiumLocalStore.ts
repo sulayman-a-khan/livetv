@@ -27,6 +27,14 @@ export interface LocalPremiumChannel {
    */
   proxyChannelKey?: string;
   proxyPushedAt?: Date | null;
+  /**
+   * The provider account this channel plays from, and the streams it plays and falls back to.
+   * Optional in the type for the same reason `proxyChannelKey` is: a store file written before
+   * a channel could name a provider has no such field on its rows.
+   */
+  providerId?: string;
+  streamId?: string;
+  backupStreamIds?: string[];
   active: boolean;
   sortOrder: number;
   note: string;
@@ -36,6 +44,8 @@ export interface LocalPremiumChannel {
 
 export interface LocalFixture {
   _id: string;
+  /** The card's title, as the admin wrote it. */
+  title?: string;
   sport: string;
   teamA: string;
   teamB: string;
@@ -58,7 +68,16 @@ export interface LocalFixture {
 }
 
 const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "premium-store.json");
+/**
+ * Where this tier's own rows live.
+ *
+ * The path is the project's own `data/` folder, and a test run may point it somewhere else:
+ * a run that measured itself against whatever a developer happened to leave behind would be
+ * measuring their leftovers and not the code. Nothing sets this outside a test.
+ */
+const DATA_FILE = process.env.PREMIUM_STORE_FILE
+  ? path.resolve(process.env.PREMIUM_STORE_FILE)
+  : path.join(DATA_DIR, "premium-store.json");
 
 declare global {
   // eslint-disable-next-line no-var
@@ -113,6 +132,11 @@ function ensureLoaded() {
         },
         proxyChannelKey: text(c?.proxyChannelKey),
         proxyPushedAt: c?.proxyPushedAt ? new Date(c.proxyPushedAt) : null,
+        providerId: text(c?.providerId),
+        streamId: text(c?.streamId),
+        backupStreamIds: Array.isArray(c?.backupStreamIds)
+          ? c.backupStreamIds.filter((id: unknown): id is string => typeof id === "string")
+          : [],
         active: c?.active !== false,
         sortOrder: typeof c?.sortOrder === "number" ? c.sortOrder : 99,
         note: text(c?.note),
@@ -124,6 +148,7 @@ function ensureLoaded() {
         Array.isArray(parsed.fixtures) ? parsed.fixtures : []
       ).map((f: any) => ({
         _id: text(f?._id),
+        title: text(f?.title),
         sport: text(f?.sport, "football"),
         teamA: text(f?.teamA),
         teamB: text(f?.teamB),
@@ -152,7 +177,8 @@ function ensureLoaded() {
 
 function saveToDisk() {
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const dir = path.dirname(DATA_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const data = {
       premiumChannels: global.__freetv_premium_channels || [],
       fixtures: global.__freetv_premium_fixtures || [],

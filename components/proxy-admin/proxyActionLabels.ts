@@ -27,6 +27,18 @@ export function proxyActionLabel(action: string | null | undefined): string {
       return "চ্যানেলের অবস্থা বদল";
     case "probe_channel":
       return "চ্যানেল যাচাই";
+    case "create_provider":
+      return "প্রোভাইডার যোগ";
+    case "update_provider":
+      return "প্রোভাইডার বদল";
+    case "delete_provider":
+      return "প্রোভাইডার মুছে ফেলা";
+    case "create_channel":
+      return "চ্যানেল যোগ";
+    case "update_channel":
+      return "চ্যানেল বদল";
+    case "delete_channel":
+      return "চ্যানেল মুছে ফেলা";
     default:
       return "কাজ";
   }
@@ -38,11 +50,13 @@ const SITE_FAILURES: Record<string, string> = {
   unknown_action: "এই কাজটি প্যানেল করে না।",
   invalid_target: "আইডিটি বাক্সের নিয়ম মেনে চলছে না।",
   invalid_active: "চালু না বন্ধ, তা পাঠানো হয়নি।",
+  invalid_argument: "দেওয়া তথ্য বাক্সের নিয়ম মেনে চলছে না।",
   not_configured: "এই সার্ভারে বাক্সের লেখার কী নেই।",
   unreachable: "বাক্সে পৌঁছানো যায়নি।",
   unreadable_answer: "বাক্সের উত্তর পড়া যায়নি।",
   refused: "বাক্স পরিবর্তনটি গ্রহণ করেনি।",
   unknown_row: "বাক্সে এই সারি নেই।",
+  conflict: "বাক্সে এই সারি আগে থেকেই আছে, কিংবা এখনো ব্যবহারে আছে।",
   refused_credential: "বাক্স এই সার্ভারের কী মেনে নিচ্ছে না।",
   box_error: "বাক্স কাজটি করতে পারেনি।",
 };
@@ -63,6 +77,8 @@ const BOX_FAILURES: Record<string, string> = {
   registry_unavailable: "বাক্সের রেজিস্ট্রি পাওয়া যায়নি।",
   provider_busy: "প্রোভাইডারের সব সংযোগ ব্যবহারে আছে।",
   provider_in_use: "প্রোভাইডারটি ব্যবহারে আছে।",
+  provider_exists: "বাক্সে এই প্রোভাইডারটি আগে থেকেই আছে।",
+  channel_exists: "বাক্সে এই চ্যানেলটি আগে থেকেই আছে।",
   duplicate_credential: "এই ক্রেডেনশিয়াল আগে থেকেই আছে।",
   channel_limit: "বাক্সের চ্যানেল সীমা পূর্ণ।",
   too_many_channels: "বাক্সের চ্যানেল সীমা পূর্ণ।",
@@ -74,6 +90,11 @@ const BOX_FAILURES: Record<string, string> = {
  *
  * The box's own code is used when there is one, because it names the reason precisely; the
  * server's code says where the refusal happened when the box gave no reason of its own.
+ *
+ * The box names the field it refused in its own code — `invalid_streamId`,
+ * `invalid_backupStreamIds` — and there are more fields than anyone would want to write a
+ * line for. So a code of that shape gets one general line rather than no line at all: the
+ * operator learns that a value was refused without learning which of forty rules it broke.
  */
 export function proxyActionFailure(
   siteCode: string | null | undefined,
@@ -81,6 +102,9 @@ export function proxyActionFailure(
 ): ProxyActionLine {
   const boxText = boxCode ? BOX_FAILURES[boxCode] : undefined;
   if (boxText) return { tone: "red", text: boxText };
+  if (boxCode && /^invalid_[a-z]{1,30}$/.test(boxCode)) {
+    return { tone: "red", text: "বাক্স দেওয়া তথ্যটি গ্রহণ করেনি — ফিল্ডের নিয়ম মিলছে না।" };
+  }
   if (siteCode && SITE_FAILURES[siteCode]) return { tone: "red", text: SITE_FAILURES[siteCode] };
   return { tone: "red", text: "বাক্স কাজটি গ্রহণ করেনি।" };
 }
@@ -127,6 +151,40 @@ export function proxyActionSuccess(
     const noun = action === "set_channel_active" ? "চ্যানেল" : "প্রোভাইডার";
     const state = data.active === true ? "চালু" : data.active === false ? "বন্ধ" : "অপরিবর্তিত";
     return { tone: "green", text: `${noun} এখন ${state}।` };
+  }
+
+  if (action === "create_provider") {
+    return { tone: "green", text: "প্রোভাইডার বাক্সে যোগ হয়েছে।" };
+  }
+
+  if (action === "update_provider") {
+    return { tone: "green", text: "প্রোভাইডারের তথ্য বদল হয়েছে।" };
+  }
+
+  if (action === "delete_provider") {
+    return { tone: "green", text: "প্রোভাইডার বাক্স থেকে মুছে ফেলা হয়েছে।" };
+  }
+
+  if (action === "create_channel") {
+    const backups = number(data.backupCount);
+    const summary = backups === null ? null : `${backups} ব্যাকআপ স্ট্রিম`;
+    return {
+      tone: "green",
+      text: `চ্যানেল বাক্সে যোগ হয়েছে।${summary ? ` ${summary}।` : ""}`,
+    };
+  }
+
+  if (action === "update_channel") {
+    const backups = number(data.backupCount);
+    const summary = backups === null ? null : `${backups} ব্যাকআপ স্ট্রিম`;
+    return {
+      tone: "green",
+      text: `চ্যানেলের তথ্য বদল হয়েছে।${summary ? ` ${summary}।` : ""}`,
+    };
+  }
+
+  if (action === "delete_channel") {
+    return { tone: "green", text: "চ্যানেল বাক্স থেকে মুছে ফেলা হয়েছে।" };
   }
 
   if (action === "probe_channel") {

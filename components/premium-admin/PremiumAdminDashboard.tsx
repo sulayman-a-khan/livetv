@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Database, Loader2, ShieldCheck } from "lucide-react";
 import FixturePanel from "./FixturePanel";
+import LivePanel from "./LivePanel";
 import PremiumChannelPanel from "./PremiumChannelPanel";
+import ProviderPanel from "./ProviderPanel";
 
 interface PremiumAdminDashboardProps {
   secretKey: string;
@@ -12,7 +14,7 @@ interface PremiumAdminDashboardProps {
 
 const OPEN_KEY = "freetv_premium_admin_open_sections";
 
-const DEFAULT_OPEN = { channels: true, fixtures: true };
+const DEFAULT_OPEN = { providers: true, channels: true, live: true, fixtures: true };
 
 type OpenSections = typeof DEFAULT_OPEN;
 
@@ -110,10 +112,22 @@ export default function PremiumAdminDashboard({ secretKey }: PremiumAdminDashboa
         </div>
       </div>
 
+      <ProviderPanel
+        secretKey={secretKey}
+        open={openSections.providers}
+        onToggle={() => toggle("providers")}
+      />
+
       <PremiumChannelPanel
         secretKey={secretKey}
         open={openSections.channels}
         onToggle={() => toggle("channels")}
+      />
+
+      <LivePanel
+        secretKey={secretKey}
+        open={openSections.live}
+        onToggle={() => toggle("live")}
       />
 
       <FixturePanel

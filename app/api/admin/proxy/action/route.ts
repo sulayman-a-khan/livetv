@@ -18,7 +18,7 @@ export const maxDuration = 30;
 /**
  * POST /api/admin/proxy/action
  *
- * The write half of the 24/7 control panel: one route that performs one of four named
+ * The write half of the 24/7 control panel: one route that performs one of the named
  * actions on the stream box.
  *
  * The browser names the action and the row it means; it never names a path, a URL or a
@@ -49,6 +49,16 @@ export async function POST(req: NextRequest) {
     action: body.action,
     target: body.target,
     active: body.active,
+    label: body.label,
+    serverUrl: body.serverUrl,
+    username: body.username,
+    password: body.password,
+    displayName: body.displayName,
+    category: body.category,
+    logoUrl: body.logoUrl,
+    providerId: body.providerId,
+    streamId: body.streamId,
+    backupStreamIds: body.backupStreamIds,
   });
 
   return NextResponse.json(result.body, {

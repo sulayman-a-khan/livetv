@@ -27,6 +27,21 @@ export interface IPremiumChannel extends Document {
   proxyChannelKey: string;
   /** When the source was last pushed to the box, so a panel run leaves visible evidence. */
   proxyPushedAt: Date | null;
+  /**
+   * The provider account this channel plays from, and the streams it plays and falls back to.
+   *
+   * The box holds the credential; this row holds only the handle that names the account and
+   * the ids of the streams on it. It is enough to re-fill the edit form and to show what a
+   * channel was built on, and it is nothing a viewer could play — the player is handed a
+   * signed URL by the server, never a stream id.
+   *
+   * A row with no provider is a channel with no stream yet: a name and a place on the rail.
+   */
+  providerId: string;
+  /** The stream the channel plays first. */
+  streamId: string;
+  /** The streams it falls back to, in the order it falls back to them. */
+  backupStreamIds: string[];
   /** Admin switch: an inactive channel is hidden from the rail. */
   active: boolean;
   /** Rail position. The admin's own order, like a pinned channel's. */
@@ -53,6 +68,9 @@ const PremiumChannelSchema = new Schema<IPremiumChannel>(
     headers: { type: PremiumChannelHeadersSchema, default: () => ({}) },
     proxyChannelKey: { type: String, default: "", trim: true, index: true },
     proxyPushedAt: { type: Date, default: null },
+    providerId: { type: String, default: "", trim: true, index: true },
+    streamId: { type: String, default: "", trim: true },
+    backupStreamIds: { type: [String], default: [] },
     active: { type: Boolean, default: true, index: true },
     sortOrder: { type: Number, default: 99 },
     note: { type: String, default: "", trim: true },

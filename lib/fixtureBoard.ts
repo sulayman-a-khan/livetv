@@ -19,6 +19,13 @@ const MAX_CARDS = 3;
 /** The fixture fields the board reads, shaped so the store's record fits as-is. */
 export interface BoardFixture {
   _id: string;
+  /**
+   * The card's title, as the admin wrote it.
+   *
+   * Optional because a card written before titles existed has none: the title is a
+   * convenience the admin reads, and the two team fields are what a card is actually made of.
+   */
+  title?: string;
   sport: FixtureSport;
   teamA: string;
   teamB: string;
@@ -98,6 +105,8 @@ export interface FixtureChoice {
 
 export interface PublicFixture {
   id: string;
+  /** The card's title, as the admin wrote it. */
+  title: string;
   sport: FixtureSport;
   teamA: string;
   teamB: string;
@@ -231,6 +240,30 @@ function resolveChoice(
 }
 
 /**
+ * The next channel to try when the one playing could not, in the order the admin set.
+ *
+ * The card's order is the priority: the first channel on it is tried first, and the ones after
+ * it are what a failure moves to. A refusal that names the box rather than the channel — the box
+ * is down, unreachable, or could not sign — is not about this channel, so another channel on the
+ * same box would answer the same way: the walk steps over those and looks for one that plays
+ * from its own origin.
+ *
+ * `remaining` is the card's channels after the one that just failed, in the card's own order.
+ */
+export function nextFallbackChannel(
+  remaining: readonly { channelId: string; sourceType: FixtureSourceType }[],
+  code: string | null
+): { channelId: string; sourceType: FixtureSourceType } | null {
+  const boxLevel =
+    code === "box_unavailable" || code === "box_unreachable" || code === "sign_failed";
+  for (const candidate of remaining) {
+    if (boxLevel && candidate.sourceType === "secured") continue;
+    return candidate;
+  }
+  return null;
+}
+
+/**
  * Live matches first (soonest kickoff among them), then upcoming ones in kickoff
  * order, capped at the slots the slot can hold.
  *
@@ -298,6 +331,7 @@ export function projectFixtures(
     const offers = offersOf(choices);
     return {
       id: fixture._id,
+      title: fixture.title || "",
       sport: fixture.sport,
       teamA: fixture.teamA,
       teamB: fixture.teamB,

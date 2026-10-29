@@ -45,7 +45,15 @@ const TIER_LABEL: Record<FixtureChoice["sourceType"], string> = {
 /** What Tab reaches inside the dialog, in the order it reaches it. */
 const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-function ChoiceRow({ choice }: { choice: FixtureChoice }) {
+/**
+ * One channel a viewer can pick, with the place it holds in the order the admin set.
+ *
+ * The number is the order the card carries, so the list reads as the admin's priority: the first
+ * channel on the card is the one the card tries first, and the ones under it are what a fallback
+ * moves to. A row that cannot be opened keeps its place, because it is still a channel the match
+ * is on.
+ */
+function ChoiceRow({ choice, order }: { choice: FixtureChoice; order: number }) {
   const [logoBroken, setLogoBroken] = useState(false);
 
   const detail = choice.watchPath
@@ -59,6 +67,7 @@ function ChoiceRow({ choice }: { choice: FixtureChoice }) {
           href={choice.watchPath}
           className="flex items-center gap-2.5 rounded-xl border border-slate-700/70 bg-white/[0.04] p-2.5 transition-colors active:bg-white/[0.08]"
         >
+          <span className="text-[10px] font-black text-slate-500 w-3 shrink-0 text-center">{order}</span>
           <ChoiceMark choice={choice} broken={logoBroken} onBroken={() => setLogoBroken(true)} />
           <span className="min-w-0 flex-1">
             <span className="block text-[12px] font-bold text-slate-100 truncate">
@@ -76,6 +85,7 @@ function ChoiceRow({ choice }: { choice: FixtureChoice }) {
           aria-disabled="true"
           className="flex items-center gap-2.5 rounded-xl border border-slate-800/60 p-2.5 opacity-60"
         >
+          <span className="text-[10px] font-black text-slate-500 w-3 shrink-0 text-center">{order}</span>
           <ChoiceMark choice={choice} broken={logoBroken} onBroken={() => setLogoBroken(true)} />
           <span className="min-w-0 flex-1">
             <span className="block text-[12px] font-bold text-slate-300 truncate">
@@ -226,8 +236,8 @@ export default function FixtureChannelDialog({
         </div>
 
         <div className="flex flex-col gap-1.5">
-          {fixture.choices.map((choice) => (
-            <ChoiceRow key={`${choice.sourceType}:${choice.channelId}`} choice={choice} />
+          {fixture.choices.map((choice, index) => (
+            <ChoiceRow key={`${choice.sourceType}:${choice.channelId}`} choice={choice} order={index + 1} />
           ))}
           {fixture.staleReferences > 0 ? <StaleRow count={fixture.staleReferences} /> : null}
         </div>

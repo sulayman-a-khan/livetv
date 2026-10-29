@@ -14,13 +14,17 @@ import { test } from "node:test";
 
 import {
   countdownMs,
+  endTimeAfter,
   fixturePhase,
+  minutesBetween,
+  toLocalInputValue,
   validateFixtureInput,
   validatePremiumChannelInput,
   validatePremiumSourcePush,
 } from "../lib/premiumFixtures";
 import {
   dedupeRefs,
+  nextFallbackChannel,
   offersOf,
   projectFixtures,
   referencedChannelIds,
@@ -301,6 +305,70 @@ test("a reference carries no key beyond an id and a source, because a card is pu
   );
 });
 
+test("a title that names two teams is the same answer as the two team fields", () => {
+  const fromTitle = validateFixtureInput(
+    { title: "Bangladesh vs India", sport: "cricket", startsAt: "2026-10-25T16:00:00.000Z" },
+    true
+  );
+  assert.deepEqual(fromTitle.errors, []);
+  assert.equal(fromTitle.value.teamA, "Bangladesh");
+  assert.equal(fromTitle.value.teamB, "India");
+  // The title itself is kept: it is what the admin wrote, and the board shows it when it says
+  // something the two team names do not.
+  assert.equal(fromTitle.value.title, "Bangladesh vs India");
+
+  // A team the admin typed wins over the title's own reading of it — the two may be in the other
+  // order, and the admin's order is the one that counts.
+  const explicit = validateFixtureInput(
+    {
+      title: "Bangladesh vs India",
+      teamA: "India",
+      teamB: "Bangladesh",
+      sport: "cricket",
+      startsAt: "2026-10-25T16:00:00.000Z",
+    },
+    true
+  );
+  assert.deepEqual(explicit.errors, []);
+  assert.equal(explicit.value.teamA, "India");
+  assert.equal(explicit.value.teamB, "Bangladesh");
+
+  // A title that names no pair is kept as a title and names no team of its own.
+  const plain = validateFixtureInput(
+    {
+      title: "Opening ceremony",
+      teamA: "One",
+      teamB: "Two",
+      sport: "football",
+      startsAt: "2026-10-25T16:00:00.000Z",
+    },
+    true
+  );
+  assert.deepEqual(plain.errors, []);
+  assert.equal(plain.value.title, "Opening ceremony");
+  assert.equal(plain.value.teamA, "One");
+});
+
+test("a match's length and its end time are the same fact, so one is derived from the other", () => {
+  // The editor holds a kickoff and an end; the tier stores the minutes between them.
+  assert.equal(minutesBetween("2026-10-25T16:00", "2026-10-25T18:00"), 120);
+  assert.equal(minutesBetween("2026-10-25T16:00", "2026-10-25T16:00"), 0);
+  // An end before the kickoff is not a length: it says the admin mistyped one of them.
+  assert.equal(minutesBetween("2026-10-25T16:00", "2026-10-25T15:00"), -60);
+  // A missing or unreadable time is no answer at all, rather than a number of zero.
+  assert.equal(minutesBetween("", "2026-10-25T18:00"), null);
+  assert.equal(minutesBetween("2026-10-25T16:00", "later"), null);
+
+  assert.equal(endTimeAfter("2026-10-25T16:00", 120), "2026-10-25T18:00");
+  assert.equal(endTimeAfter("2026-10-25T16:00", 45), "2026-10-25T16:45");
+  assert.equal(endTimeAfter("not a time", 120), "");
+
+  // The value the editor reads back is the shape it writes: local wall clock, no seconds, no zone.
+  assert.equal(toLocalInputValue("2026-10-25T16:00:00.000Z").endsWith(":00"), true);
+  assert.match(toLocalInputValue("2026-10-25T16:00:00.000Z"), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  assert.equal(toLocalInputValue("not a date"), "");
+});
+
 test("the single-channel field is refused instead of being reinterpreted", () => {
   // It named a premium row and nothing else, but a write that still sends it would be storing
   // a second, vaguer answer to "where is this match watched".
@@ -528,6 +596,7 @@ test("the projection names the channels but carries no source or header", () => 
     "teamALogo",
     "teamB",
     "teamBLogo",
+    "title",
     "watchPath",
   ];
   const CHOICE_KEYS = [
@@ -1128,5 +1197,45 @@ test("the board asks each tier once, for the ids its cards actually name", () =>
     true
   );
   assert.equal(board.reduce((total, card) => total + card.staleReferences, 0), 1);
+});
+
+test("a channel that cannot play moves to the next one on the card, in the card's order", () => {
+  const remaining = [secured("pc_two"), direct(DIRECT_ONE._id), secured("pc_three")];
+
+  // A refusal that is about this channel is not about the others: the next one on the card is
+  // tried, and it is the next one and not the best-looking one — the order is the priority.
+  assert.deepEqual(nextFallbackChannel(remaining, "not_pushed"), {
+    channelId: "pc_two",
+    sourceType: "secured",
+  });
+  assert.deepEqual(nextFallbackChannel(remaining, "off_air"), {
+    channelId: "pc_two",
+    sourceType: "secured",
+  });
+
+  // A refusal that is about the box is about every channel on that box: another channel there
+  // would answer the same way, so the walk steps over them and looks for one that plays from its
+  // own origin.
+  assert.deepEqual(nextFallbackChannel(remaining, "box_unavailable"), {
+    channelId: DIRECT_ONE._id,
+    sourceType: "direct",
+  });
+  assert.deepEqual(nextFallbackChannel(remaining, "sign_failed"), {
+    channelId: DIRECT_ONE._id,
+    sourceType: "direct",
+  });
+  assert.deepEqual(nextFallbackChannel(remaining, "box_unreachable"), {
+    channelId: DIRECT_ONE._id,
+    sourceType: "direct",
+  });
+
+  // Nothing left to try is the end of the walk, and the viewer is told why.
+  assert.equal(nextFallbackChannel([], "not_pushed"), null);
+  assert.equal(nextFallbackChannel([secured("pc_two")], "box_unavailable"), null);
+  // A failure with no code at all is not a verdict about the box, so the next channel is tried.
+  assert.deepEqual(nextFallbackChannel([secured("pc_two")], null), {
+    channelId: "pc_two",
+    sourceType: "secured",
+  });
 });
 

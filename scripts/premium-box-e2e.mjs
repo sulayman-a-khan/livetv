@@ -389,8 +389,12 @@ async function main() {
   }
   const { createLocalStack } = await import(pathToFileURL(stackPath).href);
 
-  const storeFile = path.join(ROOT, "data", "premium-store.json");
-  const storeBefore = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
+  // This tier's own store, in a throwaway file of this run's own. The project's
+  // `data/premium-store.json` is the developer's, and a run that measured itself against
+  // whatever cards they happened to leave behind would be measuring their leftovers: the board
+  // holds a fixed number of cards, so one leftover card is one card this run cannot place.
+  const storeDir = fs.mkdtempSync(path.join(os.tmpdir(), "freetv-premium-store-e2e-"));
+  const storeFile = path.join(storeDir, "premium-store.json");
   // The Direct HLS catalogue's own file, fingerprinted rather than read: this run links fixture
   // cards at channels from it, and the only proof that a link is a name rather than an edit is
   // that the file is the same bytes when the run ends as it was before the first write.
@@ -398,6 +402,10 @@ async function main() {
   const fingerprint = (file) =>
     fs.existsSync(file) ? createHash("sha256").update(fs.readFileSync(file)).digest("hex") : "<no such file>";
   const catalogueBefore = fingerprint(catalogueFile);
+  // The developer's own tier store, fingerprinted for the same reason: this run must not touch it,
+  // and the only proof of that is that it is the same bytes when the run ends.
+  const developerStoreFile = path.join(ROOT, "data", "premium-store.json");
+  const developerStoreBefore = fingerprint(developerStoreFile);
 
   section("boot");
   // Which checkout the run resolved on its own, so a pass says where the box was and a
@@ -487,6 +495,9 @@ async function main() {
         // nothing to rotate on every machine when one box is withdrawn.
         PROXY_BOX_SECRET: HARNESS_BOX_SECRET,
         BOX_REGISTRY_FILE: registryFile,
+        // The tier's own store, in this run's throwaway file. The developer's own store is
+        // neither read nor written by this run.
+        PREMIUM_STORE_FILE: storeFile,
       },
       stdio: ["ignore", "pipe", "pipe"],
     }
@@ -1374,14 +1385,14 @@ async function main() {
     // the run: the project's own data directory is left exactly as it was found.
     fs.rmSync(registryDir, { recursive: true, force: true });
 
-    const storeNow = fs.existsSync(storeFile) ? fs.readFileSync(storeFile) : null;
-    if (storeBefore === null) {
-      if (storeNow !== null) fs.rmSync(storeFile);
-      gate("the tier's local store file is back to not existing", !fs.existsSync(storeFile), storeFile);
-    } else {
-      fs.writeFileSync(storeFile, storeBefore);
-      gate("the tier's local store file is restored byte for byte", Buffer.compare(fs.readFileSync(storeFile), storeBefore) === 0, storeFile);
-    }
+    // The tier's own store for this run lived in a throwaway directory of its own, so it goes
+    // with the run: the developer's own store is left exactly as it was found.
+    fs.rmSync(storeDir, { recursive: true, force: true });
+    gate(
+      "the developer's own tier store is untouched by this run",
+      fingerprint(developerStoreFile) === developerStoreBefore,
+      developerStoreFile
+    );
 
     const failed = gates.filter((row) => !row.ok).length;
     say(`\n${gates.length - failed} passed, ${failed} failed`);

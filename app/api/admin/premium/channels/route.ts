@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
 import { connectToDatabase } from "@/lib/db";
-import { createPremiumChannel, listPremiumChannels } from "@/lib/premiumStore";
-import { validatePremiumChannelInput } from "@/lib/premiumFixtures";
+import {
+  createPremiumChannel,
+  deletePremiumChannel,
+  listPremiumChannels,
+  setPremiumProxy,
+} from "@/lib/premiumStore";
+import { boxLogoProblem, validatePremiumChannelInput } from "@/lib/premiumFixtures";
+import { BOX_CHANNEL_FIELDS, boxShapeOf, syncChannelToBox } from "@/lib/premiumBoxSync";
+import { proxyKeyForRow } from "@/lib/premiumProxy";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +51,17 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/admin/premium/channels
- * Add a channel to the rail. It carries no stream: the source line is pushed to the stream box
- * by `.../channels/[id]/push`, which keeps only the handle here. A channel created before that
- * push exists simply has nothing to play yet, and the board shows it as such.
+ * Add a channel to the rail.
+ *
+ * Two kinds of channel, and the difference is where the stream comes from:
+ *
+ *   - **A row with no provider** is a name and a place on the rail. Its stream, if it gets
+ *     one, is pushed to the box by `.../channels/[id]/push`, which owns that lane. Nothing is
+ *     written to the box here.
+ *   - **A row with a provider** plays from an account on the box: a stream and the streams it
+ *     falls back to. The row is written first and the box second, and a box that refuses the
+ *     change takes the row with it — a row that claims a stream the box does not hold is a row
+ *     that plays nothing and says otherwise.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -60,6 +75,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: errors.join("; ") }, { status: 400 });
     }
 
+    const logoProblem = boxLogoProblem(value.logoUrl ?? "", value.providerId ?? "");
+    if (logoProblem) {
+      return NextResponse.json({ success: false, error: logoProblem }, { status: 400 });
+    }
+
     const channel = await createPremiumChannel({
       name: value.name!,
       category: value.category ?? "Premium",
@@ -68,9 +88,42 @@ export async function POST(req: NextRequest) {
       sortOrder: value.sortOrder ?? 99,
       note: value.note ?? "",
       proxyChannelKey: value.proxyChannelKey ?? "",
+      providerId: value.providerId ?? "",
+      streamId: value.streamId ?? "",
+      backupStreamIds: value.backupStreamIds ?? [],
     });
 
-    return NextResponse.json({ success: true, channel });
+    // A row with no provider has no stream yet, so there is nothing for the box to hold.
+    if (!channel.providerId) {
+      return NextResponse.json({ success: true, channel });
+    }
+
+    // The handle a provider-backed channel is filed under: the one the admin typed, or the one
+    // the row's own id implies. The row keeps it either way, so the site and the box are never
+    // looking at two different channels.
+    const channelKey = channel.proxyChannelKey || proxyKeyForRow(channel._id);
+    const withKey =
+      (await setPremiumProxy(channel._id, {
+        proxyChannelKey: channelKey,
+        proxyPushedAt: new Date(),
+      })) ?? channel;
+
+    const outcome = await syncChannelToBox(boxShapeOf(withKey), BOX_CHANNEL_FIELDS);
+    if (!outcome.ok) {
+      // The row goes with the change it made. Keeping it would leave a channel on the rail
+      // that names a provider and a stream the box has never heard of.
+      await deletePremiumChannel(channel._id);
+      return NextResponse.json(
+        {
+          success: false,
+          error: `the channel was not added because the stream box refused it: ${outcome.error}`,
+          code: outcome.code,
+        },
+        { status: outcome.status }
+      );
+    }
+
+    return NextResponse.json({ success: true, channel: withKey });
   } catch (error: any) {
     return fail(error, "Failed to add premium channel");
   }

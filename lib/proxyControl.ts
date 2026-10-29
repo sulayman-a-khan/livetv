@@ -165,6 +165,77 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 /**
+ * What the box holds, read through its own admin surface.
+ *
+ * The read-only surface above is enough for a panel that only looks, but the premium tier
+ * writes through the admin surface and has to see what it wrote: a provider list that comes
+ * from a different door than the write would be a second, disagreeing answer about the same
+ * vault. So this is one read of the box's own admin rows, projected by the same functions
+ * that project the read-only surface — the lane identity, the credential and the raw vault
+ * text are not in the projection and so cannot travel.
+ */
+export interface BoxAdminRows {
+  /** The box answered at all. */
+  reachable: boolean;
+  /** The box answered and accepted this server's credential. */
+  authorized: boolean;
+  providers: ProxyProviderView[];
+  channels: ProxyChannelView[];
+}
+
+/**
+ * Read the box's provider rows and channel rows in one request.
+ *
+ * Never throws: a box that is down, one that refuses this server's credential and one with
+ * no admin surface are three readings rather than three exceptions, and a panel that could
+ * not answer at all would show an empty list that reads like "you have no providers".
+ */
+export async function readBoxAdminRows(
+  deps: ProxyControlDeps = {}
+): Promise<BoxAdminRows> {
+  const empty: BoxAdminRows = { reachable: false, authorized: false, providers: [], channels: [] };
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
+  const token = (deps.token ?? (await currentBoxToken("admin"))).trim();
+  if (!baseUrl || !token) return empty;
+
+  const send = deps.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await send(`${baseUrl}/admin/channels`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(deps.timeoutMs ?? INSPECT_TIMEOUT_MS),
+      cache: "no-store",
+    });
+  } catch {
+    return empty;
+  }
+
+  const declared = Number(res.headers?.get?.("content-length") || "");
+  if (Number.isFinite(declared) && declared > MAX_INSPECT_BYTES) return empty;
+  let body: unknown = null;
+  try {
+    const raw = await res.text();
+    if (raw.length <= MAX_INSPECT_BYTES) body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
+  if (res.status !== 200 || body === null) {
+    // A refused credential is a fact about this server's setup, and it is the one fact an
+    // operator needs: a box that is up but refuses the admin token is not a box that is down.
+    return { ...empty, reachable: true, authorized: false };
+  }
+  return {
+    reachable: true,
+    authorized: true,
+    providers: providerViews(body),
+    channels: channelViews(body),
+  };
+}
+
+/**
  * The whole projection, with no network in it, so the rules can be argued with in a test.
  *
  * The states are decided here and nowhere else:

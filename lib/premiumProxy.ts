@@ -8,11 +8,14 @@
  * it is pushed straight to the box and discarded here, and a viewer's playlist URL is
  * signed by the proxy and read by this module on the server, never by a browser.
  *
- * Two environment names, neither of them with a default and neither of them public:
- * `PROXY_ADMIN_TOKEN` (push/retract) and `PROXY_APP_TOKEN` (sign). The box's address is
- * resolved rather than read: it is the one this server's environment names, or the one a
- * box registered because its own address is not knowable in advance (`lib/boxRegistry.ts`).
- * Missing configuration fails closed with the names, never the values.
+ * One environment name, neither of them with a default and neither of them public:
+ * `PROXY_BOX_SECRET`. It is a master secret, not a credential for the box: the tokens this
+ * module presents are derived from it for the one box the site is talking to
+ * (`lib/boxCredentials.ts`), so a box's credential is its own and can be withdrawn by
+ * revoking that box. The box's address is resolved rather than read: it is the one this
+ * server's environment names, or the one a box registered because its own address is not
+ * knowable in advance (`lib/boxRegistry.ts`). Missing configuration fails closed with the
+ * names, never the values.
  *
  * Why this file does not use `lib/safeFetch.ts`: the base URL is not request input, it is
  * the operator's own environment or an address the site proved was a box, and the SSRF
@@ -22,6 +25,7 @@
  */
 
 import { resolveBoxAddress } from "./boxRegistry";
+import { boxSecret, deriveBoxToken } from "./boxCredentials";
 
 const PROVIDER_LABEL_LIMIT = 60;
 const REQUEST_TIMEOUT_MS = 12_000;
@@ -48,27 +52,34 @@ export function proxyKeyForRow(rowId: string): string {
 }
 
 /**
- * The address of the box and the two credentials the site holds for it.
+ * The address of the box and the credentials this site holds for it.
  *
  * The address is resolved rather than read: it may be the one this server's environment
  * names, or the one a box registered because its own address is not knowable in advance (a
- * quick tunnel's hostname is minted at boot). The tokens are the site's own environment and
- * are never anything else.
+ * quick tunnel's hostname is minted at boot). The credentials are derived for that one box
+ * from the site's master secret, so there is no shared token in this file and nothing to
+ * rotate on every machine when one box is withdrawn.
  */
 async function readEnv() {
-  const baseUrl = (await resolveBoxAddress())?.baseUrl ?? "";
-  const adminToken = (process.env.PROXY_ADMIN_TOKEN || "").trim();
-  const appToken = (process.env.PROXY_APP_TOKEN || "").trim();
-  return { baseUrl, adminToken, appToken };
+  const resolved = await resolveBoxAddress();
+  const baseUrl = resolved?.baseUrl ?? "";
+  const boxId = resolved?.boxId ?? "";
+  const secret = boxSecret();
+  return {
+    baseUrl,
+    boxId,
+    adminToken: deriveBoxToken(secret, "admin", boxId),
+    appToken: deriveBoxToken(secret, "app", boxId),
+  };
 }
 
 /** The names of whatever is missing. A viewer-facing path never calls this. */
 export async function proxyConfigProblem(): Promise<string | null> {
-  const { baseUrl, adminToken, appToken } = await readEnv();
+  const { baseUrl, boxId } = await readEnv();
   const missing: string[] = [];
   if (!baseUrl) missing.push("PROXY_BASE_URL");
-  if (!adminToken) missing.push("PROXY_ADMIN_TOKEN");
-  if (!appToken) missing.push("PROXY_APP_TOKEN");
+  if (!boxSecret()) missing.push("PROXY_BOX_SECRET");
+  if (!boxId) missing.push("an enrolled stream box");
   return missing.length ? `the stream box is not configured on this server (missing ${missing.join(", ")})` : null;
 }
 
@@ -130,7 +141,7 @@ export async function pushPremiumSource(
   input: ProxySourceInput
 ): Promise<ProxyOutcome<{ channelKey: string; pushedAt: string }>> {
   const { adminToken } = await readEnv();
-  if (!adminToken) return { ok: false, error: "PROXY_ADMIN_TOKEN is not set" };
+  if (!adminToken) return { ok: false, error: "this server holds no credential for the stream box" };
 
   const providerBody = {
     providerId: input.channelKey,
@@ -197,7 +208,7 @@ export async function retractPremiumSource(
   channelKey: string
 ): Promise<ProxyOutcome<{ channelKey: string }>> {
   const { adminToken } = await readEnv();
-  if (!adminToken) return { ok: false, error: "PROXY_ADMIN_TOKEN is not set" };
+  if (!adminToken) return { ok: false, error: "this server holds no credential for the stream box" };
   const key = encodeURIComponent(channelKey);
 
   const channel = await call(`/admin/channels/${key}`, adminToken, { method: "DELETE" });
@@ -225,7 +236,7 @@ export interface SignedEntry {
  */
 export async function signPremiumEntry(channelKey: string): Promise<ProxyOutcome<SignedEntry>> {
   const { appToken } = await readEnv();
-  if (!appToken) return { ok: false, error: "PROXY_APP_TOKEN is not set" };
+  if (!appToken) return { ok: false, error: "this server holds no credential for the stream box" };
 
   const reply = await call("/app/sign", appToken, { method: "POST", body: { channelKeys: [channelKey] } });
   if ("ok" in reply) return reply;

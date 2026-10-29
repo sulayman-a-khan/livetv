@@ -97,8 +97,8 @@ const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "freetv-premium-play-"));
 delete process.env.MONGODB_URI;
 delete process.env.VERCEL;
 delete process.env.PROXY_BASE_URL;
-delete process.env.PROXY_APP_TOKEN;
-delete process.env.PROXY_ADMIN_TOKEN;
+delete process.env.PROXY_BOX_SECRET;
+delete process.env.BOX_REGISTRY_FILE;
 
 process.chdir(sandbox);
 

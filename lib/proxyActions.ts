@@ -2,8 +2,9 @@
  * The write half of the 24/7 proxy control tier.
  *
  * The read half (`lib/proxyControl.ts`) may look at the box. This module may change it, and
- * it is the only place in the site that holds the box's *write* credential — the same
- * `PROXY_ADMIN_TOKEN` the premium tier already uses to push a source onto the box.
+ * it is the only place in the site that holds the box's *write* credential — derived for the
+ * one box this server is talking to, the same credential the premium tier uses to push a
+ * source onto the box.
  *
  * Three properties this file has to keep, and each one is a decision rather than a detail:
  *
@@ -25,7 +26,8 @@
  * make this server write on their behalf.
  */
 import { isProxyAdminSecretValid } from "./proxyControl";
-import { resolveBoxAddress } from "./boxRegistry";
+import { boxConfigProblem, currentBoxToken, resolveBoxAddress } from "./boxRegistry";
+import { boxSecret } from "./boxCredentials";
 
 /**
  * How long the box has to answer an action.
@@ -143,7 +145,7 @@ export interface ProxyActionDetail {
 export interface ProxyActionDeps {
   /** Defaults to `PROXY_BASE_URL`. Never taken from a request. */
   baseUrl?: string;
-  /** The box's admin token. Defaults to `PROXY_ADMIN_TOKEN`. Never taken from a request. */
+  /** The box's admin token. Defaults to the token derived for the enrolled box. Never taken from a request. */
   token?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -293,15 +295,17 @@ function failureCodeFor(boxStatus: number): ProxyActionFailureCode {
 /**
  * What this server is missing, by name only.
  *
- * The write surface needs the address and the admin token; without either one the action
- * cannot be performed, and saying which one is missing is the difference between a five
- * minute fix and an hour of guessing.
+ * The write surface needs the address and a credential for the one box it is talking to;
+ * without either one the action cannot be performed, and saying which one is missing is the
+ * difference between a five minute fix and an hour of guessing.
+ *
+ * The three are in a chain of dependence and only the first missing one is named: without a
+ * master secret there is nothing to derive a token from; with a secret but no enrolled box
+ * there is no box to derive one for; with a box but no address there is nowhere to reach
+ * it.
  */
 export async function proxyActionConfigProblem(): Promise<string | null> {
-  const missing: string[] = [];
-  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
-  if (!(process.env.PROXY_ADMIN_TOKEN || "").trim()) missing.push("PROXY_ADMIN_TOKEN");
-  return missing.length ? missing.join(", ") : null;
+  return boxConfigProblem();
 }
 
 /**
@@ -373,17 +377,22 @@ export async function proxyActionResponse(
   const baseUrl = (
     deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
   ).trim().replace(/\/+$/, "");
-  const token = (deps.token ?? process.env.PROXY_ADMIN_TOKEN ?? "").trim();
+  const token = (deps.token ?? (await currentBoxToken("admin")) ?? "").trim();
   if (!baseUrl || !token) {
-    const missing = [!baseUrl ? "PROXY_BASE_URL" : null, !token ? "PROXY_ADMIN_TOKEN" : null].filter(
-      (name): name is string => name !== null
-    );
+    // The chain, in the order the things depend on each other. The credential comes first:
+    // without one there is no box to write to, whatever the address says, and naming the
+    // address would send the operator to edit a variable that is already set.
+    const missing = !token
+      ? boxSecret()
+        ? "an enrolled stream box"
+        : "PROXY_BOX_SECRET"
+      : "PROXY_BASE_URL";
     return {
       status: 503,
       body: {
         success: false,
         code: "not_configured",
-        error: `the stream box cannot be written to from this server (missing ${missing.join(", ")})`,
+        error: `the stream box cannot be written to from this server (missing ${missing})`,
       },
     };
   }

@@ -5,10 +5,13 @@ import Link from "next/link";
 import {
   Activity,
   AlertTriangle,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   Database,
   HardDrive,
+  KeyRound,
   Layers,
   Loader2,
   Power,
@@ -16,9 +19,11 @@ import {
   RefreshCw,
   Server,
   ShieldAlert,
+  ShieldOff,
   Tv,
 } from "lucide-react";
 import type { ProxyBoxSnapshot, ProxyInspectSnapshot } from "@/lib/proxyControl";
+import type { BoxRegistration } from "@/lib/boxRegistry";
 import { proxyStateBanner } from "./proxyBanner";
 import {
   proxyActionFailure,
@@ -82,6 +87,13 @@ function stateLabel(state: "serving" | "inactive" | "unusable" | null): string {
   if (state === "inactive") return "বন্ধ";
   if (state === "unusable") return "খোলা যাচ্ছে না";
   return "জানা নেই";
+}
+
+/** What the site thinks of a box's enrollment, in the panel's words. */
+function boxStateLabel(state: "pending" | "enrolled" | "revoked"): string {
+  if (state === "enrolled") return "এনরোল করা";
+  if (state === "revoked") return "বাতিল করা";
+  return "অপেক্ষমাণ";
 }
 
 function providerProblemLabel(problem: string | null): string {
@@ -190,6 +202,12 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
   const [now, setNow] = useState(() => Date.now());
   const [outcome, setOutcome] = useState<ProxyActionLine | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [boxes, setBoxes] = useState<BoxRegistration[]>([]);
+  const [boxesError, setBoxesError] = useState<string | null>(null);
+  const [boxIdInput, setBoxIdInput] = useState("");
+  const [enrollment, setEnrollment] = useState<{ boxId: string; code: string; expiresAt: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busyBox, setBusyBox] = useState<string | null>(null);
 
   /**
    * The last time the box answered, kept in the browser as well as on the server: a serverless
@@ -261,9 +279,138 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
     }
   }, [secretKey]);
 
+  /**
+   * The list of boxes this site knows, whatever state each one is in.
+   *
+   * It is read apart from the health reading on purpose: a box that is not answering is
+   * exactly the case in which an operator needs to see whether the box is enrolled at all,
+   * and a merged reading would show "the box is down" where the truth is "the box was never
+   * admitted". Nothing secret is in it — a box's name, its address and the state of its
+   * enrollment. The tokens a box holds are derived by the server and never travel here.
+   */
+  const loadBoxes = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/proxy/boxes", {
+        headers: { "x-admin-secret": secretKey.trim() },
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (data?.success === true && Array.isArray(data.boxes)) {
+        setBoxes(data.boxes as BoxRegistration[]);
+        setBoxesError(null);
+      } else {
+        setBoxesError(
+          typeof data?.error === "string" ? data.error : "বক্সের তালিকা পড়া যায়নি।"
+        );
+      }
+    } catch {
+      setBoxesError("বক্সের তালিকা পড়া যায়নি।");
+    }
+  }, [secretKey]);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([load(), loadInspection()]);
-  }, [load, loadInspection]);
+    await Promise.all([load(), loadInspection(), loadBoxes()]);
+  }, [load, loadInspection, loadBoxes]);
+
+  /**
+   * Admit a box: ask the site for a one-time enrollment code for a name.
+   *
+   * The code comes back once and is shown once. The browser never holds a box credential —
+   * it holds the site admin secret, and the code it receives is spent by the box, not by
+   * this page. What the operator does with it is write it into the box's folder.
+   */
+  const enrollBox = useCallback(async () => {
+    const boxId = boxIdInput.trim();
+    if (!boxId) return;
+    setBusyBox("enroll");
+    try {
+      const res = await fetch("/api/admin/proxy/boxes", {
+        method: "POST",
+        headers: { "x-admin-secret": secretKey.trim(), "content-type": "application/json" },
+        body: JSON.stringify({ boxId }),
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (data?.success === true && typeof data.enrollmentCode === "string") {
+        setEnrollment({
+          boxId: typeof data.boxId === "string" ? data.boxId : boxId,
+          code: data.enrollmentCode,
+          expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : "",
+        });
+        setCopied(false);
+        setBoxIdInput("");
+        setOutcome({
+          tone: "green",
+          text: `"${boxId}" বক্সের এনরোলমেন্ট তৈরি হয়েছে। কোডটি একবারই দেখা যাবে — এখনই নিয়ে রাখুন।`,
+        });
+        await loadBoxes();
+      } else {
+        setOutcome({
+          tone: "red",
+          text: typeof data?.error === "string" ? data.error : "এনরোলমেন্ট তৈরি হয়নি।",
+        });
+      }
+    } catch {
+      setOutcome({ tone: "red", text: "এনরোলমেন্ট তৈরি হয়নি।" });
+    } finally {
+      setBusyBox(null);
+    }
+  }, [boxIdInput, loadBoxes, secretKey]);
+
+  /**
+   * Withdraw a box: the site stops deriving tokens for it and stops talking to it.
+   *
+   * One row, one call, and nothing has to be done to the box itself — a credential the
+   * site no longer derives is not a credential the site will accept.
+   */
+  const revokeBox = useCallback(
+    async (boxId: string) => {
+      if (
+        !window.confirm(
+          `"${boxId}" বক্সটি বাতিল করবেন? সাইট আর এই বক্সের সাথে কথা বলবে না।`
+        )
+      ) {
+        return;
+      }
+      setBusyBox(`revoke:${boxId}`);
+      try {
+        const res = await fetch(`/api/admin/proxy/boxes/${encodeURIComponent(boxId)}/revoke`, {
+          method: "POST",
+          headers: { "x-admin-secret": secretKey.trim() },
+          cache: "no-store",
+        });
+        const data = await res.json();
+        if (data?.success === true) {
+          setOutcome({
+            tone: "green",
+            text: `"${boxId}" বক্স বাতিল হয়েছে। সাইট আর এই বক্সের সাথে কথা বলবে না।`,
+          });
+          await loadBoxes();
+        } else {
+          setOutcome({
+            tone: "red",
+            text: typeof data?.error === "string" ? data.error : "বক্স বাতিল হয়নি।",
+          });
+        }
+      } catch {
+        setOutcome({ tone: "red", text: "বক্স বাতিল হয়নি।" });
+      } finally {
+        setBusyBox(null);
+      }
+    },
+    [loadBoxes, secretKey]
+  );
+
+  /** Copies the enrollment code to the clipboard, so it can be pasted into the box. */
+  const copyEnrollment = useCallback(async () => {
+    if (!enrollment) return;
+    try {
+      await navigator.clipboard.writeText(enrollment.code);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }, [enrollment]);
 
   /**
    * Asks the server to perform one action on the box.
@@ -403,7 +550,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
         return {
           tone: "amber",
           title: "বাক্স read-only কী মেনে নিচ্ছে না।",
-          body: "বাক্সের READONLY_SERVICE_TOKEN আর এখানকার PROXY_READONLY_TOKEN এক হতে হবে, অথবা একটিই বসানো হয়নি।",
+          body: "বাক্সের READONLY_SERVICE_TOKEN আর এই সার্ভারের বাক্স-কী এক হতে হবে — অর্থাৎ PROXY_BOX_SECRET থেকে বের হওয়া ঐ বাক্সের নিজস্ব read-only কী।",
         };
       case "not_found":
         return {
@@ -414,8 +561,8 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
       case "not_configured":
         return {
           tone: "amber",
-          title: "এখানে read-only কী বসানো নেই।",
-          body: "এই সার্ভারে PROXY_READONLY_TOKEN নেই, তাই বাক্সের বিস্তারিত পড়া হয়নি। স্বাস্থ্যের খবর উপরে আলাদা বিষয় — সেটা আপনার read-only কীর উপর নির্ভর করে না।",
+          title: "এখানে বাক্সের কী বের করা যায়নি।",
+          body: "এই সার্ভারে PROXY_BOX_SECRET নেই, বা কোনো বাক্স এনরোল করা নেই, বা বাক্সের ঠিকানা নেই — তাই বাক্সের বিস্তারিত পড়া হয়নি। স্বাস্থ্যের খবর উপরে আলাদা বিষয় — সেটা আপনার read-only কীর উপর নির্ভর করে না।",
         };
       case "error":
         return {
@@ -522,6 +669,148 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
           <p className="text-sm font-bold">{banner.title}</p>
           <p className="text-[11px] opacity-80 mt-0.5">{banner.body}</p>
         </div>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-4">
+        <Card icon={<KeyRound className="w-4 h-4" />} title="বক্স তালিকা ও এনরোলমেন্ট">
+          {boxesError ? (
+            <p className="text-[11px] text-red-300">{boxesError}</p>
+          ) : boxes.length === 0 ? (
+            <p className="text-[11px] text-slate-400">
+              এই সাইট এখনো কোনো বক্সকে এনরোল করেনি।
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {boxes.map((box) => (
+                <div
+                  key={box.boxId}
+                  className="rounded-xl border border-slate-800 bg-slate-900/40 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-100 truncate">
+                      {box.boxId}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                        box.state === "enrolled"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : box.state === "revoked"
+                            ? "bg-red-500/15 text-red-300"
+                            : "bg-amber-500/15 text-amber-300"
+                      }`}
+                    >
+                      {boxStateLabel(box.state)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-500 break-all">
+                    {box.baseUrl || "ঠিকানা এখনো জানা নেই"}
+                  </p>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-slate-500 truncate">
+                      {box.enrolledAt
+                        ? `এনরোল: ${new Date(box.enrolledAt).toLocaleString("bn-BD")}`
+                        : "এনরোল হয়নি"}
+                    </span>
+                    {box.state === "enrolled" && (
+                      <RowButton
+                        onClick={() => revokeBox(box.boxId)}
+                        disabled={busyBox !== null}
+                        tone="amber"
+                        title="বক্সটি বাতিল করুন"
+                      >
+                        {busyBox === `revoke:${box.boxId}` ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <ShieldOff className="w-3 h-3" />
+                        )}
+                        <span>বাতিল</span>
+                      </RowButton>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-3 pt-3 border-t border-slate-800/60">
+            <p className="text-[11px] font-bold text-slate-300">নতুন বক্স এনরোল করুন</p>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={boxIdInput}
+                onChange={(event) => setBoxIdInput(event.target.value)}
+                placeholder="বক্সের আইডি"
+                aria-label="বক্সের আইডি"
+                className="flex-1 min-w-0 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 outline-none focus:border-cyan-500/50"
+              />
+              <button
+                type="button"
+                onClick={enrollBox}
+                disabled={busyBox !== null || !boxIdInput.trim()}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 transition-all disabled:opacity-50 shrink-0"
+              >
+                {busyBox === "enroll" ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <KeyRound className="w-3 h-3" />
+                )}
+                <span>তৈরি করুন</span>
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
+              বক্সের নিজের আইডি লিখুন — বক্সের কনফিগে লেখা{" "}
+              <span className="text-slate-300">BOX_ID</span>। সাইট একটি একবারের কোড দেবে;
+              সেই কোড বক্সের <span className="text-slate-300">config\enroll.code</span>{" "}
+              ফাইলে বসিয়ে বক্সটি বন্ধ করে চালু করুন।
+            </p>
+          </div>
+        </Card>
+
+        {enrollment && (
+          <Card icon={<KeyRound className="w-4 h-4" />} title="এনরোলমেন্ট কোড — একবারই দেখা যাবে">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+              <p className="text-[11px] font-bold text-amber-300">{enrollment.boxId}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  readOnly
+                  value={enrollment.code}
+                  aria-label="এনরোলমেন্ট কোড"
+                  onFocus={(event) => event.currentTarget.select()}
+                  className="flex-1 min-w-0 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 font-mono text-[11px] text-slate-100 outline-none"
+                />
+                <RowButton onClick={copyEnrollment} title="কোড কপি করুন">
+                  {copied ? (
+                    <Check className="w-3 h-3" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  <span>{copied ? "কপি হয়েছে" : "কপি"}</span>
+                </RowButton>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-400 leading-relaxed">
+              কোডটি শুধু এই একবারই দেখা যাবে — সাইট শুধু তার ছাপ রাখে, কোডটি নিজে নয়। বক্সের{" "}
+              <span className="text-slate-300">config\enroll.code</span> ফাইলে কোডটি লিখে
+              বক্সটি বন্ধ করে চালু করুন; বক্স নিজে সাইটের সাথে কথা বলে নিজের তিনটি
+              ক্রেডেনশিয়াল নেবে, আর কোডটি একবার ব্যবহার হয়েই ফোঁটা হয়ে যাবে।
+              {enrollment.expiresAt ? (
+                <>
+                  {" "}
+                  কোডটির মেয়াদ শেষ হবে{" "}
+                  <span className="text-slate-300">
+                    {new Date(enrollment.expiresAt).toLocaleString("bn-BD")}
+                  </span>
+                  {" "}
+                  তার আগে।
+                </>
+              ) : null}
+            </p>
+            <div className="mt-2">
+              <RowButton onClick={() => setEnrollment(null)} title="কোডটি লুকান">
+                কোডটি লুকান
+              </RowButton>
+            </div>
+          </Card>
+        )}
       </div>
 
       {snapshot && (

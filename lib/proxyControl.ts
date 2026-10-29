@@ -21,7 +21,12 @@
  * caller supplied: the threat `lib/safeFetch.ts` guards against is not present on this path.
  */
 import { safeEquals } from "./adminAuth";
-import { resolveBoxAddress } from "./boxRegistry";
+import {
+  boxConfigProblem,
+  currentBoxToken,
+  resolveBoxAddress,
+  resolveBoxHealthAddress,
+} from "./boxRegistry";
 
 /**
  * How long the box has to answer. The health route does no work, so this is only ever the
@@ -115,8 +120,8 @@ export interface ProxyControlDeps {
   /** Defaults to `PROXY_BASE_URL`. Never taken from a request. */
   baseUrl?: string;
   /**
-   * The box's read-only token. Defaults to `PROXY_READONLY_TOKEN`. Never taken from a
-   * request, and never leaves this server.
+   * The box's read-only token. Defaults to the token derived for the box this server is
+   * talking to. Never taken from a request, and never leaves this server.
    */
   token?: string;
   fetchImpl?: typeof fetch;
@@ -309,7 +314,7 @@ export async function readProxyBoxSnapshot(
   const clock = deps.now ?? Date.now;
   const now = clock();
   const baseUrl = (
-    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+    deps.baseUrl ?? (await resolveBoxHealthAddress()) ?? ""
   ).trim().replace(/\/+$/, "");
   if (!baseUrl) {
     return snapshotFromHealth({ status: 0, body: null }, now, slot().lastSuccessAt);
@@ -385,15 +390,16 @@ export function isProxyAdminSecretValid(presented: string | null | undefined): b
   return safeEquals(raw, expected);
 }
 /**
- * What the server is missing, by name only. No address means the box is not configured
- * here — which is a different problem from the box being down, and the panel says so
- * instead of guessing. An address can come from this server's environment or from a box
- * that registered itself, so the question is asked of the resolver rather than of one
- * variable.
+ * What the panel is missing, by name only.
+ *
+ * The panel signs in with the site admin secret and asks the box one credential-free
+ * question, so those two are all it needs: an address to ask, and the secret that opens
+ * the panel. The credential the inspection needs is a separate question, and the inspection
+ * section answers it for itself.
  */
 export async function proxyControlConfigProblem(): Promise<string | null> {
   const missing: string[] = [];
-  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
+  if (!(await resolveBoxHealthAddress())) missing.push("PROXY_BASE_URL");
   if (!(process.env.ADMIN_SECRET_KEY || "").trim()) missing.push("ADMIN_SECRET_KEY");
   return missing.length ? missing.join(", ") : null;
 }
@@ -764,7 +770,7 @@ export async function readProxyInspection(
   const baseUrl = (
     deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
   ).trim().replace(/\/+$/, "");
-  const token = (deps.token ?? process.env.PROXY_READONLY_TOKEN ?? "").trim();
+  const token = (deps.token ?? (await currentBoxToken("readonly"))).trim();
   if (!baseUrl || !token) {
     // Nothing is asked: a server with no read-only token has no reason to talk to the box,
     // and a server with no address has nowhere to talk to.
@@ -886,15 +892,15 @@ export async function readProxyInspection(
 }
 
 /**
- * What the inspection is missing, by name only. The read-only token is a different secret
- * from the box's admin token, so a deployment can have a working health panel and no
- * inspection at all — and the panel has to be able to say which of the two it is.
+ * What the inspection is missing, by name only.
+ *
+ * The read-only token is derived for the box this server is talking to, so the inspection
+ * needs the master secret, an enrolled box and an address — in that order, and only the
+ * first missing one is named. A deployment can have a working health panel and no
+ * inspection at all, and the panel has to be able to say which of the two it is.
  */
 export async function proxyInspectionConfigProblem(): Promise<string | null> {
-  const missing: string[] = [];
-  if (!(await resolveBoxAddress())) missing.push("PROXY_BASE_URL");
-  if (!(process.env.PROXY_READONLY_TOKEN || "").trim()) missing.push("PROXY_READONLY_TOKEN");
-  return missing.length ? missing.join(", ") : null;
+  return boxConfigProblem();
 }
 
 /**

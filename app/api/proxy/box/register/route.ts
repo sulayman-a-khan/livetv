@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isBoxRegisterTokenValid, registerBox } from "@/lib/boxRegistry";
+import { isBoxTokenValid, registerBox } from "@/lib/boxRegistry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,16 +22,19 @@ const MAX_BODY_BYTES = 8 * 1024;
  *
  * The proof has two steps, and the second is what makes the first mean something. The site
  * reads the box's unauthenticated health route and insists on the box's own name in the
- * answer; then it reads the box's catalogue with the site's own app token, which only the box
+ * answer; then it reads the box's catalogue with the box's own token, which only the box
  * holding that token can answer. A name in a JSON body costs an impostor nothing to copy, so
  * without the second step a host that merely claimed to be a box would be handed the site's
  * box credentials.
  *
- * The credential is `BOX_REGISTER_TOKEN`, presented as `Authorization: Bearer …`, and it is
- * the site's own: the box holds it, the browser never sees it, and the site compares it in
- * constant time. There is no default, so a site with no token configured refuses every
- * registration — an address that nobody can register is an address the site never sends a
- * credential to.
+ * The credential is the box's own app token, presented as `Authorization: Bearer …`, and the
+ * box names itself in `x-box-id`. The token is derived for that one box, so a box can speak
+ * for itself and nobody else can speak for it; there is no shared token and no default, so a
+ * site with no master secret refuses every registration — an address that nobody can register
+ * is an address the site never sends a credential to.
+ *
+ * A box the site has not enrolled, or one the site has revoked, is refused before its
+ * address is looked at. Admission is the site's decision, and this route only carries it out.
  *
  * The order of the work is the point of the route. The credential is decided before the
  * body is read; the address is checked before anything is fetched; and the box is proved
@@ -43,7 +46,8 @@ const MAX_BODY_BYTES = 8 * 1024;
  */
 export async function POST(req: NextRequest) {
   const presented = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  if (!isBoxRegisterTokenValid(presented)) {
+  const boxId = (req.headers.get("x-box-id") || "").trim();
+  if (!boxId || !isBoxTokenValid(presented, "app", boxId)) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401, headers: { "cache-control": "no-store" } }
@@ -76,13 +80,28 @@ export async function POST(req: NextRequest) {
     body = {};
   }
 
+  const named = typeof body.boxId === "string" ? body.boxId.trim() : "";
+  if (named && named !== boxId) {
+    return NextResponse.json(
+      { success: false, error: "the box named in the header and the body must be the same one" },
+      { status: 400, headers: { "cache-control": "no-store" } }
+    );
+  }
+
   const result = await registerBox({
     baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : "",
-    boxId: typeof body.boxId === "string" ? body.boxId : "",
-  });
+    boxId,
+  }, { appToken: presented });
 
   if (!result.ok) {
-    const status = result.reason === "invalid" ? 400 : result.reason === "unverified" ? 502 : 503;
+    const status =
+      result.reason === "invalid"
+        ? 400
+        : result.reason === "not_admitted"
+          ? 403
+          : result.reason === "unverified"
+            ? 502
+            : 503;
     return NextResponse.json(
       { success: false, error: result.error },
       { status, headers: { "cache-control": "no-store" } }

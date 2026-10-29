@@ -58,7 +58,7 @@
  * already be built there.
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -84,9 +84,31 @@ const TUNNEL_WAIT_MS = 45_000;
 // A harness-only key. It is not a secret: it exists so the admin routes can be driven without
 // borrowing the machine's real ADMIN_SECRET_KEY, which this script must never read or print.
 const HARNESS_ADMIN_KEY = "premium-box-e2e-admin-key-not-real";
-// The site's credential for a box's registration, in the same spirit: a value only this run
-// knows, so the box can say where it is without the script holding anything real.
-const REGISTER_TOKEN = "premium-box-e2e-register-token-not-real";
+// The site's one master secret for this run, in the same spirit as the harness admin key: a
+// value only this run knows, so the box's own three credentials can be derived from it and
+// from the box's own name. Nothing real is read or printed.
+const HARNESS_BOX_SECRET = "premium-box-e2e-master-secret-not-real";
+// The name the box knows itself by. The site derives a credential for this name and for no
+// other, so a second name below is a second box with a second set of credentials.
+const BOX_ID = "e2e-box";
+const IMPOSTOR_BOX_ID = "e2e-impostor";
+
+/**
+ * The site's own derivation, reproduced here.
+ *
+ * The site hands the box its three credentials when the box redeems its enrollment code, and
+ * this run has to hand the *box* those same values up front — the box holds them and the
+ * site derives them, and the two only meet if they derive the same thing. So the rule is
+ * written out here rather than imported, and the gate below proves the two agree.
+ */
+const deriveBoxToken = (secret, purpose, boxId) =>
+  createHmac("sha256", secret).update(`soluplay-box:${purpose}:${boxId}`).digest("hex");
+
+const boxTokens = (boxId) => ({
+  app: deriveBoxToken(HARNESS_BOX_SECRET, "app", boxId),
+  admin: deriveBoxToken(HARNESS_BOX_SECRET, "admin", boxId),
+  readonly: deriveBoxToken(HARNESS_BOX_SECRET, "readonly", boxId),
+});
 
 const SEGMENT_MS = 2000;
 const WINDOW = 4;
@@ -391,7 +413,18 @@ async function main() {
   const originBase = await origin.start(PROXY_PORT + 1);
   const originHost = originBase.slice("http://".length);
   const sourceUrl = `${originBase}/secure/${PATH_TOKEN}/index.m3u8?token=${QUERY_TOKEN}`;
-  ADMIN_SECRETS = [PATH_TOKEN, QUERY_TOKEN, WANT_UA, WANT_REFERER, sourceUrl];
+  // The site's master secret and the three credentials derived from it are secrets too, and
+  // they are the ones a viewer must never be able to read: the master secret would let
+  // anybody derive a credential for any box, and a credential is the right to speak to a box.
+  ADMIN_SECRETS = [
+    PATH_TOKEN,
+    QUERY_TOKEN,
+    WANT_UA,
+    WANT_REFERER,
+    sourceUrl,
+    HARNESS_BOX_SECRET,
+    ...Object.values(boxTokens(BOX_ID)),
+  ];
   BROWSER_SECRETS = [...ADMIN_SECRETS, originHost];
 
   let tunnel = null;
@@ -413,6 +446,10 @@ async function main() {
     // against a gate that refuses rather than a wildcard that accepts everything.
     siteOrigins: APP_ORIGIN,
     siteGuardMode: "strict",
+    // The credentials the box answers with. The site derives the very same three from its
+    // master secret and the box's name, and a gate below proves the two agree — so the box
+    // here is holding exactly what it would hold in a real deployment.
+    tokens: boxTokens(BOX_ID),
   };
   // A `let`, because one section below stops the box on purpose and brings it back: that is the
   // only way to measure a readiness gate against a real outage rather than a stubbed answer.
@@ -445,10 +482,10 @@ async function main() {
         // all, so the only address it can use is the one the box registers below. An empty
         // value is still a defined one, so .env.local cannot put a stale address back.
         PROXY_BASE_URL: "",
-        PROXY_ADMIN_TOKEN: stack.adminToken,
-        PROXY_APP_TOKEN: stack.appToken,
-        PROXY_READONLY_TOKEN: stack.readonlyToken,
-        BOX_REGISTER_TOKEN: REGISTER_TOKEN,
+        // The site's one master secret. Every credential the site holds for a box is
+        // derived from it and from the box's own name, so there is no shared token here and
+        // nothing to rotate on every machine when one box is withdrawn.
+        PROXY_BOX_SECRET: HARNESS_BOX_SECRET,
         BOX_REGISTRY_FILE: registryFile,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -528,6 +565,68 @@ async function main() {
     const noKey = await getJson(`${site}/api/admin/premium/channels`, {});
     gate("and so is no key at all", noKey.res.status === 401, `status ${noKey.res.status}`);
 
+    /* ---------------- the box is enrolled ---------------- */
+
+    section("the box is enrolled");
+    // Admission is the site's decision: an admin issues a one-time code, the box exchanges
+    // it for its own credentials, and the code is worthless afterwards. Nothing else in
+    // this run works until this does, so it is measured first.
+    const issued = await postJson(`${site}/api/admin/proxy/boxes`, { boxId: BOX_ID }, admin);
+    gate(
+      "an admin can issue an enrollment code for a box",
+      issued.res.status === 200 && issued.json.success === true && typeof issued.json.enrollmentCode === "string",
+      `${issued.res.status} ${JSON.stringify(issued.json).slice(0, 140)}`
+    );
+    const enrollmentCode = String(issued.json.enrollmentCode ?? "");
+    // The code is a credential in its own right, so it joins the leak list: nothing a viewer
+    // is sent may carry it.
+    ADMIN_SECRETS.push(enrollmentCode);
+    BROWSER_SECRETS.push(enrollmentCode);
+
+    const wrongCode = await postJson(
+      `${site}/api/proxy/box/enroll`,
+      { boxId: BOX_ID, code: "not-the-code" },
+      {}
+    );
+    gate(
+      "a wrong enrollment code is refused",
+      wrongCode.res.status === 403,
+      `${wrongCode.res.status} ${wrongCode.json.error ?? ""}`
+    );
+
+    const redeemed = await postJson(
+      `${site}/api/proxy/box/enroll`,
+      { boxId: BOX_ID, code: enrollmentCode },
+      {}
+    );
+    const tokens = redeemed.json.tokens ?? {};
+    gate(
+      "the box trades its code for its three credentials",
+      redeemed.res.status === 200 &&
+        redeemed.json.success === true &&
+        typeof tokens.app === "string" &&
+        typeof tokens.admin === "string" &&
+        typeof tokens.readonly === "string",
+      `${redeemed.res.status} ${JSON.stringify(redeemed.json).slice(0, 140)}`
+    );
+    const derived = boxTokens(BOX_ID);
+    gate(
+      "and they are the ones the site derives for that box alone",
+      tokens.app === derived.app && tokens.admin === derived.admin && tokens.readonly === derived.readonly,
+      "the site's derivation and the box's credential disagree"
+    );
+
+    const replayed = await postJson(
+      `${site}/api/proxy/box/enroll`,
+      { boxId: BOX_ID, code: enrollmentCode },
+      {}
+    );
+    gate(
+      "and the code cannot be spent twice",
+      replayed.res.status === 403,
+      `${replayed.res.status} ${replayed.json.error ?? ""}`
+    );
+
     /* ---------------- the box says where it is ---------------- */
 
     section("the box says where it is");
@@ -536,23 +635,23 @@ async function main() {
     // learned from the box rather than one it was configured with.
     const noCredential = await postJson(
       `${site}/api/proxy/box/register`,
-      { baseUrl: stack.base, boxId: "e2e-box" },
-      { authorization: "Bearer not-the-registration-token" }
+      { baseUrl: stack.base, boxId: BOX_ID },
+      { authorization: "Bearer not-the-box-token" }
     );
     gate(
-      "a registration without the site's own credential is refused",
+      "a registration without the box's own credential is refused",
       noCredential.res.status === 401,
       `${noCredential.res.status} ${noCredential.json.error ?? ""}`
     );
 
     const registered = await postJson(
       `${site}/api/proxy/box/register`,
-      { baseUrl: stack.base, boxId: "e2e-box" },
-      { authorization: `Bearer ${REGISTER_TOKEN}` }
+      { baseUrl: stack.base, boxId: BOX_ID },
+      { authorization: `Bearer ${derived.app}`, "x-box-id": BOX_ID }
     );
     gate(
       "the box's own address is accepted",
-      registered.res.status === 200 && registered.json.success === true && registered.json.box?.id === "e2e-box",
+      registered.res.status === 200 && registered.json.success === true && registered.json.box?.id === BOX_ID,
       `${registered.res.status} ${JSON.stringify(registered.json).slice(0, 140)}`
     );
     gate(
@@ -563,10 +662,18 @@ async function main() {
 
     // An address that cannot answer as a box is refused, and the one that could is kept:
     // a registration nobody can prove must never become the address the site sends a token to.
+    // The impostor is enrolled first, so the refusal it earns is about its *address* and not
+    // about its admission — otherwise this gate would prove nothing.
+    const impostorEnrolled = await postJson(`${site}/api/admin/proxy/boxes`, { boxId: IMPOSTOR_BOX_ID }, admin);
+    const impostorCode = String(impostorEnrolled.json.enrollmentCode ?? "");
+    const impostorTokens = impostorEnrolled.res.status === 200 && impostorCode
+      ? (await postJson(`${site}/api/proxy/box/enroll`, { boxId: IMPOSTOR_BOX_ID, code: impostorCode }, {})).json
+          .tokens ?? {}
+      : {};
     const impostor = await postJson(
       `${site}/api/proxy/box/register`,
-      { baseUrl: "http://127.0.0.1:9", boxId: "e2e-impostor" },
-      { authorization: `Bearer ${REGISTER_TOKEN}` }
+      { baseUrl: "http://127.0.0.1:9", boxId: IMPOSTOR_BOX_ID },
+      { authorization: `Bearer ${impostorTokens.app ?? ""}`, "x-box-id": IMPOSTOR_BOX_ID }
     );
     gate(
       "an address that cannot answer as a box is refused",
@@ -574,10 +681,13 @@ async function main() {
       `${impostor.res.status} ${impostor.json.error ?? ""}`
     );
     const kept = fs.existsSync(registryFile) ? fs.readFileSync(registryFile, "utf8") : "";
+    const keptRows = kept ? (JSON.parse(kept).boxes ?? []) : [];
+    const keptBox = keptRows.find((row) => row.boxId === BOX_ID);
+    const keptImpostor = keptRows.find((row) => row.boxId === IMPOSTOR_BOX_ID);
     gate(
       "and the address the site keeps is still the box's",
-      kept.includes(stack.base) && !kept.includes("impostor"),
-      kept.slice(0, 160)
+      keptBox?.baseUrl === stack.base && keptImpostor?.baseUrl === "",
+      `kept ${JSON.stringify({ box: keptBox?.baseUrl, impostor: keptImpostor?.baseUrl })}`
     );
 
     const reached = await getJson(`${site}/api/admin/proxy/status`, admin);

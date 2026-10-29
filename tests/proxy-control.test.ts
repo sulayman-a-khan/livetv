@@ -12,6 +12,8 @@
  */
 
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +22,13 @@ import { afterEach, test } from "node:test";
 // The box registry keeps a local registration in a file. These cases are about this
 // server's own configuration, so the file is pointed at a path that does not exist: the
 // site then has no registered box, whatever this machine happens to hold.
-process.env.BOX_REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-control-registry", "proxy-box.json");
+const REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-control-registry", "proxy-box.json");
+process.env.BOX_REGISTRY_FILE = REGISTRY_FILE;
+
+// A blank URI is the shape of "this process has no database". It is cleared before anything
+// is loaded, because `lib/db.ts` reads it once at load time.
+delete process.env.MONGODB_URI;
+delete process.env.VERCEL;
 
 type Control = typeof import("../lib/proxyControl");
 const control: Control = require("../lib/proxyControl");
@@ -34,6 +42,25 @@ const {
   proxyInspectResponse,
   proxyInspectionConfigProblem,
 } = control;
+
+type Registry = typeof import("../lib/boxRegistry");
+const registry: Registry = require("../lib/boxRegistry");
+const { resetBoxRegistryCache } = registry;
+
+/**
+ * The site's master secret and the box it is for.
+ *
+ * The read-only token is not a value anybody set: it is derived from these two, so the
+ * server holds a secret and a box's name, and the token falls out of them.
+ */
+const BOX_SECRET = "the-master-secret-this-site-holds-for-its-boxes";
+const BOX_ID = "box-under-test";
+
+/** The read-only token the site derives for this box. */
+const DERIVED_READONLY_TOKEN = crypto
+  .createHmac("sha256", BOX_SECRET)
+  .update(`soluplay-box:readonly:${BOX_ID}`)
+  .digest("hex");
 
 /**
  * `/healthz` as `ProxyServer/src/server.ts` actually answers it: counts, a vault report and
@@ -121,17 +148,63 @@ function resetSlot(): void {
 
 const REAL_ADMIN_SECRET = process.env.ADMIN_SECRET_KEY;
 const REAL_BASE_URL = process.env.PROXY_BASE_URL;
-const REAL_READONLY_TOKEN = process.env.PROXY_READONLY_TOKEN;
+const REAL_BOX_SECRET = process.env.PROXY_BOX_SECRET;
 
 function setEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
 
+/**
+ * Writes the one row the site keeps about a box: its name, its address and the fact that it
+ * is enrolled. No credential is in it — the token is derived from the master secret.
+ */
+function enrolledBox(baseUrl = "https://box.example.com"): void {
+  fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
+  fs.writeFileSync(
+    REGISTRY_FILE,
+    JSON.stringify(
+      {
+        boxes: [
+          {
+            boxId: BOX_ID,
+            baseUrl,
+            registeredAt: new Date().toISOString(),
+            state: "enrolled",
+            enrolledAt: new Date().toISOString(),
+            revokedAt: null,
+            enrollmentCodeHash: "",
+            enrollmentCodeExpiresAt: null,
+            enrollmentCodeUsedAt: null,
+          },
+        ],
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  resetBoxRegistryCache();
+}
+
+/** Removes the row, so the site holds no admitted box. */
+function noBox(): void {
+  fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
+  fs.writeFileSync(REGISTRY_FILE, JSON.stringify({ boxes: [] }, null, 2), "utf8");
+  resetBoxRegistryCache();
+}
+
+// The registry file lives in the temporary directory, so it outlives one run and the next
+// one would start with a box it did not enrol. It is emptied here and after every case, so
+// no case can inherit a box from another case or from an earlier run.
+noBox();
+
 afterEach(() => {
   setEnv("ADMIN_SECRET_KEY", REAL_ADMIN_SECRET);
   setEnv("PROXY_BASE_URL", REAL_BASE_URL);
-  setEnv("PROXY_READONLY_TOKEN", REAL_READONLY_TOKEN);
+  setEnv("PROXY_BOX_SECRET", REAL_BOX_SECRET);
+  noBox();
+  resetBoxRegistryCache();
   resetSlot();
 });
 
@@ -757,10 +830,11 @@ test("an unauthorized caller never reaches the read-only surface", async () => {
   assert.equal(box.calls.length, 0, "an unauthorized call must not reach the box");
 });
 
-test("a server with no read-only token asks the box nothing at all", async () => {
+test("a server that can derive no read-only token asks the box nothing at all", async () => {
   resetSlot();
   setEnv("ADMIN_SECRET_KEY", "correct-horse-battery-staple");
-  setEnv("PROXY_READONLY_TOKEN", undefined);
+  setEnv("PROXY_BOX_SECRET", undefined);
+  noBox();
   const { fetchImpl, box } = stubInspectFetch(workingInspectReplies());
 
   const result = await proxyInspectResponse("correct-horse-battery-staple", {
@@ -779,14 +853,24 @@ test("a server with no read-only token asks the box nothing at all", async () =>
 
 test("the inspection names what is missing, by name only", async () => {
   setEnv("PROXY_BASE_URL", "https://box.example.com");
-  setEnv("PROXY_READONLY_TOKEN", READONLY_TOKEN);
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  enrolledBox();
   assert.equal(await proxyInspectionConfigProblem(), null);
 
-  setEnv("PROXY_READONLY_TOKEN", "");
+  setEnv("PROXY_BOX_SECRET", "");
   const problem = await proxyInspectionConfigProblem();
-  assert.ok(problem && problem.includes("PROXY_READONLY_TOKEN"), "a missing variable is named");
-  assert.ok(!problem.includes(READONLY_TOKEN), "the problem text must not carry a value");
+  assert.ok(problem && problem.includes("PROXY_BOX_SECRET"), "a missing variable is named");
+  assert.ok(!problem.includes(BOX_SECRET), "the problem text must not carry a value");
   assert.ok(!problem.includes("https://"), "the problem text must not carry an address");
+});
+
+test("a site with a master secret and no enrolled box says the box is missing", async () => {
+  setEnv("PROXY_BASE_URL", "https://box.example.com");
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  noBox();
+  const problem = await proxyInspectionConfigProblem();
+  assert.ok(problem && problem.includes("an enrolled stream box"), "the missing box is named");
+  assert.ok(!problem.includes(BOX_SECRET), "the problem text must not carry a value");
 });
 
 // --- what leaves the server, and what does not ---
@@ -1121,7 +1205,8 @@ test("the inspection route refuses an unauthorized caller before the box is aske
   setEnv("ADMIN_SECRET_KEY", "local-d2-verify-only");
   const box = await startInspectBox();
   setEnv("PROXY_BASE_URL", box.url);
-  setEnv("PROXY_READONLY_TOKEN", READONLY_TOKEN);
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  enrolledBox(box.url);
 
   try {
     const refused = await GET(new NextRequest("http://localhost/api/admin/proxy/inspect"));
@@ -1144,9 +1229,10 @@ test("the inspection route refuses an unauthorized caller before the box is aske
     assert.equal(allowed.status, 200);
     assert.equal(box.hits(), 4, "the authorized call asks the four read-only routes");
 
-    // The read-only token reached the box, in the header the box expects.
+    // The read-only token reached the box, in the header the box expects — and it is the
+    // token the site derived for this box, not one the operator set.
     for (const header of box.authHeaders()) {
-      assert.equal(header, `Bearer ${READONLY_TOKEN}`);
+      assert.equal(header, `Bearer ${DERIVED_READONLY_TOKEN}`);
     }
 
     const body = await allowed.json();
@@ -1163,6 +1249,7 @@ test("the inspection route refuses an unauthorized caller before the box is aske
     const said = JSON.stringify(body);
     assert.ok(!said.includes("local-d2-verify-only"), "the admin secret reached the browser");
     assert.ok(!said.includes(READONLY_TOKEN), "the read-only token reached the browser");
+    assert.ok(!said.includes(DERIVED_READONLY_TOKEN), "the derived token reached the browser");
     assert.ok(!said.includes("127.0.0.1"), "the box's address reached the browser");
     assert.ok(!said.includes("/readonly"), "the upstream path reached the browser");
   } finally {
@@ -1178,7 +1265,8 @@ test("an unreachable upstream produces a safe inspection reading, not an error p
   setEnv("ADMIN_SECRET_KEY", "local-d2-verify-only");
   // A port nothing listens on: the transport fails, exactly as a dead tunnel would.
   setEnv("PROXY_BASE_URL", "http://127.0.0.1:1");
-  setEnv("PROXY_READONLY_TOKEN", READONLY_TOKEN);
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  enrolledBox("http://127.0.0.1:1");
 
   const res = await GET(
     new NextRequest("http://localhost/api/admin/proxy/inspect", {

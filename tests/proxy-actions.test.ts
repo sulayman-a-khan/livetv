@@ -12,6 +12,8 @@
  */
 
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -20,18 +22,43 @@ import { afterEach, test } from "node:test";
 // The box registry keeps a local registration in a file. These cases are about this
 // server's own configuration, so the file is pointed at a path that does not exist: the
 // site then has no registered box, whatever this machine happens to hold.
-process.env.BOX_REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-actions-registry", "proxy-box.json");
+const REGISTRY_FILE = path.join(os.tmpdir(), "freetv-proxy-actions-registry", "proxy-box.json");
+process.env.BOX_REGISTRY_FILE = REGISTRY_FILE;
+
+// A blank URI is the shape of "this process has no database". It is cleared before anything
+// is loaded, because `lib/db.ts` reads it once at load time and a database that answered
+// here would take a branch these cases are not about.
+delete process.env.MONGODB_URI;
+delete process.env.VERCEL;
 
 type Actions = typeof import("../lib/proxyActions");
 const actions: Actions = require("../lib/proxyActions");
 const { proxyActionResponse, proxyActionConfigProblem, PROXY_ACTION_NAMES } = actions;
+
+type Registry = typeof import("../lib/boxRegistry");
+const registry: Registry = require("../lib/boxRegistry");
+const { resetBoxRegistryCache } = registry;
 
 type Labels = typeof import("../components/proxy-admin/proxyActionLabels");
 const labels: Labels = require("../components/proxy-admin/proxyActionLabels");
 const { proxyActionLabel, proxyActionFailure, proxyActionSuccess } = labels;
 
 const ADMIN_SECRET = "correct-horse-battery-staple";
-const BOX_TOKEN = "box-write-token-not-real-000000000";
+
+/**
+ * The site's one master secret, and the box it is for.
+ *
+ * The write credential is not a value anybody set: it is derived from these two, so the
+ * test holds a master secret and a box's name, and the token falls out of them.
+ */
+const BOX_SECRET = "the-master-secret-this-site-holds-for-its-boxes";
+const BOX_ID = "box-under-test";
+
+/** The write token the site derives for this box. */
+const BOX_TOKEN = crypto
+  .createHmac("sha256", BOX_SECRET)
+  .update(`soluplay-box:admin:${BOX_ID}`)
+  .digest("hex");
 
 function fakeResponse(status: number, text: string) {
   return {
@@ -60,24 +87,75 @@ function stubFetch(reply: { status: number; body: unknown } | Error = { status: 
 
 const REAL_ADMIN_SECRET = process.env.ADMIN_SECRET_KEY;
 const REAL_BASE_URL = process.env.PROXY_BASE_URL;
-const REAL_ADMIN_TOKEN = process.env.PROXY_ADMIN_TOKEN;
+const REAL_BOX_SECRET = process.env.PROXY_BOX_SECRET;
 
 function setEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
 }
 
+/**
+ * Writes the one row the site keeps about a box: its name, its address and the fact that it
+ * is enrolled.
+ *
+ * There is no credential in the row, and that is the point — the site's database holds no
+ * token at all. The write token is derived from the master secret and the box's own name,
+ * so this file plus the secret is everything the server needs.
+ */
+function enrolledBox(): void {
+  fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
+  fs.writeFileSync(
+    REGISTRY_FILE,
+    JSON.stringify(
+      {
+        boxes: [
+          {
+            boxId: BOX_ID,
+            baseUrl: "https://box.example.com",
+            registeredAt: new Date().toISOString(),
+            state: "enrolled",
+            enrolledAt: new Date().toISOString(),
+            revokedAt: null,
+            enrollmentCodeHash: "",
+            enrollmentCodeExpiresAt: null,
+            enrollmentCodeUsedAt: null,
+          },
+        ],
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  resetBoxRegistryCache();
+}
+
+/** Removes the row, so the site holds no admitted box. */
+function noBox(): void {
+  fs.mkdirSync(path.dirname(REGISTRY_FILE), { recursive: true });
+  fs.writeFileSync(REGISTRY_FILE, JSON.stringify({ boxes: [] }, null, 2), "utf8");
+  resetBoxRegistryCache();
+}
+
+// The registry file lives in the temporary directory, so it outlives one run and the next
+// one would start with a box it did not enrol. It is emptied here and after every case, so
+// no case can inherit a box from another case or from an earlier run.
+noBox();
+
 afterEach(() => {
   setEnv("ADMIN_SECRET_KEY", REAL_ADMIN_SECRET);
   setEnv("PROXY_BASE_URL", REAL_BASE_URL);
-  setEnv("PROXY_ADMIN_TOKEN", REAL_ADMIN_TOKEN);
+  setEnv("PROXY_BOX_SECRET", REAL_BOX_SECRET);
+  noBox();
+  resetBoxRegistryCache();
 });
 
 /** The environment a working deployment of this tier has. */
 function configuredEnv(): void {
   setEnv("ADMIN_SECRET_KEY", ADMIN_SECRET);
   setEnv("PROXY_BASE_URL", "https://box.example.com");
-  setEnv("PROXY_ADMIN_TOKEN", BOX_TOKEN);
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  enrolledBox();
 }
 
 // --- the gate, before the box is ever asked ---
@@ -438,18 +516,38 @@ test("an answer that is not JSON is not read as values", async () => {
 test("without the write credential the server says what is missing and asks nothing", async () => {
   setEnv("ADMIN_SECRET_KEY", ADMIN_SECRET);
   setEnv("PROXY_BASE_URL", "https://box.example.com");
-  setEnv("PROXY_ADMIN_TOKEN", undefined);
+  setEnv("PROXY_BOX_SECRET", undefined);
+  noBox();
   const { fetchImpl, box } = stubFetch();
 
   const result = await proxyActionResponse(ADMIN_SECRET, { action: "refresh_vault" }, { fetchImpl });
 
   assert.equal(result.status, 503);
   assert.equal(result.body.success, false);
-  assert.match(String(result.body.error), /PROXY_ADMIN_TOKEN/);
+  assert.match(String(result.body.error), /PROXY_BOX_SECRET/);
   assert.ok(!String(result.body.error).includes(BOX_TOKEN));
   assert.equal(box.calls.length, 0, "a server that cannot write must not ask the box");
 
-  assert.equal(await proxyActionConfigProblem(), "PROXY_ADMIN_TOKEN");
+  assert.equal(await proxyActionConfigProblem(), "PROXY_BOX_SECRET");
+});
+
+test("a site with a master secret but no enrolled box still cannot write", async () => {
+  // The master secret is half the credential; the other half is a box the site admits. A
+  // site that holds the secret and no box has nothing to derive a token from, and must say
+  // so rather than ask a box it does not have.
+  setEnv("ADMIN_SECRET_KEY", ADMIN_SECRET);
+  setEnv("PROXY_BASE_URL", "https://box.example.com");
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  noBox();
+  const { fetchImpl, box } = stubFetch();
+
+  const result = await proxyActionResponse(ADMIN_SECRET, { action: "refresh_vault" }, { fetchImpl });
+
+  assert.equal(result.status, 503);
+  assert.match(String(result.body.error), /enrolled stream box/);
+  assert.equal(box.calls.length, 0);
+
+  assert.equal(await proxyActionConfigProblem(), "an enrolled stream box");
 });
 
 test("a boolean is required for the two activation actions", async () => {
@@ -534,7 +632,8 @@ test("the action route refuses an unauthorized caller before the box is asked", 
   const { POST } = require("../app/api/admin/proxy/action/route.js");
 
   setEnv("ADMIN_SECRET_KEY", ADMIN_SECRET);
-  setEnv("PROXY_ADMIN_TOKEN", BOX_TOKEN);
+  setEnv("PROXY_BOX_SECRET", BOX_SECRET);
+  enrolledBox();
   const box = await startRecordingBox();
   setEnv("PROXY_BASE_URL", box.url);
 

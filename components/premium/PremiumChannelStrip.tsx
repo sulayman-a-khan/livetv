@@ -53,9 +53,11 @@ export default function PremiumChannelStrip() {
           <Link
             key={channel.id}
             href={`/premium/${channel.id}`}
-            className="flex-1 min-w-[132px] sm:max-w-[260px] flex items-center gap-2 rounded-xl border border-amber-500/30 bg-gradient-to-r from-[#1b1408] via-[#120e07] to-[#0a1222] px-2 py-1.5 hover:border-amber-400/60 transition-colors"
+            className="flex-1 min-w-[132px] sm:max-w-[260px] flex items-center gap-2 rounded-xl border border-[#d4af37]/35 bg-gradient-to-br from-[#16130a] via-[#0b0a08] to-[#07070c] px-2 py-1.5 shadow-[0_0_20px_-10px_rgba(212,175,55,0.55)] hover:border-[#d4af37]/70 hover:shadow-[0_0_26px_-8px_rgba(212,175,55,0.65)] transition-all"
           >
-            <span className="w-9 h-9 shrink-0 rounded-lg bg-white/95 border border-amber-500/40 p-1 flex items-center justify-center overflow-hidden">
+            {/* A gold pinstripe down the edge, the way a plaque is marked. */}
+            <span className="w-0.5 h-7 rounded-full bg-gradient-to-b from-[#f2dc9a] via-[#d4af37] to-[#7a5f18] shrink-0" />
+            <span className="w-9 h-9 shrink-0 rounded-lg bg-white/95 border border-[#d4af37]/45 p-1 flex items-center justify-center overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={getChannelLogo(channel.name, channel.logoUrl)}
@@ -73,7 +75,7 @@ export default function PremiumChannelStrip() {
                 }}
               />
             </span>
-            <span className="min-w-0 text-[11px] font-bold text-amber-100 truncate">
+            <span className="min-w-0 text-[11px] font-bold text-[#f2e6c4] truncate">
               {channel.name}
             </span>
           </Link>

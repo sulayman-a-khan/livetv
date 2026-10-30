@@ -2,19 +2,50 @@
 
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { Calendar, Clock, Goal, Trophy } from "lucide-react";
 import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
 import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
 import { parseMatchTitle, teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/** The three numbers a countdown is made of, so the two forms of it cannot disagree. */
+function countdownParts(ms: number): { h: number; m: number; s: number } {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return { h: Math.floor(total / 3600), m: Math.floor((total % 3600) / 60), s: total % 60 };
+}
+
 /** The countdown the approved wording asks for: a clock, then Bengali text. */
 function countdownText(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
+  const { h, m, s } = countdownParts(ms);
   return `${pad(h)} : ${pad(m)} : ${pad(s)} মিনিট পর খেলা শুরু হবে`;
+}
+
+/** The same clock as digits, for the badge that has room for nothing else. */
+function countdownDigits(ms: number): string {
+  const { h, m, s } = countdownParts(ms);
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+/**
+ * Bangladesh Standard Time: six hours ahead of UTC and no daylight saving, so the offset is a
+ * constant rather than a lookup.
+ *
+ * The arithmetic is done by hand rather than through `Intl` because the card is rendered on the
+ * server and again in the browser, and the two must not disagree about what time it is.
+ */
+const BDT_OFFSET_MS = 6 * 60 * 60 * 1000;
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+
+/** The kickoff as the card prints it: the date, and the time of day in Bangladesh. */
+function kickoffParts(ms: number): { date: string; time: string } {
+  const at = new Date(ms + BDT_OFFSET_MS);
+  const hour24 = at.getUTCHours();
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return {
+    date: `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}, ${at.getUTCFullYear()}`,
+    time: `${pad(hour12)}:${pad(at.getUTCMinutes())} ${hour24 < 12 ? "AM" : "PM"} (BDT)`,
+  };
 }
 
 function initialsOf(name: string): string {
@@ -30,30 +61,35 @@ function initialsOf(name: string): string {
 }
 
 /**
- * Team mark: the flag the team is recognised by, the logo the admin entered, or its initials.
+ * The team's flag, drawn as a panel.
  *
  * The flag comes first because recognition is the point — a national side is recognised from its
  * name, so an admin never has to find, crop and upload a picture of a flag. A logo they entered
  * is the next thing to try and the initials are the last, so a card is never blank, and a
  * picture that fails to load costs the card its picture and nothing else.
+ *
+ * The picture is contained rather than cropped: a flag and a crest have different shapes, and a
+ * crest cut off at the edges is worse than a crest with a little air around it.
  */
-function TeamMark({ name, logo }: { name: string; logo: string }) {
+function TeamFlag({ name, logo }: { name: string; logo: string }) {
   const [failed, setFailed] = useState<string[]>([]);
   const candidates = [teamFlagUrl(name), logo].filter((src): src is string => Boolean(src));
   const src = candidates.find((candidate) => !failed.includes(candidate));
 
   return (
-    <div className="w-9 h-9 rounded-full bg-white/95 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+    <div className="relative w-full max-w-[132px] aspect-[4/3] rounded-xl overflow-hidden bg-white/95 border border-white/20 shadow-lg shadow-black/50">
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={src}
           alt=""
-          className="max-w-full max-h-full object-contain"
+          className="w-full h-full object-contain p-0.5"
           onError={() => setFailed((list) => (list.includes(src) ? list : [...list, src]))}
         />
       ) : (
-        <span className="text-[10px] font-black text-slate-700">{initialsOf(name)}</span>
+        <span className="absolute inset-0 flex items-center justify-center text-[13px] font-black text-slate-700">
+          {initialsOf(name)}
+        </span>
       )}
     </div>
   );
@@ -109,63 +145,116 @@ function FixtureCard({
   const live = fixture.phase === "live";
   const offers = offersOf(fixture.choices);
   const heading = headingOf(fixture);
-  // The card's own line names the channel a tap would reach, so the first offer is the one worth
-  // printing — the same answer `watchPath` was built from, not a field carried alongside it.
-  const named = offers[0] ?? fixture.choices[0];
-  const extra = offers.length > 1 ? ` +${offers.length - 1}` : "";
+  const startsAt = new Date(fixture.startsAt).getTime();
+  const kickoff = kickoffParts(startsAt);
+  const remaining = startsAt - now;
+  // A live match whose channels are all shut says so on its face: a red badge would promise a
+  // stream the card cannot open.
+  const noOffer = live && offers.length === 0 ? noOfferText(fixture.choices) : "";
 
   const card = (
     <article
-      className={`rounded-2xl border border-slate-800/80 bg-[#0a1222] p-3 flex-col gap-2.5 w-full ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 sm:p-3.5 flex-col gap-3 w-full ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
-            {SPORT_LABEL[fixture.sport]}
-          </span>
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide truncate">
+      {/* The two corners the card carries: the theme's indigo and its mint, both held low so the
+          teams stay the brightest thing on the card. */}
+      <div className="pointer-events-none absolute -top-12 -left-10 h-28 w-28 rounded-full bg-brand-500/20 blur-2xl" />
+      <div className="pointer-events-none absolute -bottom-14 -right-8 h-28 w-28 rounded-full bg-brand-accent/10 blur-2xl" />
+
+      <div className="relative flex items-center gap-2 min-w-0">
+        <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-indigo-200">
+          {fixture.sport === "cricket" ? (
+            <Trophy className="w-3 h-3" />
+          ) : (
+            <Goal className="w-3 h-3" />
+          )}
+          {SPORT_LABEL[fixture.sport]}
+        </span>
+        {fixture.competition ? (
+          <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 truncate">
             {fixture.competition}
-          </span>
-        </div>
-        {live ? (
-          <span className="flex items-center gap-1 text-[10px] font-black text-red-400 shrink-0">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            LIVE NOW
           </span>
         ) : null}
       </div>
 
       {heading ? (
-        <p className="text-[11px] font-bold text-white truncate">{heading}</p>
+        <p className="relative text-[11px] font-bold text-slate-300 truncate">{heading}</p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-2 min-w-0">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <TeamMark name={fixture.teamA} logo={fixture.teamALogo} />
-          <span className="text-[11px] font-bold text-slate-200 truncate">{fixture.teamA}</span>
+      <div className="relative grid grid-cols-[1fr_46px_1fr] items-center gap-2 sm:gap-3">
+        <div className="flex justify-center min-w-0">
+          <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
         </div>
-        <span className="text-[10px] font-black text-slate-600 shrink-0">vs</span>
-        <div className="flex items-center gap-2 min-w-0 flex-1 justify-end flex-row-reverse">
-          <TeamMark name={fixture.teamB} logo={fixture.teamBLogo} />
-          <span className="text-[11px] font-bold text-slate-200 truncate text-right">
+        <div className="flex flex-col items-center gap-1">
+          <span className="block h-5 w-px rotate-[18deg] bg-gradient-to-b from-transparent to-brand-500/80" />
+          <span className="text-[13px] font-black italic text-slate-300">VS</span>
+          <span className="block h-5 w-px -rotate-[18deg] bg-gradient-to-t from-transparent to-brand-500/80" />
+        </div>
+        <div className="flex justify-center min-w-0">
+          <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
+        </div>
+      </div>
+
+      <div className="relative grid grid-cols-[1fr_46px_1fr] gap-2 sm:gap-3">
+        <div className="flex justify-center min-w-0">
+          <span className="text-[11px] sm:text-[13px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+            {fixture.teamA}
+          </span>
+        </div>
+        <div />
+        <div className="flex justify-center min-w-0">
+          <span className="text-[11px] sm:text-[13px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamB}
           </span>
         </div>
       </div>
 
-      <p
-        className={`text-[11px] font-bold ${
-          live ? (offers.length > 0 ? "text-emerald-400" : "text-slate-400") : "text-white"
-        } truncate`}
-      >
-        {live
-          ? offers.length > 0
-            ? `▶ Live on ${named.name}${extra}`
-            : noOfferText(fixture.choices)
-          : countdownText(new Date(fixture.startsAt).getTime() - now)}
-      </p>
+      <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-800/80 bg-black/30 px-3 py-2">
+        <div className="flex flex-col gap-1 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            {live ? (
+              noOffer ? null : (
+                <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                  LIVE NOW
+                </span>
+              )
+            ) : (
+              <>
+                <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
+                  <Clock className="w-3 h-3" />
+                  UPCOMING
+                </span>
+                <span
+                  title={countdownText(remaining)}
+                  aria-label={countdownText(remaining)}
+                  className="text-[12px] font-black tabular-nums text-amber-300/90"
+                >
+                  {countdownDigits(remaining)}
+                </span>
+              </>
+            )}
+          </div>
+          {noOffer ? (
+            <span className="text-[10px] font-bold text-amber-300/90">{noOffer}</span>
+          ) : null}
+        </div>
+
+        <span className="hidden sm:block h-8 w-px bg-slate-700/80" />
+
+        <div className="flex flex-col gap-0.5 sm:ml-auto">
+          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
+            <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+            {kickoff.date}
+          </span>
+          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
+            <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+            {kickoff.time}
+          </span>
+        </div>
+      </div>
     </article>
   );
 

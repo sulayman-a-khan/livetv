@@ -34,17 +34,6 @@ export default async function PremiumWatchPage({ params }: { params: { id: strin
 
   return (
     <main className="max-w-5xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col gap-3">
-      <header className="flex items-center gap-3 min-w-0">
-        {channel.logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={channel.logoUrl} alt="" className="w-10 h-10 rounded-lg object-contain bg-white/95 border border-slate-700 shrink-0" />
-        ) : null}
-        <div className="min-w-0">
-          <h1 className="text-base font-black text-white truncate">{channel.name}</h1>
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide truncate">{channel.category}</p>
-        </div>
-      </header>
-
       {channel.active ? (
         <PremiumPlayer channelId={channel._id} channels={cardChannels} />
       ) : (

@@ -151,7 +151,7 @@ function FixtureCard({
       <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      {/* What the match is and when it starts, on one line: the sport on the left, the clock on the
+      {/* What the match is, and where it stands right now: the sport on the left, the status on the
           right, and the tournament underneath them where it has the whole width to itself. */}
       <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
@@ -162,14 +162,34 @@ function FixtureCard({
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
-        <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-[10px] font-bold text-slate-300">
-          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.date}
-          <span className="text-slate-600">·</span>
-          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.time}
-        </span>
+
+        {live ? (
+          noOffer ? null : (
+            <span className="ml-auto inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              LIVE NOW
+            </span>
+          )
+        ) : (
+          <span className="ml-auto flex items-center gap-1.5 shrink-0">
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
+              <Clock className="w-3 h-3" />
+              UPCOMING
+            </span>
+            <span
+              title={countdownText(remaining)}
+              aria-label={countdownText(remaining)}
+              className="text-[11px] font-black tabular-nums text-amber-300/90"
+            >
+              {countdownDigits(remaining)}
+            </span>
+          </span>
+        )}
       </div>
+
+      {noOffer ? (
+        <p className="relative text-center text-[10px] font-bold text-amber-300/90">{noOffer}</p>
+      ) : null}
 
       {fixture.competition ? (
         <p className="relative text-center text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500 truncate">
@@ -195,34 +215,13 @@ function FixtureCard({
         </div>
       </div>
 
-      {/* The status, alone and centred: a live match says so in red and an upcoming one counts
-          down in amber, while a match whose channels are all shut says that instead of promising
-          a stream. */}
-      <div className="relative flex flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
-        {live ? (
-          noOffer ? (
-            <span className="text-[10px] font-bold text-amber-300/90">{noOffer}</span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              LIVE NOW
-            </span>
-          )
-        ) : (
-          <>
-            <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
-              <Clock className="w-3 h-3" />
-              UPCOMING
-            </span>
-            <span
-              title={countdownText(remaining)}
-              aria-label={countdownText(remaining)}
-              className="text-[11px] font-black tabular-nums text-amber-300/90"
-            >
-              {countdownDigits(remaining)}
-            </span>
-          </>
-        )}
+      {/* The kickoff, under the teams: the date and the time the whole card comes down to. */}
+      <div className="relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5 text-[10px] font-bold text-slate-300">
+        <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+        {kickoff.date}
+        <span className="text-slate-600">·</span>
+        <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+        {kickoff.time}
       </div>
     </article>
   );

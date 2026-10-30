@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listPremiumChannels } from "@/lib/premiumStore";
+import { isPremiumReady, readPremiumReadiness } from "@/lib/premiumReadiness";
 
 export const dynamic = "force-dynamic";
 
@@ -13,22 +14,38 @@ export const dynamic = "force-dynamic";
  *
  * A row with no handle on the box is left out: it could never open, so a tile for it would be a
  * dead end with a picture on it.
+ *
+ * And a box that cannot answer empties the list entirely. Every one of these channels plays
+ * through that box, so a tile shown while it is down is a promise the page cannot keep — the
+ * strip disappears instead, the way the match board keeps a card but drops its link.
  */
 export async function GET() {
   try {
-    const rows = await listPremiumChannels();
-    const channels = rows
-      .filter((row) => row.active && row.proxyChannelKey)
-      .map((row) => ({
-        id: row._id,
-        name: row.name,
-        logoUrl: row.logoUrl,
-        category: row.category,
-      }));
+    const [rows, readiness] = await Promise.all([
+      listPremiumChannels(),
+      readPremiumReadiness(),
+    ]);
+    const ready = isPremiumReady(readiness);
+
+    const channels = ready
+      ? rows
+          .filter((row) => row.active && row.proxyChannelKey)
+          .map((row) => ({
+            id: row._id,
+            name: row.name,
+            logoUrl: row.logoUrl,
+            category: row.category,
+          }))
+      : [];
 
     return NextResponse.json(
       { success: true, count: channels.length, channels },
-      { status: 200, headers: { "Cache-Control": "public, s-maxage=15" } }
+      {
+        status: 200,
+        // A box that is down empties the list, and an empty list must not be cached: the strip
+        // has to come back the moment the box answers again.
+        headers: { "Cache-Control": ready ? "public, s-maxage=15" : "no-store" },
+      }
     );
   } catch (error: any) {
     console.error("GET /api/premium/channels error:", error);

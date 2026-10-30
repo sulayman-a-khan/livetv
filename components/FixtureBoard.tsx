@@ -154,105 +154,87 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 sm:p-3.5 flex-col gap-3 w-full ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex-col gap-2 w-full ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
       {/* The two corners the card carries: the theme's indigo and its mint, both held low so the
           teams stay the brightest thing on the card. */}
-      <div className="pointer-events-none absolute -top-12 -left-10 h-28 w-28 rounded-full bg-brand-500/20 blur-2xl" />
-      <div className="pointer-events-none absolute -bottom-14 -right-8 h-28 w-28 rounded-full bg-brand-accent/10 blur-2xl" />
+      <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
+      <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      <div className="relative flex items-center gap-2 min-w-0">
-        <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-indigo-200">
+      <div className="relative flex items-center gap-1.5 min-w-0">
+        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
-            <Trophy className="w-3 h-3" />
+            <Trophy className="w-2.5 h-2.5" />
           ) : (
-            <Goal className="w-3 h-3" />
+            <Goal className="w-2.5 h-2.5" />
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
+        {heading ? (
+          <span className="text-[10px] font-bold text-slate-300 truncate">{heading}</span>
+        ) : null}
         {fixture.competition ? (
-          <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-500 truncate">
+          <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-slate-500 truncate shrink-0">
             {fixture.competition}
           </span>
         ) : null}
       </div>
 
-      {heading ? (
-        <p className="relative text-[11px] font-bold text-slate-300 truncate">{heading}</p>
-      ) : null}
-
-      <div className="relative grid grid-cols-[1fr_46px_1fr] items-center gap-2 sm:gap-3">
-        <div className="flex justify-center min-w-0">
+      {/* The two teams, held close together: the flags carry the row, the VS sits between them and
+          the names sit tight under their own flag. */}
+      <div className="relative flex items-center justify-center gap-2.5 sm:gap-3">
+        <div className="flex w-[64px] sm:w-[74px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <span className="block h-5 w-px rotate-[18deg] bg-gradient-to-b from-transparent to-brand-500/80" />
-          <span className="text-[13px] font-black italic text-slate-300">VS</span>
-          <span className="block h-5 w-px -rotate-[18deg] bg-gradient-to-t from-transparent to-brand-500/80" />
-        </div>
-        <div className="flex justify-center min-w-0">
-          <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
-        </div>
-      </div>
-
-      <div className="relative grid grid-cols-[1fr_46px_1fr] gap-2 sm:gap-3">
-        <div className="flex justify-center min-w-0">
-          <span className="text-[11px] sm:text-[13px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamA}
           </span>
         </div>
-        <div />
-        <div className="flex justify-center min-w-0">
-          <span className="text-[11px] sm:text-[13px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+        <span className="text-[11px] font-black italic text-slate-300 shrink-0">VS</span>
+        <div className="flex w-[64px] sm:w-[74px] flex-col items-center gap-1">
+          <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
+          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamB}
           </span>
         </div>
       </div>
 
-      <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-800/80 bg-black/30 px-3 py-2">
-        <div className="flex flex-col gap-1 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
-            {live ? (
-              noOffer ? null : (
-                <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
-                  <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                  LIVE NOW
-                </span>
-              )
-            ) : (
-              <>
-                <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
-                  <Clock className="w-3 h-3" />
-                  UPCOMING
-                </span>
-                <span
-                  title={countdownText(remaining)}
-                  aria-label={countdownText(remaining)}
-                  className="text-[12px] font-black tabular-nums text-amber-300/90"
-                >
-                  {countdownDigits(remaining)}
-                </span>
-              </>
-            )}
-          </div>
-          {noOffer ? (
-            <span className="text-[10px] font-bold text-amber-300/90">{noOffer}</span>
-          ) : null}
-        </div>
+      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+        {live ? (
+          noOffer ? null : (
+            <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+              <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
+              LIVE NOW
+            </span>
+          )
+        ) : (
+          <>
+            <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-300">
+              <Clock className="w-2.5 h-2.5" />
+              UPCOMING
+            </span>
+            <span
+              title={countdownText(remaining)}
+              aria-label={countdownText(remaining)}
+              className="text-[10px] font-black tabular-nums text-amber-300/90"
+            >
+              {countdownDigits(remaining)}
+            </span>
+          </>
+        )}
+        {noOffer ? (
+          <span className="text-[9px] font-bold text-amber-300/90">{noOffer}</span>
+        ) : null}
 
-        <span className="hidden sm:block h-8 w-px bg-slate-700/80" />
+        <span className="hidden sm:block h-4 w-px bg-slate-700/80 shrink-0" />
 
-        <div className="flex flex-col gap-0.5 sm:ml-auto">
-          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
-            <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
-            {kickoff.date}
-          </span>
-          <span className="flex items-center gap-1.5 text-[10px] font-bold text-slate-300">
-            <Clock className="w-3 h-3 text-slate-500 shrink-0" />
-            {kickoff.time}
-          </span>
+        <div className="ml-auto flex items-center gap-1 text-[9px] font-bold text-slate-300 whitespace-nowrap">
+          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.date}
+          <span className="text-slate-600">·</span>
+          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.time}
         </div>
       </div>
     </article>

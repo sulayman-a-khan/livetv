@@ -48,15 +48,14 @@ export default function PremiumChannelStrip() {
 
   return (
     <section className="mb-3">
-      <h2 className="text-sm font-black text-white tracking-tight mb-2.5">Premium</h2>
       <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
         {channels.map((channel) => (
           <Link
             key={channel.id}
             href={`/premium/${channel.id}`}
-            className="flex-1 min-w-[132px] sm:max-w-[260px] flex items-center gap-2 rounded-xl border border-slate-800/80 bg-[#0a1222] px-2 py-1.5 hover:bg-[#0d1628] transition-colors"
+            className="flex-1 min-w-[132px] sm:max-w-[260px] flex items-center gap-2 rounded-xl border border-amber-500/30 bg-gradient-to-r from-[#1b1408] via-[#120e07] to-[#0a1222] px-2 py-1.5 hover:border-amber-400/60 transition-colors"
           >
-            <span className="w-9 h-9 shrink-0 rounded-lg bg-white/95 border border-slate-700 p-1 flex items-center justify-center overflow-hidden">
+            <span className="w-9 h-9 shrink-0 rounded-lg bg-white/95 border border-amber-500/40 p-1 flex items-center justify-center overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={getChannelLogo(channel.name, channel.logoUrl)}
@@ -74,7 +73,7 @@ export default function PremiumChannelStrip() {
                 }}
               />
             </span>
-            <span className="min-w-0 text-[11px] font-bold text-slate-100 truncate">
+            <span className="min-w-0 text-[11px] font-bold text-amber-100 truncate">
               {channel.name}
             </span>
           </Link>

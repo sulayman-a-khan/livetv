@@ -151,37 +151,39 @@ function FixtureCard({
       <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      {/* What the match is, and where it stands right now: the sport on the left, the status on the
-          right. A card that is half a phone wide cannot carry both on one line, so on a phone the
-          status sits on its own line underneath rather than wrapping into a broken corner, and the
-          tournament follows it. */}
-      <div className="relative flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 min-w-0">
-        <span className="inline-flex items-center gap-1 self-start sm:self-auto shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
+      {/* What the match is, and where it stands right now: the sport on the left, the status on
+          the right, and the two of them share one line at every width. A card on a phone is half
+          the page wide, so the type there is small and the sport badge is held to half its
+          desktop size — the line gets shorter rather than breaking into two rows. */}
+      <div className="relative flex items-center gap-1 sm:gap-2 min-w-0">
+        <span className="inline-flex items-center gap-0.5 sm:gap-1 shrink-0 whitespace-nowrap rounded-full border border-brand-500/50 bg-brand-500/10 px-1 sm:px-2.5 py-0 sm:py-1 text-[7px] sm:text-[10px] font-black uppercase tracking-[0.06em] sm:tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
-            <Trophy className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
+            <Trophy className="w-2 sm:w-3 h-2 sm:h-3" />
           ) : (
-            <Goal className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
+            <Goal className="w-2 sm:w-3 h-2 sm:h-3" />
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
 
         {live ? (
           noOffer ? null : (
-            <span className="inline-flex items-center gap-1.5 self-start sm:self-auto sm:ml-auto shrink-0 rounded-full bg-red-600 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap ml-auto rounded-full bg-red-600 px-1 sm:px-2.5 py-0 sm:py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wider text-white">
+              <span className="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full bg-white animate-pulse" />
               LIVE NOW
             </span>
           )
         ) : (
-          <span className="flex items-center gap-1.5 self-start sm:self-auto sm:ml-auto shrink-0">
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300">
-              <Clock className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
+          <span className="flex items-center gap-1 shrink-0 ml-auto">
+            <span className="inline-flex items-center gap-0.5 sm:gap-1 whitespace-nowrap rounded-full border border-amber-500/50 bg-amber-500/10 px-1 sm:px-2.5 py-0 sm:py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300">
+              {/* The clock beside the word has no room on a phone, and the countdown beside it
+                  says the same thing more precisely. */}
+              <Clock className="hidden sm:block w-3 h-3" />
               UPCOMING
             </span>
             <span
               title={countdownText(remaining)}
               aria-label={countdownText(remaining)}
-              className="text-[10px] sm:text-[11px] font-black tabular-nums text-amber-300/90"
+              className="text-[7px] sm:text-[11px] font-black tabular-nums text-amber-300/90"
             >
               {countdownDigits(remaining)}
             </span>

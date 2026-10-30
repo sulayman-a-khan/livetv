@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Calendar, Clock, Goal, Trophy } from "lucide-react";
 import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
 import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
-import { parseMatchTitle, teamFlagUrl } from "@/lib/teamFlags";
+import { teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -106,21 +106,6 @@ const SPORT_LABEL: Record<PublicFixture["sport"], string> = {
 };
 
 /**
- * The admin's own wording for the match, when it says something the team names do not.
- *
- * "Bangladesh vs India" is what the two team marks already say, so the card does not print it
- * twice; "BAN vs IND" is the admin naming the same match the way they want it read, and that
- * is shown.
- */
-function headingOf(fixture: PublicFixture): string {
-  const title = fixture.title.trim();
-  if (!title) return "";
-  const parsed = parseMatchTitle(title);
-  if (parsed && parsed.teamA === fixture.teamA && parsed.teamB === fixture.teamB) return "";
-  return title;
-}
-
-/**
  * What a live match with nothing to open says.
  *
  * When every choice gives the same reason, that reason is the card's line: a premium outage, a
@@ -148,7 +133,6 @@ function FixtureCard({
 }) {
   const live = fixture.phase === "live";
   const offers = offersOf(fixture.choices);
-  const heading = headingOf(fixture);
   const startsAt = new Date(fixture.startsAt).getTime();
   const kickoff = kickoffParts(startsAt);
   const remaining = startsAt - now;
@@ -158,7 +142,7 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex-col gap-2 w-full ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 flex-col gap-2 w-full max-w-[280px] mx-auto ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
@@ -167,79 +151,78 @@ function FixtureCard({
       <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      <div className="relative flex items-center gap-1.5 min-w-0">
-        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-indigo-200">
+      {/* What the match is and what it is called: the sport on one side, the tournament on the
+          other, with the clock on its own line underneath, where it has room to be read. */}
+      <div className="relative flex items-center gap-2 min-w-0">
+        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
-            <Trophy className="w-2.5 h-2.5" />
+            <Trophy className="w-3 h-3" />
           ) : (
-            <Goal className="w-2.5 h-2.5" />
+            <Goal className="w-3 h-3" />
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
-        {heading ? (
-          <span className="text-[10px] font-bold text-slate-300 truncate">{heading}</span>
-        ) : null}
         {fixture.competition ? (
-          <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-slate-500 truncate shrink-0">
+          <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-slate-500 truncate">
             {fixture.competition}
           </span>
         ) : null}
       </div>
 
+      <div className="relative flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-bold text-slate-300">
+        <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
+        {kickoff.date}
+        <span className="text-slate-600">·</span>
+        <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+        {kickoff.time}
+      </div>
+
       {/* The two teams, held close together: the flags carry the row, the VS sits between them and
           the names sit tight under their own flag. */}
-      <div className="relative flex items-center justify-center gap-2.5 sm:gap-3">
-        <div className="flex w-[64px] sm:w-[74px] flex-col items-center gap-1">
+      <div className="relative flex items-center justify-center gap-3">
+        <div className="flex w-[68px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
-          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamA}
           </span>
         </div>
-        <span className="text-[11px] font-black italic text-slate-300 shrink-0">VS</span>
-        <div className="flex w-[64px] sm:w-[74px] flex-col items-center gap-1">
+        <span className="text-[12px] font-black italic text-slate-300 shrink-0">VS</span>
+        <div className="flex w-[68px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
-          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamB}
           </span>
         </div>
       </div>
 
-      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+      {/* The status, alone and centred: a live match says so in red and an upcoming one counts
+          down in amber, while a match whose channels are all shut says that instead of promising
+          a stream. */}
+      <div className="relative flex flex-wrap items-center justify-center gap-2 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
         {live ? (
-          noOffer ? null : (
-            <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-red-600 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
-              <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
+          noOffer ? (
+            <span className="text-[10px] font-bold text-amber-300/90">{noOffer}</span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               LIVE NOW
             </span>
           )
         ) : (
           <>
-            <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-300">
-              <Clock className="w-2.5 h-2.5" />
+            <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
+              <Clock className="w-3 h-3" />
               UPCOMING
             </span>
             <span
               title={countdownText(remaining)}
               aria-label={countdownText(remaining)}
-              className="text-[10px] font-black tabular-nums text-amber-300/90"
+              className="text-[11px] font-black tabular-nums text-amber-300/90"
             >
               {countdownDigits(remaining)}
             </span>
           </>
         )}
-        {noOffer ? (
-          <span className="text-[9px] font-bold text-amber-300/90">{noOffer}</span>
-        ) : null}
-
-        <span className="hidden sm:block h-4 w-px bg-slate-700/80 shrink-0" />
-
-        <div className="ml-auto flex items-center gap-1 text-[9px] font-bold text-slate-300 whitespace-nowrap">
-          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.date}
-          <span className="text-slate-600">·</span>
-          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.time}
-        </div>
       </div>
     </article>
   );

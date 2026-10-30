@@ -152,9 +152,11 @@ function FixtureCard({
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
       {/* What the match is, and where it stands right now: the sport on the left, the status on the
-          right, and the tournament underneath them where it has the whole width to itself. */}
-      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
+          right. A card that is half a phone wide cannot carry both on one line, so on a phone the
+          status sits on its own line underneath rather than wrapping into a broken corner, and the
+          tournament follows it. */}
+      <div className="relative flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 min-w-0">
+        <span className="inline-flex items-center gap-1 self-start sm:self-auto shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
             <Trophy className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
           ) : (
@@ -165,13 +167,13 @@ function FixtureCard({
 
         {live ? (
           noOffer ? null : (
-            <span className="ml-auto inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-white">
+            <span className="inline-flex items-center gap-1.5 self-start sm:self-auto sm:ml-auto shrink-0 rounded-full bg-red-600 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-white">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               LIVE NOW
             </span>
           )
         ) : (
-          <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <span className="flex items-center gap-1.5 self-start sm:self-auto sm:ml-auto shrink-0">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300">
               <Clock className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
               UPCOMING

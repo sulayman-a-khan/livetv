@@ -68,13 +68,17 @@ function initialsOf(name: string): string {
  * is the next thing to try and the initials are the last, so a card is never blank, and a
  * picture that fails to load costs the card its picture and nothing else.
  *
- * The picture is contained rather than cropped: a flag and a crest have different shapes, and a
- * crest cut off at the edges is worse than a crest with a little air around it.
+ * A country flag fills the panel edge to edge: the flag sheet and the wrapper are both 4:3, so
+ * the picture covers the wrapper and no white margin is left showing around it. A crest is a
+ * different shape, so it is contained rather than cropped — a crest cut off at the edges is worse
+ * than a crest with a little air around it.
  */
 function TeamFlag({ name, logo }: { name: string; logo: string }) {
   const [failed, setFailed] = useState<string[]>([]);
-  const candidates = [teamFlagUrl(name), logo].filter((src): src is string => Boolean(src));
+  const flag = teamFlagUrl(name);
+  const candidates = [flag, logo].filter((src): src is string => Boolean(src));
   const src = candidates.find((candidate) => !failed.includes(candidate));
+  const isFlag = Boolean(src) && src === flag;
 
   return (
     <div className="relative w-full max-w-[132px] aspect-[4/3] rounded-xl overflow-hidden bg-white/95 border border-white/20 shadow-lg shadow-black/50">
@@ -83,7 +87,7 @@ function TeamFlag({ name, logo }: { name: string; logo: string }) {
         <img
           src={src}
           alt=""
-          className="w-full h-full object-contain p-0.5"
+          className={`w-full h-full ${isFlag ? "object-cover" : "object-contain p-0.5"}`}
           onError={() => setFailed((list) => (list.includes(src) ? list : [...list, src]))}
         />
       ) : (

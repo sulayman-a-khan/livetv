@@ -44,7 +44,7 @@ function kickoffParts(ms: number): { date: string; time: string } {
   const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
   return {
     date: `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}, ${at.getUTCFullYear()}`,
-    time: `${pad(hour12)}:${pad(at.getUTCMinutes())} ${hour24 < 12 ? "AM" : "PM"} (BDT)`,
+    time: `${pad(hour12)}:${pad(at.getUTCMinutes())} ${hour24 < 12 ? "AM" : "PM"} BDT`,
   };
 }
 
@@ -142,7 +142,7 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 flex-col gap-2 w-full max-w-[280px] mx-auto ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 flex-col gap-2 w-full ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
@@ -151,9 +151,9 @@ function FixtureCard({
       <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      {/* What the match is and what it is called: the sport on one side, the tournament on the
-          other, with the clock on its own line underneath, where it has room to be read. */}
-      <div className="relative flex items-center gap-2 min-w-0">
+      {/* What the match is and when it starts, on one line: the sport on the left, the clock on the
+          right, and the tournament underneath them where it has the whole width to itself. */}
+      <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
         <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
             <Trophy className="w-3 h-3" />
@@ -162,20 +162,20 @@ function FixtureCard({
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
-        {fixture.competition ? (
-          <span className="ml-auto text-[9px] font-bold uppercase tracking-wider text-slate-500 truncate">
-            {fixture.competition}
-          </span>
-        ) : null}
+        <span className="ml-auto flex items-center gap-1.5 whitespace-nowrap text-[10px] font-bold text-slate-300">
+          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.date}
+          <span className="text-slate-600">·</span>
+          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.time}
+        </span>
       </div>
 
-      <div className="relative flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-bold text-slate-300">
-        <Calendar className="w-3 h-3 text-slate-500 shrink-0" />
-        {kickoff.date}
-        <span className="text-slate-600">·</span>
-        <Clock className="w-3 h-3 text-slate-500 shrink-0" />
-        {kickoff.time}
-      </div>
+      {fixture.competition ? (
+        <p className="relative text-center text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500 truncate">
+          {fixture.competition}
+        </p>
+      ) : null}
 
       {/* The two teams, held close together: the flags carry the row, the VS sits between them and
           the names sit tight under their own flag. */}
@@ -330,7 +330,10 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
           as another panel of channels. It appears only when the board has cards to show: an
           empty board is not a section, it is the promo banner that the caller passed in. */}
       <h2 className="text-sm font-black text-white tracking-tight mb-2.5">24/7 Sports</h2>
-      <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+      {/* The cards are narrower than the page is wide, but they start at the page's own left edge
+          and grow to fill their column on a phone — a narrower card by capping the grid, not by
+          padding the card inside it. */}
+      <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:max-w-[1008px]">
         {fixtures.map((fixture, index) => (
           <FixtureCard
             key={fixture.id}

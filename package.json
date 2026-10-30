@@ -40,7 +40,8 @@
     "check:ci-gate": "node scripts/verify-ci-gate.mjs",
     "check:packaging": "node scripts/verify-packaging-secrets.mjs",
     "snapshot:production": "node scripts/snapshot-production-catalogue.mjs",
-    "dev:snapshot": "node scripts/run-with-snapshot.mjs next dev"
+    "dev:snapshot": "node scripts/run-with-snapshot.mjs next dev",
+    "test:db-retry": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/db-retry.test.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

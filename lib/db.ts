@@ -11,6 +11,24 @@ const MONGODB_URI = process.env.MONGODB_URI;
 // process, so keep it short.
 const RETRY_COOLDOWN_MS = process.env.VERCEL ? 2_000 : 10_000;
 
+/**
+ * How many times a connection is attempted before the caller is told the database is not
+ * there.
+ *
+ * One attempt is not enough: the cluster this site uses resolves through a name that
+ * blinks, and a single blink turns a write that was about to succeed into a refusal the
+ * operator has to repeat by hand.
+ */
+const MAX_CONNECT_ATTEMPTS = 2;
+
+/**
+ * A failure that took longer than this is not worth a second attempt: the cluster is slow
+ * or gone, and the function's own budget is short. A failure that was quick means the name
+ * or the socket blinked, and a second attempt costs a moment and usually succeeds.
+ */
+const RETRY_BUDGET_MS = 2_500;
+const RETRY_DELAY_MS = 250;
+
 interface MongooseCache {
   conn: typeof mongoose | null;
   promise: Promise<typeof mongoose> | null;
@@ -44,35 +62,49 @@ export async function connectToDatabase(): Promise<typeof mongoose | null> {
     return null;
   }
 
-  try {
-    // Reuse any in-flight connection attempt instead of firing a new
-    // mongoose.connect() for every concurrent request (previously every
-    // simultaneous caller started its own redundant connection attempt).
-    if (!cached.promise) {
-      if (!MONGODB_URI) return null;
-      const opts: mongoose.ConnectOptions = {
-        bufferCommands: false,
-        // Vercel cold starts need a little extra time to resolve DNS and connect
-        serverSelectionTimeoutMS: process.env.VERCEL ? 8000 : 5000,
-        dbName: "freetv",
-      };
-      cached.promise = mongoose.connect(MONGODB_URI, opts);
+  if (!MONGODB_URI) return null;
+
+  const opts: mongoose.ConnectOptions = {
+    bufferCommands: false,
+    // Vercel cold starts need a little extra time to resolve DNS and connect
+    serverSelectionTimeoutMS: process.env.VERCEL ? 8000 : 5000,
+    dbName: "freetv",
+  };
+
+  for (let attempt = 1; attempt <= MAX_CONNECT_ATTEMPTS; attempt += 1) {
+    const startedAt = Date.now();
+    try {
+      // Reuse any in-flight connection attempt instead of firing a new
+      // mongoose.connect() for every concurrent request (previously every
+      // simultaneous caller started its own redundant connection attempt).
+      if (!cached.promise) {
+        cached.promise = mongoose.connect(MONGODB_URI, opts);
+      }
+
+      cached.conn = await cached.promise;
+      if (cached.conn && cached.conn.connection && cached.conn.connection.readyState === 1) {
+        return cached.conn;
+      }
+      cached.promise = null;
+    } catch (e: any) {
+      cached.promise = null;
+      cached.conn = null;
     }
 
-    cached.conn = await cached.promise;
-    if (cached.conn && cached.conn.connection && cached.conn.connection.readyState === 1) {
-      return cached.conn;
+    // A failure that was slow means the cluster is unreachable rather than unlucky, and a
+    // second attempt would only spend the time the function has left. A failure that was
+    // quick means the name or the socket blinked — and a second attempt is worth making,
+    // because the write the caller came here for is not the caller's fault.
+    const spent = Date.now() - startedAt;
+    if (attempt >= MAX_CONNECT_ATTEMPTS || spent > RETRY_BUDGET_MS) {
+      cached.lastFailureAt = Date.now();
+      return null;
     }
-    cached.promise = null;
-    cached.lastFailureAt = Date.now();
-    return null;
-  } catch (e: any) {
-    cached.promise = null;
-    cached.conn = null;
-    cached.lastFailureAt = Date.now();
-    // Return null so inMemoryDb is used smoothly
-    return null;
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
   }
+
+  cached.lastFailureAt = Date.now();
+  return null;
 }
 
 /**

@@ -25,6 +25,7 @@
     "app/api/admin/premium/live/route.ts",
     "app/api/admin/premium/providers/route.ts",
     "app/api/admin/premium/providers/[id]/route.ts",
+    "app/api/admin/premium/providers/[id]/channels/route.ts",
     "app/api/youtube/resolve/route.ts",
     "app/api/admin/proxy/action/route.ts",
     "app/api/admin/proxy/inspect/route.ts",

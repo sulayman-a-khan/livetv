@@ -236,6 +236,158 @@ export async function readBoxAdminRows(
 }
 
 /**
+ * One live channel on a provider account, as the account itself names it.
+ *
+ * `streamId` is what a channel row has to hold; the name and the category are how an
+ * operator recognises the channel. Nothing else the panel said is kept.
+ */
+export interface ProviderCatalogueChannel {
+  streamId: string;
+  name: string;
+  category: string;
+}
+
+/**
+ * Why an account's catalogue is empty, in the terms an operator can act on.
+ *
+ * A box that is down, a box that refuses this server's credential and an account whose
+ * panel did not answer are three different problems, so the panel must not merge them
+ * into one "no channels".
+ */
+export type CatalogueRefusal =
+  /** The box did not answer at all. */
+  | "unreachable"
+  /** The box answered and refused the admin token. */
+  | "unauthorized"
+  /** The box holds no such provider. */
+  | "unknown_provider"
+  /** The box answered, but the account's panel did not. */
+  | "catalogue_unavailable"
+  /** The box answered with something this tier cannot use. */
+  | "error"
+  /** This server has no address or no token, so nothing was asked. */
+  | "not_configured";
+
+export interface ProviderCatalogue {
+  /** The box answered at all. */
+  reachable: boolean;
+  /** The box answered and accepted this server's credential. */
+  authorized: boolean;
+  providerId: string;
+  channels: ProviderCatalogueChannel[];
+  /** Why the list is empty, when it is. */
+  refusal: CatalogueRefusal | null;
+}
+
+/**
+ * How long the box has to answer a catalogue read.
+ *
+ * Longer than an inspection read: this one asks the provider's own panel, over the
+ * tunnel, and a panel with a few thousand channels is not an in-process read.
+ */
+const CATALOGUE_TIMEOUT_MS = 20_000;
+
+/**
+ * The largest catalogue answer that is read.
+ *
+ * The box caps its own answer; this cap is the second pass, so a box that grows a field
+ * cannot make this server hold a body nobody asked for.
+ */
+const MAX_CATALOGUE_BYTES = 8 * 1024 * 1024;
+
+/** A catalogue row, projected down to the three fields a channel form needs. */
+function catalogueChannels(body: unknown): ProviderCatalogueChannel[] {
+  const list = record(body).channels;
+  if (!Array.isArray(list)) return [];
+  const out: ProviderCatalogueChannel[] = [];
+  for (const item of list.slice(0, 5000)) {
+    const row = record(item);
+    const streamId = str(row.streamId, 32);
+    if (!streamId) continue;
+    out.push({
+      streamId,
+      name: str(row.name, 120) ?? "",
+      category: str(row.category, 60) ?? "",
+    });
+  }
+  return out;
+}
+
+/**
+ * Read one provider account's own channel list.
+ *
+ * The box holds the credential, so the box is the only side that can ask the panel what
+ * the account carries. This read asks the box, through the same admin surface the premium
+ * tier already writes through, and projects the answer down to names and stream ids.
+ *
+ * Never throws: every way this can fail is a reading rather than an exception.
+ */
+export async function readProviderCatalogue(
+  providerId: string,
+  deps: ProxyControlDeps = {}
+): Promise<ProviderCatalogue> {
+  const key = id(providerId)?.toLowerCase() ?? "";
+  const empty: ProviderCatalogue = {
+    reachable: false,
+    authorized: false,
+    providerId: key,
+    channels: [],
+    refusal: "not_configured",
+  };
+  if (!key) return { ...empty, refusal: "error" };
+
+  const baseUrl = (
+    deps.baseUrl ?? (await resolveBoxAddress())?.baseUrl ?? ""
+  ).trim().replace(/\/+$/, "");
+  const token = (deps.token ?? (await currentBoxToken("admin"))).trim();
+  if (!baseUrl || !token) return empty;
+
+  const send = deps.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await send(`${baseUrl}/admin/providers/${key}/channels`, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(deps.timeoutMs ?? CATALOGUE_TIMEOUT_MS),
+      cache: "no-store",
+    });
+  } catch {
+    return { ...empty, refusal: "unreachable" };
+  }
+
+  let body: unknown = null;
+  try {
+    const raw = await res.text();
+    if (raw.length <= MAX_CATALOGUE_BYTES) body = JSON.parse(raw);
+  } catch {
+    body = null;
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    return { ...empty, reachable: true, authorized: false, refusal: "unauthorized" };
+  }
+  if (res.status === 404) {
+    return { ...empty, reachable: true, authorized: true, refusal: "unknown_provider" };
+  }
+  if (res.status !== 200 || body === null) {
+    return {
+      ...empty,
+      reachable: true,
+      authorized: true,
+      refusal: res.status === 502 ? "catalogue_unavailable" : "error",
+    };
+  }
+
+  return {
+    reachable: true,
+    authorized: true,
+    providerId: key,
+    channels: catalogueChannels(body),
+    refusal: null,
+  };
+}
+
+/**
  * The whole projection, with no network in it, so the rules can be argued with in a test.
  *
  * The states are decided here and nowhere else:

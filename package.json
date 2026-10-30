@@ -41,7 +41,8 @@
     "check:packaging": "node scripts/verify-packaging-secrets.mjs",
     "snapshot:production": "node scripts/snapshot-production-catalogue.mjs",
     "dev:snapshot": "node scripts/run-with-snapshot.mjs next dev",
-    "test:db-retry": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/db-retry.test.js"
+    "test:db-retry": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/db-retry.test.js",
+    "test:provider-catalogue": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/provider-catalogue.test.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

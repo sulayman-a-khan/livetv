@@ -6,6 +6,7 @@ import Link from "next/link";
 import Header from "@/components/Header";
 import AppDownloadBanner from "@/components/AppDownloadBanner";
 import FixtureBoard from "@/components/FixtureBoard";
+import PremiumChannelStrip from "@/components/premium/PremiumChannelStrip";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory } from "@/lib/categories";
 import { getChannelLogo } from "@/lib/utils";
 import { RefreshCw, Tv, WifiOff } from "lucide-react";
@@ -111,6 +112,9 @@ export default function HomePage() {
       </FixtureBoard>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8">
+        {/* The premium tier's own line of channels, above the direct grid. */}
+        <PremiumChannelStrip />
+
         <section className="rounded-2xl border border-slate-800/80 bg-[#0a1222] overflow-hidden animate-fade-in">
           {/* Panel header: desktop only, so phones go straight into the pills */}
           <div className="p-3.5 border-b border-slate-800/80 hidden sm:flex items-center justify-between gap-3 bg-[#0d1628]">

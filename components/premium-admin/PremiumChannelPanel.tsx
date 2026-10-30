@@ -4,6 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import { CheckSquare, Crown, Edit2, Loader2, PlusCircle, Save, Square, Trash2, Unlink, Upload, X } from "lucide-react";
 import { useBoxProviders } from "./useBoxProviders";
+import ProviderChannelPicker from "./ProviderChannelPicker";
+import { useProviderCatalogue, type CatalogueChannel } from "./useProviderCatalogue";
+import {
+  applyChannelPick,
+  clearChannelSlot,
+  typeChannelSlot,
+  type StreamSlot,
+} from "./providerChannelPick";
 
 interface PremiumRow {
   _id: string;
@@ -117,6 +125,9 @@ export default function PremiumChannelPanel({
   // The accounts the box holds, for the dropdown. A channel that plays from one of them is
   // built here rather than pushed, so the list is read when this section is open.
   const { providers, reload: reloadProviders } = useBoxProviders(secretKey, open);
+  // The chosen account's own channel list, so a stream is picked by its name rather than by
+  // an id only the account's panel knows.
+  const catalogue = useProviderCatalogue(secretKey, form.providerId, open);
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -189,6 +200,27 @@ export default function PremiumChannelPanel({
     setShowForm(true);
     setMessage(null);
     reloadProviders();
+  }
+
+  /**
+   * Takes one channel from the account's own list.
+   *
+   * The first slot also fills in the name and the category, because the account already knows
+   * them and an admin should not have to type what the account just said. A name the admin
+   * wrote is left alone, and a row that is being edited keeps its own category.
+   */
+  function pickChannel(channel: CatalogueChannel, slot: StreamSlot) {
+    setForm((current) => applyChannelPick(current, channel, slot, editingId !== null));
+  }
+
+  /** Empties one slot, so a channel can be pointed somewhere else. */
+  function clearSlot(slot: StreamSlot) {
+    setForm((current) => clearChannelSlot(current, slot));
+  }
+
+  /** Takes a stream id typed by hand, for a stream the account's live list does not name. */
+  function typeSlot(slot: StreamSlot, value: string) {
+    setForm((current) => typeChannelSlot(current, slot, value));
   }
 
   async function submit() {
@@ -502,40 +534,21 @@ export default function PremiumChannelPanel({
                 ))}
               </select>
               {form.providerId ? (
-                <div className="mt-2 space-y-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className={LABEL_CLASS}>Primary stream ID</label>
-                      <input
-                        className={FIELD_CLASS}
-                        value={form.streamId}
-                        onChange={(e) => setForm({ ...form, streamId: e.target.value })}
-                        placeholder="12345"
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS}>Backup 1 stream ID</label>
-                      <input
-                        className={FIELD_CLASS}
-                        value={form.backup1}
-                        onChange={(e) => setForm({ ...form, backup1: e.target.value })}
-                        placeholder="optional"
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS}>Backup 2 stream ID</label>
-                      <input
-                        className={FIELD_CLASS}
-                        value={form.backup2}
-                        onChange={(e) => setForm({ ...form, backup2: e.target.value })}
-                        placeholder="optional"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    The box plays the primary stream and falls back to Backup 1, then Backup 2,
-                    if the one before it fails. All three are streams of the account above.
-                  </p>
+                <div className="mt-2">
+                  <ProviderChannelPicker
+                    channels={catalogue.channels}
+                    loading={catalogue.loading}
+                    error={catalogue.error}
+                    slots={{
+                      primary: form.streamId,
+                      backup1: form.backup1,
+                      backup2: form.backup2,
+                    }}
+                    onPick={pickChannel}
+                    onManual={typeSlot}
+                    onClear={clearSlot}
+                    onReload={catalogue.reload}
+                  />
                 </div>
               ) : (
                 <div className="mt-2">

@@ -38,6 +38,7 @@
     "app/api/proxy/box/register/route.ts",
     "components/proxy-admin/proxyActionLabels.ts",
     "components/proxy-admin/proxyBanner.ts",
+    "components/premium-admin/providerChannelPick.ts",
     "lib/adminAuth.ts",
     "lib/boxRegistry.ts",
     "lib/channelMaintenance.ts",

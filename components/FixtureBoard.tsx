@@ -142,7 +142,7 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-3 flex-col gap-2 w-full ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex-col gap-2 w-full ${
         hideOnPhone ? "hidden sm:flex" : "flex"
       }`}
     >
@@ -154,32 +154,32 @@ function FixtureCard({
       {/* What the match is, and where it stands right now: the sport on the left, the status on the
           right, and the tournament underneath them where it has the whole width to itself. */}
       <div className="relative flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
+        <span className="inline-flex items-center gap-1 shrink-0 rounded-full border border-brand-500/50 bg-brand-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] text-indigo-200">
           {fixture.sport === "cricket" ? (
-            <Trophy className="w-3 h-3" />
+            <Trophy className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
           ) : (
-            <Goal className="w-3 h-3" />
+            <Goal className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
           )}
           {SPORT_LABEL[fixture.sport]}
         </span>
 
         {live ? (
           noOffer ? null : (
-            <span className="ml-auto inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-white">
+            <span className="ml-auto inline-flex items-center gap-1.5 shrink-0 rounded-full bg-red-600 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-white">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               LIVE NOW
             </span>
           )
         ) : (
           <span className="ml-auto flex items-center gap-1.5 shrink-0">
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
-              <Clock className="w-3 h-3" />
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 sm:px-2.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300">
+              <Clock className="w-2.5 sm:w-3 h-2.5 sm:h-3" />
               UPCOMING
             </span>
             <span
               title={countdownText(remaining)}
               aria-label={countdownText(remaining)}
-              className="text-[11px] font-black tabular-nums text-amber-300/90"
+              className="text-[10px] sm:text-[11px] font-black tabular-nums text-amber-300/90"
             >
               {countdownDigits(remaining)}
             </span>
@@ -197,31 +197,36 @@ function FixtureCard({
         </p>
       ) : null}
 
-      {/* The two teams, held close together: the flags carry the row, the VS sits between them and
-          the names sit tight under their own flag. */}
-      <div className="relative flex items-center justify-center gap-3">
-        <div className="flex w-[68px] flex-col items-center gap-1">
+      {/* The two teams, spread across the card: the flags take the two ends, the VS holds the middle
+          and the names sit tight under their own flag. */}
+      <div className="relative flex items-center justify-between gap-2">
+        <div className="flex w-[54px] sm:w-[68px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
-          <span className="text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamA}
           </span>
         </div>
-        <span className="text-[12px] font-black italic text-slate-300 shrink-0">VS</span>
-        <div className="flex w-[68px] flex-col items-center gap-1">
+        <span className="text-[11px] sm:text-[12px] font-black italic text-slate-300 shrink-0">VS</span>
+        <div className="flex w-[54px] sm:w-[68px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
-          <span className="text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamB}
           </span>
         </div>
       </div>
 
-      {/* The kickoff, under the teams: the date and the time the whole card comes down to. */}
-      <div className="relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5 text-[10px] font-bold text-slate-300">
-        <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-        {kickoff.date}
-        <span className="text-slate-600">·</span>
-        <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-        {kickoff.time}
+      {/* The kickoff, under the teams: the date and the time the whole card comes down to. On a
+          narrow card the two parts break onto their own lines rather than running past the edge. */}
+      <div className="relative flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5 text-[9px] sm:text-[10px] font-bold text-slate-300">
+        <span className="flex items-center gap-1 whitespace-nowrap">
+          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.date}
+        </span>
+        <span className="hidden sm:inline text-slate-600">·</span>
+        <span className="flex items-center gap-1 whitespace-nowrap">
+          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+          {kickoff.time}
+        </span>
       </div>
     </article>
   );
@@ -329,16 +334,15 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
           as another panel of channels. It appears only when the board has cards to show: an
           empty board is not a section, it is the promo banner that the caller passed in. */}
       <h2 className="text-sm font-black text-white tracking-tight mb-2.5">24/7 Sports</h2>
-      {/* The cards are narrower than the page is wide, but they start at the page's own left edge
-          and grow to fill their column on a phone — a narrower card by capping the grid, not by
-          padding the card inside it. */}
-      <div className="grid gap-2 sm:gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:max-w-[1008px]">
+      {/* Two cards to a line on a phone and four on a desktop. Every card fills its own column, so
+          the row starts at the page's left edge and nothing needs a margin to be narrower. */}
+      <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
         {fixtures.map((fixture, index) => (
           <FixtureCard
             key={fixture.id}
             fixture={fixture}
             now={now}
-            hideOnPhone={index > 0}
+            hideOnPhone={index > 1}
             onChoose={setChoosingId}
           />
         ))}

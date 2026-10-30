@@ -497,7 +497,7 @@ test("unpublished, finished and far-future matches stay off the board", () => {
   );
 });
 
-test("live matches lead the board, upcoming ones follow by kickoff, and three fill it", () => {
+test("live matches lead the board, upcoming ones follow by kickoff, and four fill it", () => {
   const channel = {
     _id: "pc_one",
     name: "Example Sports HD",
@@ -536,7 +536,7 @@ test("live matches lead the board, upcoming ones follow by kickoff, and three fi
 
   assert.deepEqual(
     board.map((card) => `${card.id}:${card.phase}`),
-    ["fx_l:live", "fx_a:upcoming", "fx_b:upcoming"]
+    ["fx_l:live", "fx_a:upcoming", "fx_b:upcoming", "fx_c:upcoming"]
   );
 });
 

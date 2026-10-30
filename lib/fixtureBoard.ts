@@ -13,8 +13,8 @@ import type { FixtureChannelRef, FixturePhase, FixtureSourceType, FixtureSport }
 /** Kickoffs further out than this are the admin's schedule, not today's board. */
 const UPCOMING_WINDOW_MS = 24 * 60 * 60_000;
 
-/** Cards the projection may hand the board; a phone shows only the first of them. */
-const MAX_CARDS = 3;
+/** Cards the projection may hand the board; a phone shows only the first row of them. */
+const MAX_CARDS = 4;
 
 /** The fixture fields the board reads, shaped so the store's record fits as-is. */
 export interface BoardFixture {

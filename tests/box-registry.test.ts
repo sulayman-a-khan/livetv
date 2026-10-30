@@ -57,6 +57,7 @@ const {
   currentBoxToken,
   resolveBoxAddress,
   resetBoxRegistryCache,
+  toBoxRecord,
 } = registry;
 
 type Credentials = typeof import("../lib/boxCredentials");
@@ -535,6 +536,79 @@ test("the site knows every box it has, whatever state it is in", async () => {
   const boxes = await listBoxes();
   const states = boxes.map((box) => `${box.boxId}:${box.state}`).sort();
   assert.deepEqual(states, ["box-one:enrolled", "box-three:revoked", "box-two:pending"]);
+});
+
+// --- the row as the database gives it back ---
+
+test("a date the database kept as a date survives the read", () => {
+  // The two stores disagree: the file store keeps text, the database keeps a real date.
+  // Reading only text silently dropped every date of every box the site keeps in its
+  // database — so the panel said an enrolled box was not enrolled, and an enrollment code
+  // outlived the day it was good for.
+  const enrolledAt = new Date("2026-10-30T03:36:00.000Z");
+  const registeredAt = new Date("2026-10-30T03:37:00.000Z");
+  const expiresAt = new Date("2026-10-31T03:35:00.000Z");
+
+  const row = toBoxRecord({
+    boxId: "box-one",
+    baseUrl: "https://box.example.com",
+    state: "enrolled",
+    registeredAt,
+    enrolledAt,
+    revokedAt: null,
+    enrollmentCodeHash: "hash",
+    enrollmentCodeExpiresAt: expiresAt,
+    enrollmentCodeUsedAt: null,
+  });
+
+  assert.equal(row.enrolledAt, enrolledAt.toISOString());
+  assert.equal(row.registeredAt, registeredAt.toISOString());
+  assert.equal(row.enrollmentCodeExpiresAt, expiresAt.toISOString());
+  assert.equal(row.revokedAt, null);
+  assert.equal(row.state, "enrolled");
+});
+
+test("the same row read as text gives the same answer", () => {
+  // The file store's shape must not drift away from the database's: the same facts have to
+  // come out of both, whichever store the site is running against.
+  const enrolledAt = new Date("2026-10-30T03:36:00.000Z");
+  const registeredAt = new Date("2026-10-30T03:37:00.000Z");
+
+  const fromDate = toBoxRecord({
+    boxId: "box-one",
+    baseUrl: "https://box.example.com",
+    state: "enrolled",
+    registeredAt,
+    enrolledAt,
+  });
+  const fromText = toBoxRecord({
+    boxId: "box-one",
+    baseUrl: "https://box.example.com",
+    state: "enrolled",
+    registeredAt: registeredAt.toISOString(),
+    enrolledAt: enrolledAt.toISOString(),
+  });
+
+  assert.deepEqual(fromDate, fromText);
+});
+
+test("a row with no dates in it is still a row, not a broken one", () => {
+  const row = toBoxRecord({ boxId: "box-two", baseUrl: "", state: "pending" });
+  assert.equal(row.state, "pending");
+  assert.equal(row.registeredAt, "");
+  assert.equal(row.enrolledAt, null);
+  assert.equal(row.enrollmentCodeExpiresAt, null);
+});
+
+test("a date that cannot be read is treated as absent", () => {
+  const row = toBoxRecord({
+    boxId: "box-two",
+    state: "pending",
+    enrolledAt: "not a date",
+    enrollmentCodeExpiresAt: new Date("nonsense"),
+  });
+  assert.equal(row.enrolledAt, null);
+  assert.equal(row.enrollmentCodeExpiresAt, null);
 });
 
 // --- registering ---

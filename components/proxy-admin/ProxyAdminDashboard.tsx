@@ -140,6 +140,23 @@ function boxStateTone(state: "pending" | "enrolled" | "revoked"): Tone {
   return "amber";
 }
 
+/**
+ * The one line under a box's name.
+ *
+ * The badge beside the name already says what state the box is in, so this line must never
+ * say it again and must never disagree with it: a box that is enrolled is enrolled, even on
+ * a day when the site never recorded the moment it was enrolled.
+ */
+function boxStateNote(box: BoxRegistration): string {
+  if (box.state === "pending") return "Waiting for its enrollment code";
+  if (box.state === "revoked") return "Its credential was withdrawn";
+  if (box.enrolledAt) return `Enrolled ${new Date(box.enrolledAt).toLocaleString("en-GB")}`;
+  if (box.registeredAt) {
+    return `Last registered ${new Date(box.registeredAt).toLocaleString("en-GB")}`;
+  }
+  return "Enrolled";
+}
+
 function providerProblemLabel(problem: string | null): string {
   if (problem === "undecryptable") return "The password cannot be opened";
   if (problem === "unreadable") return "The stored details are not right";
@@ -870,9 +887,7 @@ export default function ProxyAdminDashboard({ secretKey }: ProxyAdminDashboardPr
                 </p>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span className="text-[10px] text-slate-500 truncate">
-                    {box.enrolledAt
-                      ? `Enrolled ${new Date(box.enrolledAt).toLocaleString("en-GB")}`
-                      : "Not enrolled"}
+                    {boxStateNote(box)}
                   </span>
                   {box.state === "enrolled" && (
                     <RowButton

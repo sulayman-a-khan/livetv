@@ -421,15 +421,38 @@ function toRegistration(record: BoxRecord): BoxRegistration {
   };
 }
 
-/** Reads one stored row back into the shape this module works in. */
-function toRecord(row: Record<string, unknown>): BoxRecord {
-  const when = (value: unknown): string | null =>
-    typeof value === "string" && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : null;
+/**
+ * Reads one stored row back into the shape this module works in.
+ *
+ * Exported because the two stores disagree about what a date is — the database keeps a real
+ * date and the file keeps text — and only a test that feeds both can hold this honest.
+ */
+export function toBoxRecord(row: Record<string, unknown>): BoxRecord {
+  /**
+   * A date the store gave us, as an ISO string.
+   *
+   * The database keeps these as real dates and the file store keeps them as text, so both
+   * have to be accepted: reading only strings silently dropped every date of every box the
+   * site keeps in its database — which left the panel saying an enrolled box was not
+   * enrolled, and let an enrolment code outlive the day it was good for.
+   */
+  const when = (value: unknown): string | null => {
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return new Date(value).toISOString();
+    }
+    if (typeof value === "string" && value.trim() && !Number.isNaN(Date.parse(value))) {
+      return new Date(value).toISOString();
+    }
+    return null;
+  };
   const state = row.state;
   return {
     boxId: typeof row.boxId === "string" ? row.boxId.trim() : "",
     baseUrl: typeof row.baseUrl === "string" ? row.baseUrl.trim() : "",
-    registeredAt: typeof row.registeredAt === "string" ? row.registeredAt : "",
+    registeredAt: when(row.registeredAt) ?? "",
     state: state === "enrolled" || state === "revoked" ? state : "pending",
     enrolledAt: when(row.enrolledAt),
     revokedAt: when(row.revokedAt),
@@ -452,7 +475,7 @@ function readLocalBoxes(): BoxRecord[] {
           ? [parsed]
           : [];
     return (rows as Record<string, unknown>[])
-      .map((row) => toRecord(row))
+      .map((row) => toBoxRecord(row))
       .filter((row) => row.boxId);
   } catch {
     return [];
@@ -517,7 +540,7 @@ export async function readRegisteredBox(
     const row = await ProxyBoxModel.findOne({ state: "enrolled" })
       .sort({ registeredAt: -1, enrolledAt: -1 })
       .lean();
-    if (row) found = toRegistration(toRecord(row as unknown as Record<string, unknown>));
+    if (row) found = toRegistration(toBoxRecord(row as unknown as Record<string, unknown>));
   } else if (!mustUseDatabase()) {
     // A deployment has no file to fall back to, and a local run has no database to read, so
     // this branch is only ever one or the other.
@@ -537,7 +560,7 @@ export async function listBoxes(): Promise<BoxRegistration[]> {
   const conn = await connectToDatabase();
   if (conn) {
     const rows = await ProxyBoxModel.find({}).sort({ boxId: 1 }).lean();
-    return rows.map((row) => toRegistration(toRecord(row as unknown as Record<string, unknown>)));
+    return rows.map((row) => toRegistration(toBoxRecord(row as unknown as Record<string, unknown>)));
   }
   if (mustUseDatabase()) return [];
   return readLocalBoxes()
@@ -553,7 +576,7 @@ export async function readBox(boxId: string): Promise<BoxRegistration | null> {
   if (conn) {
     const row = await ProxyBoxModel.findOne({ boxId: id }).lean();
     if (!row) return null;
-    return toRegistration(toRecord(row as unknown as Record<string, unknown>));
+    return toRegistration(toBoxRecord(row as unknown as Record<string, unknown>));
   }
   if (mustUseDatabase()) return null;
   const found = readLocalBoxes().find((row) => row.boxId === id);
@@ -737,7 +760,7 @@ async function persistRegistration(
       { upsert: false, new: true, setDefaultsOnInsert: true }
     ).lean();
     if (!updated) return null;
-    return toRegistration(toRecord(updated as unknown as Record<string, unknown>));
+    return toRegistration(toBoxRecord(updated as unknown as Record<string, unknown>));
   }
   if (mustUseDatabase()) return null;
   const records = readLocalBoxes();
@@ -958,7 +981,7 @@ async function readBoxRecord(boxId: string): Promise<BoxRecord | null> {
   if (conn) {
     const row = await ProxyBoxModel.findOne({ boxId: id }).lean();
     if (!row) return null;
-    return toRecord(row as unknown as Record<string, unknown>);
+    return toBoxRecord(row as unknown as Record<string, unknown>);
   }
   if (mustUseDatabase()) return null;
   const found = readLocalBoxes().find((row) => row.boxId === id);
@@ -984,7 +1007,7 @@ async function persistEnrollment(record: BoxRecord): Promise<BoxRecord | null> {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
     if (!updated) return null;
-    return toRecord(updated as unknown as Record<string, unknown>);
+    return toBoxRecord(updated as unknown as Record<string, unknown>);
   }
   if (mustUseDatabase()) return null;
   const records = readLocalBoxes();

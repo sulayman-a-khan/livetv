@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Header from "@/components/Header";
-import AdminPanelChooser from "@/components/AdminPanelChooser";
+import AdminDashboard from "@/components/AdminDashboard";
 import { KeyRound, Lock, AlertCircle, LogOut, RefreshCw } from "lucide-react";
 
 const STORAGE_KEY = "freetv_admin_secret";
@@ -153,7 +153,7 @@ export default function AdminGatePage() {
                 <span>Logout Admin</span>
               </button>
             </div>
-            <AdminPanelChooser secretKey={passcode} />
+            <AdminDashboard secretKey={passcode} />
           </div>
         )}
       </main>

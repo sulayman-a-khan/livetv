@@ -44,7 +44,18 @@ interface FormState {
   streamId: string;
   backup1: string;
   backup2: string;
+  /** The m3u8 link of a channel that plays a pasted link rather than an account stream. */
+  directUrl: string;
+  directUserAgent: string;
+  directReferer: string;
 }
+
+/**
+ * What the provider dropdown says when the channel plays a link the admin pasted instead of a
+ * stream on one of the box's accounts. It cannot be an account id: the ids the box hands out
+ * are its own, and this one is chosen by this panel.
+ */
+const DIRECT_SOURCE = "__direct_m3u8__";
 
 /** The line an admin is about to hand to the box. It exists only inside this dialog. */
 interface PushState {
@@ -67,6 +78,9 @@ const EMPTY_FORM: FormState = {
   streamId: "",
   backup1: "",
   backup2: "",
+  directUrl: "",
+  directUserAgent: "",
+  directReferer: "",
 };
 
 const FIELD_CLASS =
@@ -126,8 +140,13 @@ export default function PremiumChannelPanel({
   // built here rather than pushed, so the list is read when this section is open.
   const { providers, reload: reloadProviders } = useBoxProviders(secretKey, open);
   // The chosen account's own channel list, so a stream is picked by its name rather than by
-  // an id only the account's panel knows.
-  const catalogue = useProviderCatalogue(secretKey, form.providerId, open);
+  // an id only the account's panel knows. A direct link is not an account, so it asks the box
+  // for nothing.
+  const catalogue = useProviderCatalogue(
+    secretKey,
+    form.providerId === DIRECT_SOURCE ? "" : form.providerId,
+    open
+  );
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -191,10 +210,15 @@ export default function PremiumChannelPanel({
       note: row.note,
       proxyChannelKey: row.proxyChannelKey,
       active: row.active,
-      providerId: row.providerId || "",
+      // A row with no account but a lane on the box plays a pushed source, so it opens on the
+      // link box. The link itself is not here to open: the box holds the only copy.
+      providerId: row.providerId || (row.proxyChannelKey ? DIRECT_SOURCE : ""),
       streamId: row.streamId || "",
       backup1: row.backupStreamIds?.[0] || "",
       backup2: row.backupStreamIds?.[1] || "",
+      directUrl: "",
+      directUserAgent: "",
+      directReferer: "",
     });
     setEditingId(row._id);
     setShowForm(true);
@@ -224,21 +248,61 @@ export default function PremiumChannelPanel({
   }
 
   async function submit() {
+    // Where the channel plays from: a link the admin pasted, one of the box's accounts, or
+    // nothing yet.
+    const target =
+      form.providerId === DIRECT_SOURCE ? "direct" : form.providerId ? "account" : "none";
+    const row = editingId ? rows.find((r) => r._id === editingId) ?? null : null;
+    const current = row
+      ? row.providerId
+        ? "account"
+        : row.proxyChannelKey
+        ? "direct"
+        : "none"
+      : "none";
+    const direct = target === "direct";
+    // One handle cannot carry two streams, so a channel that changes where it plays from gives
+    // up the lane it holds before it takes the new one. An account that is simply left behind
+    // is not one of those: the row and the box would disagree about what is playing, so the
+    // server refuses that one and the row keeps what it has.
+    const laneChanges =
+      !!row?.proxyChannelKey && (target === "none" ? current === "direct" : target !== current);
+
+    if (direct && !form.directUrl.trim() && current !== "direct") {
+      setMessage("A direct link needs the m3u8 URL.");
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
     try {
-      const body = {
+      if (row && row.proxyChannelKey && laneChanges) {
+        const retracted = await retractFromBox(row);
+        if (!retracted.ok) {
+          setMessage(retracted.error);
+          return;
+        }
+      }
+
+      const body: Record<string, unknown> = {
         name: form.name,
         category: form.category,
         logoUrl: form.logoUrl,
         sortOrder: Number(form.sortOrder),
         note: form.note,
-        proxyChannelKey: form.proxyChannelKey,
         active: form.active,
-        providerId: form.providerId,
-        streamId: form.streamId,
-        backupStreamIds: [form.backup1, form.backup2].map((id) => id.trim()).filter(Boolean),
+        providerId: direct ? "" : form.providerId,
+        streamId: direct ? "" : form.streamId,
+        backupStreamIds: direct
+          ? []
+          : [form.backup1, form.backup2].map((id) => id.trim()).filter(Boolean),
       };
+      // The handle of a channel that plays a pushed source belongs to the push route, which
+      // owns that lane. A channel whose source was taken off the box has no handle at all.
+      if (target !== "direct") {
+        body.proxyChannelKey = target === "none" && current === "direct" ? "" : form.proxyChannelKey;
+      }
+
       const res = await fetch(
         editingId ? `/api/admin/premium/channels/${editingId}` : "/api/admin/premium/channels",
         {
@@ -253,9 +317,39 @@ export default function PremiumChannelPanel({
         setMessage(data.error || `Save failed (${res.status})`);
         return;
       }
-      setMessage(
-        editingId ? `Updated ${data.channel.name}.` : `Added ${data.channel.name} to the premium rail.`
-      );
+
+      const channelId = data.channel?._id || editingId;
+
+      // A direct link is not written to this site's database: it goes straight to the box, and
+      // this row keeps only the handle the box filed it under.
+      if (direct && form.directUrl.trim()) {
+        const pushed = await fetch(`/api/admin/premium/channels/${channelId}/push`, {
+          method: "POST",
+          headers: { "x-admin-secret": secretKey.trim(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceUrl: form.directUrl.trim(),
+            userAgent: form.directUserAgent,
+            referer: form.directReferer,
+          }),
+          cache: "no-store",
+        });
+        const pushData = await pushed.json();
+        if (!pushData.success) {
+          setMessage(
+            `The channel was saved, but the stream box refused the link: ${
+              pushData.error || `(${pushed.status})`
+            }`
+          );
+          await load();
+          return;
+        }
+        setMessage(`Saved. The box holds the link as ${pushData.channelKey}.`);
+      } else {
+        setMessage(
+          editingId ? `Updated ${data.channel.name}.` : `Added ${data.channel.name} to the premium rail.`
+        );
+      }
+
       setShowForm(false);
       setEditingId(null);
       await load();
@@ -364,7 +458,7 @@ export default function PremiumChannelPanel({
   }
 
   /** Removes this channel's lane from the box and clears the handle. The row stays. */
-  async function retractFromBox(row: PremiumRow): Promise<boolean> {
+  async function retractFromBox(row: PremiumRow): Promise<{ ok: boolean; error: string }> {
     const res = await fetch(`/api/admin/premium/channels/${row._id}/push`, {
       method: "DELETE",
       headers: { "x-admin-secret": secretKey.trim() },
@@ -372,10 +466,9 @@ export default function PremiumChannelPanel({
     });
     const data = await res.json();
     if (!data.success) {
-      setMessage(data.error || `Removing the source failed (${res.status})`);
-      return false;
+      return { ok: false, error: data.error || `Removing the source failed (${res.status})` };
     }
-    return true;
+    return { ok: true, error: "" };
   }
 
   async function retract(row: PremiumRow) {
@@ -383,10 +476,13 @@ export default function PremiumChannelPanel({
     setBusyId(row._id);
     setMessage(null);
     try {
-      if (await retractFromBox(row)) {
-        setMessage(`Removed from the box. "${row.name}" has no stream until you push one.`);
-        await load();
+      const retracted = await retractFromBox(row);
+      if (!retracted.ok) {
+        setMessage(retracted.error);
+        return;
       }
+      setMessage(`Removed from the box. "${row.name}" has no stream until you push one.`);
+      await load();
     } catch (err: any) {
       setMessage(`Removing the source failed: ${err.message}`);
     } finally {
@@ -407,7 +503,12 @@ export default function PremiumChannelPanel({
    */
   const providerOptions = useMemo(() => {
     const options = providers.filter((p) => p.active);
-    if (form.providerId && !options.some((p) => p.providerId === form.providerId)) {
+    // The direct link is not an account, so it is not one of the options this list adds back.
+    if (
+      form.providerId &&
+      form.providerId !== DIRECT_SOURCE &&
+      !options.some((p) => p.providerId === form.providerId)
+    ) {
       const current = providers.find((p) => p.providerId === form.providerId);
       options.push(
         current ?? {
@@ -509,7 +610,7 @@ export default function PremiumChannelPanel({
             </div>
 
             <div>
-              <label className={LABEL_CLASS}>Provider (plays from a stream box account)</label>
+              <label className={LABEL_CLASS}>Provider (a box account, or a direct m3u8 link)</label>
               <select
                 className={FIELD_CLASS}
                 value={form.providerId}
@@ -525,7 +626,8 @@ export default function PremiumChannelPanel({
                   })
                 }
               >
-                <option value="">None — push a source to the box instead</option>
+                <option value="">None — no stream for now</option>
+                <option value={DIRECT_SOURCE}>Direct m3u8 link</option>
                 {providerOptions.map((provider) => (
                   <option key={provider.providerId} value={provider.providerId}>
                     {provider.label || provider.providerId}
@@ -533,7 +635,42 @@ export default function PremiumChannelPanel({
                   </option>
                 ))}
               </select>
-              {form.providerId ? (
+              {form.providerId === DIRECT_SOURCE ? (
+                <div className="mt-2 space-y-2">
+                  <div>
+                    <label className={LABEL_CLASS}>Direct m3u8 link</label>
+                    <input
+                      className={FIELD_CLASS}
+                      value={form.directUrl}
+                      onChange={(e) => setForm({ ...form, directUrl: e.target.value })}
+                      placeholder="https://host/path/index.m3u8?token=…"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className={LABEL_CLASS}>User-Agent header</label>
+                      <input
+                        className={FIELD_CLASS}
+                        value={form.directUserAgent}
+                        onChange={(e) => setForm({ ...form, directUserAgent: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className={LABEL_CLASS}>Referer header</label>
+                      <input
+                        className={FIELD_CLASS}
+                        value={form.directReferer}
+                        onChange={(e) => setForm({ ...form, directReferer: e.target.value })}
+                        placeholder="https://…"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    The link goes straight to the stream box and is not kept here: the box holds
+                    the only copy. Leave it blank to keep the link the box already has.
+                  </p>
+                </div>
+              ) : form.providerId ? (
                 <div className="mt-2">
                   <ProviderChannelPicker
                     channels={catalogue.channels}

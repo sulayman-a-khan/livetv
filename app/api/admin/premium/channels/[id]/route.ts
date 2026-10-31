@@ -34,8 +34,9 @@ function fail(error: any, fallback: string) {
  *
  * Three things are refused rather than allowed:
  *
- *   - A provider cannot be taken away from a channel. The box cannot hold a channel with no
- *     provider, so the row would be describing something that cannot exist.
+ *   - A provider cannot be taken away from a channel that still has a lane on the box. The
+ *     lane belongs to that account, so the row would describe something the box is not
+ *     serving.
  *   - A provider cannot be attached to a channel that already has a lane on the box. That
  *     lane belongs to the push route, and two owners of one lane is how a channel ends up
  *     with two streams.
@@ -68,11 +69,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     const namesProvider = Object.prototype.hasOwnProperty.call(auth.body, "providerId");
     if (namesProvider) {
       const next = value.providerId ?? "";
-      if (!next && row.providerId) {
+      if (!next && row.providerId && row.proxyChannelKey) {
+        // A channel leaves its account only once the lane that account held is gone: the box
+        // would otherwise keep serving that stream while this row said the channel plays
+        // something else — a row that lies about what a viewer is watching.
         return NextResponse.json(
           {
             success: false,
-            error: "A channel that plays from a provider cannot lose it — delete the channel instead",
+            error:
+              "A channel that plays from a provider cannot lose it while it still has a lane on the box — delete the channel instead",
           },
           { status: 400 }
         );

@@ -2,29 +2,39 @@
 
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Calendar, Clock, Goal, Trophy } from "lucide-react";
+import { Goal, Play } from "lucide-react";
 import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
 import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
 import { teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** The three numbers a countdown is made of, so the two forms of it cannot disagree. */
-function countdownParts(ms: number): { h: number; m: number; s: number } {
+/** The four numbers a countdown is made of, so the two forms of it cannot disagree. */
+function countdownParts(ms: number): { d: number; h: number; m: number; s: number } {
   const total = Math.max(0, Math.floor(ms / 1000));
-  return { h: Math.floor(total / 3600), m: Math.floor((total % 3600) / 60), s: total % 60 };
+  return {
+    d: Math.floor(total / 86400),
+    h: Math.floor((total % 86400) / 3600),
+    m: Math.floor((total % 3600) / 60),
+    s: total % 60,
+  };
 }
 
 /** The countdown the approved wording asks for: a clock, then Bengali text. */
 function countdownText(ms: number): string {
-  const { h, m, s } = countdownParts(ms);
-  return `${pad(h)} : ${pad(m)} : ${pad(s)} মিনিট পর খেলা শুরু হবে`;
+  const { d, h, m, s } = countdownParts(ms);
+  const clock = d > 0 ? `${d} দিন ${pad(h)} : ${pad(m)}` : `${pad(h)} : ${pad(m)} : ${pad(s)}`;
+  return `${clock} মিনিট পর খেলা শুরু হবে`;
 }
 
-/** The same clock as digits, for the badge that has room for nothing else. */
-function countdownDigits(ms: number): string {
-  const { h, m, s } = countdownParts(ms);
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+/**
+ * The clock the card shows: days, hours and minutes while the kickoff is still more than a day
+ * away, and hours, minutes and seconds for the last day — the hour before the match is the one a
+ * viewer watches most closely, so that is where the seconds are.
+ */
+function countdownLabel(ms: number): string {
+  const { d, h, m, s } = countdownParts(ms);
+  return d > 0 ? `${d}d ${pad(h)}h ${pad(m)}m` : `${pad(h)}h ${pad(m)}m ${pad(s)}s`;
 }
 
 /**
@@ -81,7 +91,7 @@ function TeamFlag({ name, logo }: { name: string; logo: string }) {
   const isFlag = Boolean(src) && src === flag;
 
   return (
-    <div className="relative w-full max-w-[132px] aspect-[4/3] rounded-xl overflow-hidden bg-white/95 border border-white/20 shadow-lg shadow-black/50">
+    <div className="relative w-full max-w-[92px] aspect-[4/3] rounded-xl overflow-hidden bg-white/95 border border-white/20 shadow-lg shadow-black/50">
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -99,11 +109,35 @@ function TeamFlag({ name, logo }: { name: string; logo: string }) {
   );
 }
 
-/** The sport a card is for, in the one word its corner badge shows. */
-const SPORT_LABEL: Record<PublicFixture["sport"], string> = {
-  football: "Football",
-  cricket: "Cricket",
-};
+/**
+ * The sport's mark, small and quiet beside the match's name: a goal for football, and a bat
+ * with the stumps for cricket — drawn here because the icon set has no cricket mark to pick.
+ */
+function SportMark({ sport }: { sport: PublicFixture["sport"] }) {
+  if (sport === "cricket") {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="w-3.5 h-3.5 shrink-0 text-indigo-300"
+        aria-hidden="true"
+      >
+        <path d="M4.6 20.4 13.4 6.6" />
+        <path d="M13.4 6.6 16.2 2.9" />
+        <path d="M14.5 5.1 16.5 6.4" />
+        <path d="M16.6 12.4v8.2" />
+        <path d="M19.6 12.4v8.2" />
+        <path d="M22.6 12.4v8.2" />
+        <path d="M16.6 11.9h6" />
+      </svg>
+    );
+  }
+  return <Goal className="w-3.5 h-3.5 shrink-0 text-indigo-300" aria-hidden="true" />;
+}
 
 /**
  * What a live match with nothing to open says.
@@ -136,6 +170,10 @@ function FixtureCard({
   const startsAt = new Date(fixture.startsAt).getTime();
   const kickoff = kickoffParts(startsAt);
   const remaining = startsAt - now;
+  // The name the admin gave the match, and the competition under it. The title is what the top
+  // box carries; the competition only keeps a line of its own when the title did not take it.
+  const title = fixture.title.trim();
+  const competition = fixture.competition.trim();
   // A live match whose channels are all shut says so on its face: a red badge would promise a
   // stream the card cannot open.
   const noOffer = live && offers.length === 0 ? noOfferText(fixture.choices) : "";
@@ -151,86 +189,84 @@ function FixtureCard({
       <div className="pointer-events-none absolute -top-10 -left-8 h-24 w-24 rounded-full bg-brand-500/20 blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -right-6 h-24 w-24 rounded-full bg-brand-accent/10 blur-2xl" />
 
-      {/* What the match is, and where it stands right now: the sport on the left, the status on
-          the right, and the two of them share one line at every width. A card on a phone is half
-          the page wide, so the type there is small and the sport badge is held to half its
-          desktop size — the line gets shorter rather than breaking into two rows. */}
-      <div className="relative flex items-center gap-1 sm:gap-2 min-w-0">
-        <span className="inline-flex items-center gap-0.5 sm:gap-1 shrink-0 whitespace-nowrap rounded-full border border-brand-500/50 bg-brand-500/10 px-1 sm:px-2.5 py-0 sm:py-1 text-[7px] sm:text-[10px] font-black uppercase tracking-[0.06em] sm:tracking-[0.14em] text-indigo-200">
-          {fixture.sport === "cricket" ? (
-            <Trophy className="w-2 sm:w-3 h-2 sm:h-3" />
-          ) : (
-            <Goal className="w-2 sm:w-3 h-2 sm:h-3" />
-          )}
-          {SPORT_LABEL[fixture.sport]}
-        </span>
-
-        {live ? (
-          noOffer ? null : (
-            <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap ml-auto rounded-full bg-red-600 px-1 sm:px-2.5 py-0 sm:py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wider text-white">
-              <span className="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full bg-white animate-pulse" />
-              LIVE NOW
-            </span>
-          )
-        ) : (
-          <span className="flex items-center gap-1 shrink-0 ml-auto">
-            <span className="inline-flex items-center gap-0.5 sm:gap-1 whitespace-nowrap rounded-full border border-amber-500/50 bg-amber-500/10 px-1 sm:px-2.5 py-0 sm:py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300">
-              {/* The clock beside the word has no room on a phone, and the countdown beside it
-                  says the same thing more precisely. */}
-              <Clock className="hidden sm:block w-3 h-3" />
-              UPCOMING
-            </span>
-            <span
-              title={countdownText(remaining)}
-              aria-label={countdownText(remaining)}
-              className="text-[7px] sm:text-[11px] font-black tabular-nums text-amber-300/90"
-            >
-              {countdownDigits(remaining)}
-            </span>
+      {/* The match's name, in the box that used to sit at the foot of the card: the title first,
+          the competition under it when the title did not already say it. The sport's mark sits
+          beside the name, small enough to be read and not to shout. */}
+      {title || competition ? (
+        <div className="relative flex items-center gap-1.5 min-w-0 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+          <SportMark sport={fixture.sport} />
+          <span className="min-w-0 truncate text-[10px] sm:text-[11px] font-black uppercase tracking-[0.08em] sm:tracking-[0.12em] text-slate-200">
+            {title || competition}
           </span>
-        )}
-      </div>
-
-      {noOffer ? (
-        <p className="relative text-center text-[10px] font-bold text-amber-300/90">{noOffer}</p>
+        </div>
       ) : null}
 
-      {fixture.competition ? (
+      {title && competition ? (
         <p className="relative text-center text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500 truncate">
-          {fixture.competition}
+          {competition}
         </p>
       ) : null}
 
-      {/* The two teams, spread across the card: the flags take the two ends, the VS holds the middle
-          and the names sit tight under their own flag. */}
-      <div className="relative flex items-center justify-between gap-2">
-        <div className="flex w-[54px] sm:w-[68px] flex-col items-center gap-1">
+      {/* The two teams, spread across the card: the flags take the two ends and the middle says
+          when the match begins — or, once it has begun, that it is running now. */}
+      <div className="relative flex items-center justify-between gap-1.5 sm:gap-2">
+        <div className="flex w-[38px] sm:w-[48px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
-          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamA}
           </span>
         </div>
-        <span className="text-[11px] sm:text-[12px] font-black italic text-slate-300 shrink-0">VS</span>
-        <div className="flex w-[54px] sm:w-[68px] flex-col items-center gap-1">
+
+        {live ? (
+          <span className="inline-flex items-center gap-1 shrink-0 rounded-full bg-red-600 px-2 py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wider text-white">
+            <span className="w-1 sm:w-1.5 h-1 sm:h-1.5 rounded-full bg-white animate-ping" />
+            LIVE NOW
+          </span>
+        ) : (
+          <div className="flex flex-col items-center gap-0.5 text-center min-w-0">
+            <span className="text-[8px] sm:text-[9px] font-bold uppercase tracking-[0.12em] text-slate-500">
+              Starts at
+            </span>
+            <span className="text-[9px] sm:text-[10px] font-black text-slate-200 whitespace-nowrap">
+              {kickoff.date}
+            </span>
+            <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 whitespace-nowrap">
+              {kickoff.time}
+            </span>
+          </div>
+        )}
+
+        <div className="flex w-[38px] sm:w-[48px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamB} logo={fixture.teamBLogo} />
-          <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
+          <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
             {fixture.teamB}
           </span>
         </div>
       </div>
 
-      {/* The kickoff, under the teams: the date and the time the whole card comes down to. On a
-          narrow card the two parts break onto their own lines rather than running past the edge. */}
-      <div className="relative flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5 text-[9px] sm:text-[10px] font-bold text-slate-300">
-        <span className="flex items-center gap-1 whitespace-nowrap">
-          <Calendar className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.date}
-        </span>
-        <span className="hidden sm:inline text-slate-600">·</span>
-        <span className="flex items-center gap-1 whitespace-nowrap">
-          <Clock className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-          {kickoff.time}
-        </span>
+      {/* The foot of the card: the countdown for a match that has not started, and the way in for
+          one that has. It is pushed to the bottom so the clocks of a row of cards line up. */}
+      <div className="relative mt-auto flex items-center justify-center gap-1.5 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+        {live ? (
+          noOffer ? (
+            <span className="text-center text-[9px] sm:text-[10px] font-bold text-amber-300/90">
+              {noOffer}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[9px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-300">
+              <Play className="w-3 h-3 fill-emerald-300" />
+              Click here to watch live
+            </span>
+          )
+        ) : (
+          <span
+            title={countdownText(remaining)}
+            aria-label={countdownText(remaining)}
+            className="text-[10px] sm:text-[12px] font-black tabular-nums text-amber-300/90"
+          >
+            {countdownLabel(remaining)}
+          </span>
+        )}
       </div>
     </article>
   );

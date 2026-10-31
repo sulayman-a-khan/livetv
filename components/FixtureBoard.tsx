@@ -58,6 +58,20 @@ function kickoffParts(ms: number): { date: string; time: string } {
   };
 }
 
+/**
+ * The day a match falls on, in words where words help.
+ *
+ * A card that says "TODAY" or "TOMORROW" tells the reader more than the date it replaces, and
+ * the two are counted in Bangladesh time so the card never says tomorrow at ten at night.
+ */
+function dayWord(ms: number, now: number): string {
+  const day = Math.floor((ms + BDT_OFFSET_MS) / 86400000);
+  const today = Math.floor((now + BDT_OFFSET_MS) / 86400000);
+  if (day === today) return "TODAY";
+  if (day === today + 1) return "TOMORROW";
+  return "";
+}
+
 function initialsOf(name: string): string {
   return (
     name
@@ -183,6 +197,7 @@ function FixtureCard({
   const offers = offersOf(fixture.choices);
   const startsAt = new Date(fixture.startsAt).getTime();
   const kickoff = kickoffParts(startsAt);
+  const day = dayWord(startsAt, now);
   const remaining = startsAt - now;
   // The name the admin gave the match, and the competition under it. The title is what the top
   // box carries; the competition only keeps a line of its own when the title did not take it.
@@ -249,7 +264,7 @@ function FixtureCard({
               Starts at
             </span>
             <span className="text-[9px] sm:text-[10px] font-black text-slate-200 whitespace-nowrap">
-              {kickoff.date}
+              {day || kickoff.date}
             </span>
             <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 whitespace-nowrap">
               {kickoff.time}

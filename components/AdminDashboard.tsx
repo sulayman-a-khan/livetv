@@ -40,6 +40,8 @@ import {
   Loader2,
   Ban,
   RotateCcw,
+  Grid3x3,
+  List,
 } from "lucide-react";
 import LinkHealthBadge, { type LinkProbeDetail } from "@/components/LinkHealthBadge";
 import { isUsableViewerLink } from "@/lib/streamHealth";
@@ -425,6 +427,14 @@ function channelInPinnedTab(
   return cfg ? isChannelInCategory(ch, cfg) : true;
 }
 
+/** A logo that will not load falls back to the channel's initials. */
+function applyLogoFallback(target: HTMLImageElement, name: string) {
+  if (target.dataset.fallback) return;
+  target.dataset.fallback = "true";
+  const initials = name.substring(0, 2).toUpperCase();
+  target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
+}
+
 export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [stats, setStats] = useState<StatsData | null>(null);
   const [channels, setChannels] = useState<ChannelWithStreams[]>([]);
@@ -475,6 +485,8 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
   const [pinnedOrder, setPinnedOrder] = useState<ChannelWithStreams[]>([]);
   const [pinCategoryTab, setPinCategoryTab] = useState<string>("all");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  // The pinned board opens as a logo grid for reordering; the full table is one click away.
+  const [showPinnedDetails, setShowPinnedDetails] = useState(false);
 
   // Full channel editor (metadata + manual server links)
   const [editorChannelId, setEditorChannelId] = useState<string | null>(null);
@@ -1220,20 +1232,59 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           src={getChannelLogo(ch.name, ch.logo)}
           alt={ch.name}
           className="max-w-full max-h-full object-contain"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            if (!target.dataset.fallback) {
-              target.dataset.fallback = "true";
-              const initials = ch.name.substring(0, 2).toUpperCase();
-              target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(initials)}&background=0284c7&color=ffffff&size=200&bold=true`;
-            }
-          }}
+          onError={(e) => applyLogoFallback(e.target as HTMLImageElement, ch.name)}
         />
       </div>
       <div className="min-w-0">
         <span className="block truncate text-xs font-semibold text-white" title={ch.name}>{ch.name}</span>
         <span className="block text-[10px] text-slate-500 font-mono truncate">{ch.normalizedName}</span>
       </div>
+    </div>
+  );
+
+  /**
+   * The pinned board's default face: one logo card per channel, small enough to
+   * drag around and numbered so the order is readable at a glance. The full
+   * detail row lives behind the toggle.
+   */
+  const renderPinnedGrid = (list: Array<{ ch: ChannelWithStreams; originalIdx: number }>) => (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+      {list.map(({ ch, originalIdx }) => (
+        <div
+          key={ch._id}
+          draggable
+          onDragStart={() => handleDragStart(originalIdx)}
+          onDragOver={(e) => handleDragOver(e, originalIdx)}
+          onDragEnd={handleDragEnd}
+          title={`${ch.name} — #${originalIdx + 1}`}
+          className={`relative flex flex-col items-center gap-2 p-3 pt-7 rounded-2xl border cursor-move select-none transition-colors ${
+            draggedIndex === originalIdx
+              ? "border-amber-500/60 bg-amber-500/20"
+              : "border-slate-800 bg-slate-900/50 hover:border-amber-500/40"
+          }`}
+        >
+          <div className="absolute top-1.5 left-2 right-2 flex items-center justify-between gap-1">
+            <GripVertical className="w-3.5 h-3.5 text-slate-600" />
+            <span className="text-[10px] font-black font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-md px-1.5 py-0.5">
+              #{originalIdx + 1}
+            </span>
+          </div>
+
+          <div className="w-11 h-11 rounded-xl bg-white p-1 flex items-center justify-center overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={getChannelLogo(ch.name, ch.logo)}
+              alt={ch.name}
+              className="max-w-full max-h-full object-contain"
+              onError={(e) => applyLogoFallback(e.target as HTMLImageElement, ch.name)}
+            />
+          </div>
+
+          <span className="w-full text-center text-[11px] font-semibold text-white truncate">
+            {ch.name}
+          </span>
+        </div>
+      ))}
     </div>
   );
 
@@ -1729,7 +1780,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         open={openSections.pinned}
         onToggle={() => toggleSection("pinned")}
         collapsedHint="What viewers see first — order, mirrors, health and links all live here."
-        expandedHint="Drag a row by its handle to reorder, then save the order below."
+        expandedHint="Drag a card by its handle to reorder, then save the order below."
         badge={<SectionBadge text={`${pinnedOrder.length} Pinned`} tone="amber" />}
         actions={
           reorderSaved ? (
@@ -1740,6 +1791,16 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
         }
       >
         <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setShowPinnedDetails((v) => !v)}
+            title={showPinnedDetails ? "Back to the logo grid" : "Show mirrors, health and per-channel actions"}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-slate-300 hover:text-white border border-slate-800 hover:border-amber-500/40 rounded-xl text-xs font-bold transition-all"
+          >
+            {showPinnedDetails ? <Grid3x3 className="w-4 h-4" /> : <List className="w-4 h-4" />}
+            <span>{showPinnedDetails ? "Show Grid" : "Show Details"}</span>
+          </button>
+
           <button
             onClick={handleSavePinnedOrder}
             disabled={reordering || pinnedOrder.length === 0}
@@ -1795,7 +1856,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               Click the <span className="text-amber-400 font-semibold">Pin icon</span> next to any channel in the table below to pin it here.
             </p>
           </div>
-        ) : (
+        ) : showPinnedDetails ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300 table-fixed min-w-[760px]">
               <thead className="bg-slate-900/80 text-slate-400 uppercase text-[10px] font-bold tracking-wider">
@@ -1882,6 +1943,12 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
               </tbody>
             </table>
           </div>
+        ) : (
+          renderPinnedGrid(
+            pinnedOrder
+              .map((ch, originalIdx) => ({ ch, originalIdx }))
+              .filter(({ ch }) => channelInPinnedTab(ch, pinCategoryTab))
+          )
         )}
       </AdminSection>
 

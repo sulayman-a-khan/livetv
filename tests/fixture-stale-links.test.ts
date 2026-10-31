@@ -1,5 +1,5 @@
 /**
- * Tests for the premium tier's answer to a stale reference (P11.12).
+ * Tests for the Direct HLS tier's answer to a stale reference (P11.12).
  *
  * Run with `npm run test:fixture-stale-links`.
  *
@@ -11,8 +11,11 @@
  *  - the admin can still edit a card whose link has gone stale — a link the card already carried
  *    is kept, not refused, because refusing it would lock the admin out of the card they are
  *    fixing;
- *  - deleting a channel takes its link off every card, so a dangling id does not survive the
- *    one operation that is able to repair it.
+ *  - a catalogue channel that is deleted leaves the card and its link in place, so the link
+ *    becomes a stale reference the board counts and the admin can repair.
+ *
+ * The premium tier's own half of this rule — its delete removed the link from every card —
+ * is archived with the rest of that tier under `archive/secured-hls-premium/`.
  *
  * Nothing here reaches a database or the network: the catalogue and the cards are stood in for
  * (`tests/helpers/fakeFixtureModel.ts`), and this project's own `data/` is never read or written.
@@ -84,34 +87,16 @@ const db = installFakeDatabase({
   ],
 });
 
-/**
- * The premium tier's own rows, as far as the delete below reaches them: one channel, and the
- * one call a delete makes on it.
- */
-const premiumModule = require("@/models/PremiumChannel") as { default: unknown };
-const originalPremiumModel = premiumModule.default;
-let premiumRows: { _id: string }[] = [];
-premiumModule.default = {
-  async deleteOne(filter: { _id?: string }) {
-    const index = premiumRows.findIndex((row) => String(row._id) === String(filter?._id));
-    if (index < 0) return { deletedCount: 0 };
-    premiumRows.splice(index, 1);
-    return { deletedCount: 1 };
-  },
-};
-
 after(() => {
-  premiumModule.default = originalPremiumModel;
   db.restore();
 });
 
 type FixtureSources = typeof import("../lib/fixtureSources");
-type PremiumStore = typeof import("../lib/premiumStore");
 type FixtureStore = typeof import("../lib/fixtureStore");
 
 const sources: FixtureSources = require("../lib/fixtureSources");
-const store: PremiumStore = require("../lib/premiumStore");
 const fixtureStore: FixtureStore = require("../lib/fixtureStore");
+const { projectFixtures } = require("../lib/fixtureBoard") as typeof import("../lib/fixtureBoard");
 
 // --- the editor's own question: which links name a channel it cannot see? ---
 
@@ -180,11 +165,9 @@ test("a link the card already carried is stale, and a link the admin is adding i
   assert.equal(mixed.stale.length, 2);
 });
 
-// --- deleting a channel repairs every card that named it ---
+// --- deleting a channel leaves a stale link behind, and the match alone --------
 
-test("deleting a premium channel takes its link off every card and leaves the match alone", async () => {
-  premiumRows = [{ _id: "64b5c72de29c995275489e01" }];
-
+test("a catalogue channel that is deleted leaves the card's link behind, and the match alone", async () => {
   db.fixtures.push({
     _id: "64b5c72de29c995275489e10",
     title: "Mohammedan v Bashundhara",
@@ -194,24 +177,32 @@ test("deleting a premium channel takes its link off every card and leaves the ma
     teamALogo: "",
     teamBLogo: "",
     competition: "BPL",
-    startsAt: new Date("2026-11-05T16:00:00.000Z"),
+    startsAt: new Date(Date.now() - 30 * 60_000),
     durationMinutes: 120,
-    channels: [
-      { channelId: "64b5c72de29c995275489e01", sourceType: "secured" },
-      { channelId: PINNED, sourceType: "direct" },
-    ],
+    channels: [{ channelId: UNPINNED, sourceType: "direct" }],
     visible: true,
   });
 
-  assert.equal(await store.deletePremiumChannel("64b5c72de29c995275489e01"), true);
+  // The catalogue row is gone. Nothing in the Direct HLS tier takes the link off the card when
+  // that happens, and that is the point: the link becomes a stale reference the board counts and
+  // the admin can repair, rather than a dangling id nobody can see.
+  const at = db.channels.findIndex((row) => String(row._id) === UNPINNED);
+  assert.notEqual(at, -1, "the catalogue row has to be there to be deleted");
+  db.channels.splice(at, 1);
 
-  // The match is still there — only the admin decides a match is gone — and the link to the
-  // deleted channel is not.
+  // The match is still there — only the admin decides a match is gone — and so is its link.
   const cards = await fixtureStore.listFixtures();
   const kept = cards.find((entry) => entry._id === "64b5c72de29c995275489e10");
   assert.ok(kept, "deleting a channel must not delete the match");
   assert.equal(kept.teamA, "Mohammedan");
-  assert.deepEqual(kept.channels, [{ channelId: PINNED, sourceType: "direct" }]);
+  assert.deepEqual(kept.channels, [{ channelId: UNPINNED, sourceType: "direct" }]);
+
+  // And the board counts the link as one it cannot open, instead of hiding the card.
+  const board = projectFixtures(cards, [], [], new Date(), false);
+  const card = board.find((entry) => entry.id === "64b5c72de29c995275489e10");
+  assert.ok(card, "the match stays on the board");
+  assert.equal(card.staleReferences, 1);
+  assert.equal(card.watchPath, null);
 });
 
 // --- the route the admin actually calls ---
@@ -319,13 +310,21 @@ test("the panel shows a link it cannot see, so the admin can take it off", () =>
   assert.ok(source.includes("missingLinks"), "the missing links have to reach the screen");
 });
 
-test("the premium panel no longer carries a fixture editor", () => {
-  // The match card is the Direct HLS panel's own row now, so the premium panel must not offer a
-  // second place to enter one.
-  const source = fs.readFileSync(
-    path.join(projectCwd, "components", "premium-admin", "PremiumAdminDashboard.tsx"),
-    "utf-8"
+test("the archived premium panel no longer carries a fixture editor", () => {
+  // The match card is the Direct HLS panel's own row now, so the archived premium panel must
+  // not offer a second place to enter one.
+  const archived = path.join(
+    projectCwd,
+    "archive",
+    "secured-hls-premium",
+    "components",
+    "premium-admin"
   );
+  const source = fs.readFileSync(path.join(archived, "PremiumAdminDashboard.tsx"), "utf-8");
   assert.equal(source.includes("FixturePanel"), false);
-  assert.equal(fs.existsSync(path.join(projectCwd, "components", "premium-admin", "FixturePanel.tsx")), false);
+  assert.equal(fs.existsSync(path.join(archived, "FixturePanel.tsx")), false);
+
+  // And the panel that does carry it is the Direct HLS one.
+  const direct = fs.readFileSync(path.join(projectCwd, "components", "FixturePanel.tsx"), "utf-8");
+  assert.ok(direct.includes("unresolvedFixtureRefs"), "the Direct HLS panel carries the editor");
 });

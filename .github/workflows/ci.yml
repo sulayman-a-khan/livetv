@@ -7,10 +7,12 @@
 #
 # The gate has no environment. It holds no secret, no token and no address, it
 # never deploys, and it never talks to the production database or the stream
-# box, so a red run here cannot touch anything live. The suite's own
-# "test:premium-box" script is deliberately NOT part of this workflow: it needs
-# the private ProxyServer checkout, which this public repository cannot clone.
-# It stays a local command. scripts/verify-ci-gate.mjs asserts that exclusion.
+# box, so a red run here cannot touch anything live. The stream-box harness
+# (scripts/premium-box-e2e.mjs) is archived with the rest of the premium tier
+# under archive/ and is not part of this workflow: it needs the private
+# ProxyServer checkout, which this public repository cannot clone, so it stays
+# a command run by hand. scripts/verify-ci-gate.mjs asserts that this workflow
+# names no script of an archived tier.
 #
 # Acceptance for P14.11 is a RED run on an introduced type error: the type
 # check below must fail the job when a file does not compile.

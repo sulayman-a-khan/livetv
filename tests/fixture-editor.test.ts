@@ -6,9 +6,8 @@
  *
  * The cards live in MongoDB, so the database is stood in for
  * (`tests/helpers/fakeFixtureModel.ts`) and the catalogue is two channels it is showing and one
- * it is not. Nothing here reaches the network: the stream box is not asked anything, because
- * the board's readiness probe is answered with "no box registered", and no project's own `data/`
- * file is read or written.
+ * it is not. Nothing here reaches the network: no stream box is asked anything, because the
+ * board is Direct HLS only, and no project's own `data/` file is read or written.
  */
 
 import assert from "node:assert/strict";
@@ -78,16 +77,7 @@ const db = installFakeDatabase({
   ],
 });
 
-/**
- * No stream box is registered here, so the board's readiness probe has nothing to ask. Without
- * this the probe would look for a box in the database, which is not what this file is about.
- */
-const boxRegistry = require("@/lib/boxRegistry") as { resolveBoxAddress: () => Promise<unknown> };
-const originalResolveBoxAddress = boxRegistry.resolveBoxAddress;
-boxRegistry.resolveBoxAddress = async () => null;
-
 after(() => {
-  boxRegistry.resolveBoxAddress = originalResolveBoxAddress;
   db.restore();
 });
 
@@ -233,8 +223,14 @@ test("the card's channels are read back in the admin's order, for the fallback w
   });
 
   assert.equal(answer.status, 200, `the match was refused: ${JSON.stringify(answer.body)}`);
+  const fixture = answer.body.fixture as { channels: { channelId: string }[] };
 
-  const { listCardChannelsFor } = require("../lib/premiumStore");
+  // The order is the admin's, not the store's: it is the order the card tries its channels in
+  // and the order a fallback moves through, so nothing may sort it on the way out.
+  assert.deepEqual(
+    fixture.channels.map((ref) => ref.channelId),
+    [PINNED, PINNED_TWO]
+  );
 
   // A card nobody can see is not a reason to move a viewer anywhere, so it offers nothing — and
   // it must not take the card's place either, or a hidden card would decide where a failure goes.
@@ -247,10 +243,11 @@ test("the card's channels are read back in the admin's order, for the fallback w
     visible: false,
   });
   assert.equal(hidden.status, 200, `the match was refused: ${JSON.stringify(hidden.body)}`);
+  const hiddenId = (hidden.body.fixture as { _id: string })._id;
 
-  // The premium tier asks for the card that names one of *its* channels, so a card that names
-  // only catalogue channels offers it nothing.
-  assert.deepEqual(await listCardChannelsFor(PINNED), []);
+  const board = await call("get", "/api/fixtures");
+  const boardIds = (board.body.fixtures as { id: string }[]).map((card) => card.id);
+  assert.equal(boardIds.includes(hiddenId), false);
 });
 
 // --- what the editor may link -------------------------------------------------

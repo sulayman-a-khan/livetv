@@ -9,6 +9,14 @@ import { teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/**
+ * The height of a card on the phone's stage.
+ *
+ * Every card on the stage has to be exactly as tall as the one it covers, or the card sliding in
+ * would leave a strip of the card underneath showing at the edge.
+ */
+const STAGE_HEIGHT = "h-[178px]";
+
 /** The four numbers a countdown is made of, so the two forms of it cannot disagree. */
 function countdownParts(ms: number): { d: number; h: number; m: number; s: number } {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -173,12 +181,16 @@ function noOfferText(choices: FixtureChoice[]): string {
 function FixtureCard({
   fixture,
   now,
-  hideOnPhone,
+  stage,
   onChoose,
 }: {
   fixture: PublicFixture;
   now: number;
-  hideOnPhone: boolean;
+  /**
+   * The card is on the phone's stage, where every card has to be exactly as tall as the one it
+   * covers — so the height is fixed there instead of being left to the content.
+   */
+  stage: boolean;
   onChoose: (id: string) => void;
 }) {
   const live = fixture.phase === "live";
@@ -197,7 +209,7 @@ function FixtureCard({
   const card = (
     <article
       className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex-col gap-2 w-full ${
-        hideOnPhone ? "hidden sm:flex" : "flex"
+        stage ? `${STAGE_HEIGHT} sm:h-auto` : ""
       }`}
     >
       {/* The two corners the card carries: the theme's indigo and its mint, both held low so the
@@ -216,7 +228,7 @@ function FixtureCard({
             <SportMark sport={fixture.sport} />
           </span>
           <span
-            className={`min-w-0 px-4 text-center font-normal uppercase leading-tight text-slate-200 ${titleSizeClass(
+            className={`min-w-0 px-4 line-clamp-1 text-center font-normal uppercase leading-tight text-slate-200 ${titleSizeClass(
               title || competition
             )}`}
           >
@@ -303,7 +315,7 @@ function FixtureCard({
     return (
       <Link
         href={fixture.watchPath}
-        className={`block text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
+        className="block text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </Link>
@@ -316,7 +328,7 @@ function FixtureCard({
         type="button"
         onClick={() => onChoose(fixture.id)}
         aria-haspopup="dialog"
-        className={`text-left transition-transform active:scale-[0.99] ${hideOnPhone ? "hidden sm:block" : "block"}`}
+        className="text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </button>
@@ -347,6 +359,8 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
   // on screen.
   const [choosingId, setChoosingId] = useState<string | null>(null);
   const closeChooser = useCallback(() => setChoosingId(null), []);
+  // Which of the cards after the first is on the phone's stage right now.
+  const [slide, setSlide] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -386,11 +400,26 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [fixtures]);
 
+  // The phone's second slot is a stage: every card after the first takes a turn on it, sliding in
+  // from the right over the card that was there, and the turn after the last one belongs to the
+  // second card again — so the loop never leaves the first card's place.
+  useEffect(() => {
+    const turns = fixtures.length - 1;
+    if (turns < 2) return;
+    const timer = window.setInterval(() => setSlide((turn) => (turn + 1) % turns), 5000);
+    return () => clearInterval(timer);
+  }, [fixtures]);
+
   if (fixtures.length === 0) return <>{children}</>;
 
   const choosing = choosingId
     ? fixtures.find((fixture) => fixture.id === choosingId) ?? null
     : null;
+
+  // The stage only starts once there is more than the one card beside it to take turns.
+  const stage = fixtures.length > 2;
+  const turns = fixtures.length - 1;
+  const onStage = turns > 0 ? slide % turns : 0;
 
   return (
     <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-5">
@@ -401,15 +430,39 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
       {/* Two cards to a line on a phone and four on a desktop. Every card fills its own column, so
           the row starts at the page's left edge and nothing needs a margin to be narrower. */}
       <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
-        {fixtures.map((fixture, index) => (
-          <FixtureCard
-            key={fixture.id}
-            fixture={fixture}
-            now={now}
-            hideOnPhone={index > 1}
-            onChoose={setChoosingId}
-          />
-        ))}
+        {/* The first card keeps its place and is never covered by anything. */}
+        <FixtureCard
+          key={fixtures[0].id}
+          fixture={fixtures[0]}
+          now={now}
+          stage={stage}
+          onChoose={setChoosingId}
+        />
+
+        {turns > 0 ? (
+          /* The stage: on a phone it is the second column, and the cards take turns on it; from
+              a tablet up it is no box at all, and its cards are the rest of the row. */
+          <div
+            className={`${
+              stage ? `relative overflow-hidden ${STAGE_HEIGHT}` : ""
+            } sm:contents`}
+          >
+            {fixtures.slice(1).map((fixture, index) => (
+              <div
+                key={fixture.id}
+                className={
+                  stage
+                    ? `absolute inset-0 transition-transform duration-700 ease-out sm:static sm:translate-x-0 ${
+                        index === onStage ? "z-10 translate-x-0" : "z-0 translate-x-full"
+                      }`
+                    : ""
+                }
+              >
+                <FixtureCard fixture={fixture} now={now} stage={stage} onChoose={setChoosingId} />
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
       {choosing ? <FixtureChannelDialog fixture={choosing} onClose={closeChooser} /> : null}
     </div>

@@ -208,7 +208,7 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex-col gap-2 w-full ${
+      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex flex-col gap-2 w-full ${
         stage ? `${STAGE_HEIGHT} sm:h-auto` : ""
       }`}
     >
@@ -328,7 +328,7 @@ function FixtureCard({
         type="button"
         onClick={() => onChoose(fixture.id)}
         aria-haspopup="dialog"
-        className="text-left transition-transform active:scale-[0.99]"
+        className="block text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </button>

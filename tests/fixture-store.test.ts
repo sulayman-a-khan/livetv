@@ -39,11 +39,9 @@ nodeModule._resolveFilename = function resolveAppAlias(request: string, ...rest:
 
 const projectCwd = process.cwd();
 const projectStoreFiles = {
-  premium: path.join(projectCwd, "data", "premium-store.json"),
   catalogue: path.join(projectCwd, "data", "store.json"),
 };
 const existedBefore = {
-  premium: fs.existsSync(projectStoreFiles.premium),
   catalogue: fs.existsSync(projectStoreFiles.catalogue),
 };
 
@@ -295,6 +293,5 @@ test("the cards are not in any local file", async () => {
   // A card that lived in a developer's file and a board that read the database would be two
   // different boards, and the admin would be editing one and publishing the other.
   assert.equal(fs.existsSync(path.join(projectCwd, "data", "fixtures.json")), false);
-  assert.equal(fs.existsSync(path.join(projectCwd, "data", "premium-store.json")), existedBefore.premium);
   assert.equal(fs.existsSync(path.join(projectCwd, "data", "store.json")), existedBefore.catalogue);
 });

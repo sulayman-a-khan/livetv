@@ -2,9 +2,8 @@
  * The shape every admin form's answer takes, and the small readers that turn a
  * payload into one.
  *
- * These live apart from the forms themselves because two unrelated tiers use them:
- * the premium tier's channel and provider forms, and the match cards the Direct
- * HLS panel writes. Nothing here knows what it is reading — only how.
+ * These live apart from the forms themselves because the match cards the Direct
+ * HLS panel writes use them. Nothing here knows what it is reading — only how.
  */
 
 export interface Validation<T> {

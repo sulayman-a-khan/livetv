@@ -32,5 +32,5 @@ module.exports = {
     "no-unused-vars": "off",
     "prefer-const": "error",
   },
-  ignorePatterns: [".tmp-tests/", ".tmp-verify/", "node_modules/", "archive/"],
+  ignorePatterns: [".tmp-tests/", ".tmp-verify/", "node_modules/"],
 };

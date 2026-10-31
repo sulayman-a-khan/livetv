@@ -14,8 +14,8 @@
  *   4. no test file is left out of the aggregate test run;
  *   5. the workflow carries no literal credential or address, keeps write
  *      permissions off, and does not depend on the private stream box;
- *   6. the tiers that were isolated are archived rather than deleted, are
- *      not compiled, and no script of theirs is named by the gate.
+ *   6. the app is Direct HLS only — the gate names no script of a tier that
+ *      is not part of this repository.
  *
  * A failing line is reported by line number only — a value that looks like a
  * credential is never echoed.
@@ -323,74 +323,18 @@ const codeText = codeLines.join("\n");
 check(
   "the gate does not depend on the private stream box",
   !/premium-box/.test(codeText),
-  "the stream-box harness needs the private ProxyServer checkout and stays out of CI"
+  "no harness that needs a private checkout is named by the workflow"
 );
 
 /* ---------------------------------------------------------------------------
- * The isolated tiers: archived, not deleted.
+ * The retired tiers: gone from this repository, and the gate stays clean.
  * ------------------------------------------------------------------------ */
 
-const ARCHIVE_DIR = path.join(ROOT, "archive");
-const archiveExists = fs.existsSync(ARCHIVE_DIR);
+const retiredTarget = uniqueTargets.filter((target) => /premium|proxy|box/i.test(target));
 check(
-  "the isolated tiers are archived, not deleted",
-  archiveExists,
-  archiveExists ? path.relative(ROOT, ARCHIVE_DIR) : "the archive directory is missing"
-);
-
-check(
-  "the archive carries its restoration guide",
-  archiveExists && fs.existsSync(path.join(ARCHIVE_DIR, "README.md")),
-  "the guide is what makes the archive restorable without git history"
-);
-
-const archivedTestsDir = path.join(ARCHIVE_DIR, "secured-hls-premium", "tests");
-const archivedTests = fs.existsSync(archivedTestsDir)
-  ? fs.readdirSync(archivedTestsDir).filter((name) => name.endsWith(".test.ts"))
-  : [];
-check(
-  "the archived tiers keep their own tests",
-  archivedTests.length > 0,
-  `${archivedTests.length} archived test files`
-);
-
-const appConfigText = readText(path.join(ROOT, "tsconfig.json"));
-let appConfig = null;
-if (appConfigText !== null) {
-  try {
-    appConfig = JSON.parse(appConfigText);
-  } catch {
-    appConfig = null;
-  }
-}
-const appExcludes = Array.isArray(appConfig?.exclude) ? appConfig.exclude : [];
-check(
-  "the app's type check does not compile the archive",
-  appExcludes.some((entry) => String(entry) === "archive"),
-  `exclude: ${appExcludes.join(", ")}`
-);
-
-const testsIncludeArchived = testsInclude.some((entry) => String(entry).includes("archive"));
-check(
-  "the test compile does not compile the archive",
-  !testsIncludeArchived,
-  testsIncludeArchived ? "the archive is in the test compile" : "the archive is restored by putting its paths back"
-);
-
-const archivedTarget = uniqueTargets.filter((target) => /premium|proxy|box/i.test(target));
-check(
-  "the gate runs no archived tier's script",
-  archivedTarget.length === 0,
-  archivedTarget.length === 0 ? "the gate runs Direct HLS only" : `still named: ${archivedTarget.join(", ")}`
-);
-
-check(
-  "the local stream-box harness is archived, not active",
-  !Object.prototype.hasOwnProperty.call(packageScripts, "test:premium-box") &&
-    fs.existsSync(
-      path.join(ARCHIVE_DIR, "secured-hls-premium", "scripts", "premium-box-e2e.mjs")
-    ),
-  "it is excluded from CI and kept for restoration"
+  "the gate runs no retired tier's script",
+  retiredTarget.length === 0,
+  retiredTarget.length === 0 ? "the gate runs Direct HLS only" : `still named: ${retiredTarget.join(", ")}`
 );
 
 /* ---------------------------------------------------------------------------

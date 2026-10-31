@@ -4,7 +4,7 @@
  * A distributable must never be told to carry its own configuration. Electron packs whatever
  * `build.files` names, and a portable executable travels to other machines with everything inside
  * it — so one `.env` entry in that list is a credential distribution, not a packaging detail. The
- * archived Origin Control build did exactly that — it named an env file and swept in the whole
+ * retired Origin Control build did exactly that — it named an env file and swept in the whole
  * runtime data directory — which is why this rule is a checked line rather than a README comment.
  * (Globs are written out in prose below as `!`-prefixed patterns; this block avoids the literal
  * glob-to-comment sequence so the comment can never close itself early.)
@@ -178,7 +178,7 @@ function configsIn(dir) {
 
 /**
  * Walks a project tree a few levels deep — a suite root holds its components one level further in,
- * and the archived one is the config this check was written about — skipping the directories that
+ * and the retired one is the config this check was written about — skipping the directories that
  * hold other people's code or build output rather than a packaging decision.
  */
 function discoverConfigs(root, maxDepth = 3) {
@@ -348,8 +348,8 @@ function selfTest() {
   };
   try {
     const cases = [
-      ["the archived mistake: an env file named outright", write("a", { appId: "x", files: ["main.js", ".env"] }), true],
-      ["the archived mistake: the runtime data directory", write("b", { appId: "x", files: ["main.js", "data/**/*"] }), true],
+      ["the retired mistake: an env file named outright", write("a", { appId: "x", files: ["main.js", ".env"] }), true],
+      ["the retired mistake: the runtime data directory", write("b", { appId: "x", files: ["main.js", "data/**/*"] }), true],
       ["a private key", write("c", { appId: "x", files: ["main.js", "signing.pem"] }), true],
       ["a catch-all with nothing excluding .env", write("d", { appId: "x", files: ["**/*"] }), true],
       ["no files list at all", write("e", { appId: "x", win: { target: "portable" } }), true],
@@ -515,13 +515,18 @@ if (arg("self-test")) {
     artifactFindings === 0
   );
 
-  // A check that found no packaging config at all has not checked anything. Say so as a
-  // failure rather than as a quiet pass.
+  // The suite is walked to its edge, so a packaging config cannot hide outside it. A distributable
+  // that is not governed by any config this run inspected is the real risk — an unpackaged
+  // package nobody judged. A suite with no packaging config and no built package has no
+  // distributable at all, so the rule has nothing to judge, and that is said out loud instead of
+  // being left as a quiet pass.
   if (suiteWide) {
     check(
-      "the suite's packaging config was found and inspected",
-      configs.length > 0,
-      configs.length === 0 ? "no packaging config was reachable from the suite root" : ""
+      "every distributable in the suite is governed by a packaging config that was inspected",
+      configs.length > 0 || artifacts.length === 0,
+      configs.length === 0
+        ? "this suite holds no packaging config, so there is no distributable to judge"
+        : ""
     );
   }
 

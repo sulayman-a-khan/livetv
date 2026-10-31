@@ -144,7 +144,7 @@ export function requireDatabase(conn: typeof mongoose | null, action: string): v
  * Refuse a write that has nowhere to persist, on a deployment only.
  *
  * This tier's local store is developer data: on a deployment there is no
- * `data/premium-store.json` to fall back to, and the filesystem cannot be written
+ * `data/store.json` to fall back to, and the filesystem cannot be written
  * to, so an accepted create would be answered with a fresh id and then lost when
  * the lambda cooled down — the panel would show a row that no viewer's request can
  * ever read back, and an accepted delete would report a row gone that is still on

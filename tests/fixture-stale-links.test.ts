@@ -14,9 +14,6 @@
  *  - a catalogue channel that is deleted leaves the card and its link in place, so the link
  *    becomes a stale reference the board counts and the admin can repair.
  *
- * The premium tier's own half of this rule — its delete removed the link from every card —
- * is archived with the rest of that tier under `archive/secured-hls-premium/`.
- *
  * Nothing here reaches a database or the network: the catalogue and the cards are stood in for
  * (`tests/helpers/fakeFixtureModel.ts`), and this project's own `data/` is never read or written.
  */
@@ -308,23 +305,4 @@ test("the panel shows a link it cannot see, so the admin can take it off", () =>
     "the panel has to ask which of its links name no channel"
   );
   assert.ok(source.includes("missingLinks"), "the missing links have to reach the screen");
-});
-
-test("the archived premium panel no longer carries a fixture editor", () => {
-  // The match card is the Direct HLS panel's own row now, so the archived premium panel must
-  // not offer a second place to enter one.
-  const archived = path.join(
-    projectCwd,
-    "archive",
-    "secured-hls-premium",
-    "components",
-    "premium-admin"
-  );
-  const source = fs.readFileSync(path.join(archived, "PremiumAdminDashboard.tsx"), "utf-8");
-  assert.equal(source.includes("FixturePanel"), false);
-  assert.equal(fs.existsSync(path.join(archived, "FixturePanel.tsx")), false);
-
-  // And the panel that does carry it is the Direct HLS one.
-  const direct = fs.readFileSync(path.join(projectCwd, "components", "FixturePanel.tsx"), "utf-8");
-  assert.ok(direct.includes("unresolvedFixtureRefs"), "the Direct HLS panel carries the editor");
 });

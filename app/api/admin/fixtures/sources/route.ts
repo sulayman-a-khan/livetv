@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
  * GET /api/admin/fixtures/sources
  * Every channel a match may be linked to, in the one call the fixture editor makes when it opens.
  *
- * The direct catalogue is the only list here: a match links catalogue channels, so the premium
- * tier is not part of this workflow and its rows are not read.
+ * The direct catalogue is the only list here: a match links catalogue channels, so no
+ * other tier is part of this workflow and no other rows are read.
  *
  * Read-only by construction: `lib/fixtureSources.ts` selects ids, names and logos and never a
  * link, a header or a probe result. A card stores a reference to what appears here, so nothing an

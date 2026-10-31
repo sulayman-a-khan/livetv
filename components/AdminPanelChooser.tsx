@@ -13,7 +13,7 @@ interface AdminPanelChooserProps {
  *
  * Direct HLS is the only streaming control panel that is still live, so it is the only
  * option here. The other tiers this screen used to offer — the secure/premium panel and
- * the 24/7 proxy control panel — are archived under `archive/`, together with the
+ * the 24/7 proxy control panel — are gone from this repository, together with the
  * routes and navigation that reached them, so nothing links to them any more.
  *
  * The Direct HLS panel mounts `AdminDashboard` exactly as the gate did before: same

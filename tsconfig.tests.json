@@ -1,5 +1,5 @@
 {
-  "//": "Compiles the pure ranking rules plus tests/ into .tmp-tests so Node's own test runner can execute them. The compiler options mirror the app's own tsconfig.json, so this compile is a real type check and not only an emit: a type error in a test file fails it. The archived tiers under archive/ are not listed: they are not compiled while they are archived, and they are restored by putting their paths back here.",
+  "//": "Compiles the pure ranking rules plus tests/ into .tmp-tests so Node's own test runner can execute them. The compiler options mirror the app's own tsconfig.json, so this compile is a real type check and not only an emit: a type error in a test file fails it. Only the app's own modules are listed here — the files under tests/ plus the ones the tested code reaches.",
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["dom", "dom.iterable", "esnext"],

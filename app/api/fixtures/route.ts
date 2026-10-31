@@ -47,9 +47,9 @@ export async function GET(_req: NextRequest) {
 
     const directChannels = await listDirectChannelsByIds(directIds);
 
-    // The board is Direct HLS only. The secured tier is archived, so it has no channels to
-    // resolve and no readiness to measure: a reference to it resolves to nothing and is
-    // counted as a link the board cannot open, rather than being offered as a choice.
+    // The board is Direct HLS only. There is no other tier to resolve, so a reference to one
+    // resolves to nothing and is counted as a link the board cannot open, rather than being
+    // offered as a choice.
     const publicFixtures = projectFixtures(
       fixtures,
       [],

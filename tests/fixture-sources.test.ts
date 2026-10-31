@@ -40,11 +40,9 @@ nodeModule._resolveFilename = function resolveAppAlias(request: string, ...rest:
 const projectCwd = process.cwd();
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "freetv-fixture-sources-"));
 const projectStoreFiles = {
-  premium: path.join(projectCwd, "data", "premium-store.json"),
   catalogue: path.join(projectCwd, "data", "store.json"),
 };
 const existedBefore = {
-  premium: fs.existsSync(projectStoreFiles.premium),
   catalogue: fs.existsSync(projectStoreFiles.catalogue),
 };
 
@@ -271,6 +269,5 @@ test("a deployment with no database refuses to guess whether a direct channel ex
 });
 
 test("this run never touched this project's own data files", () => {
-  assert.equal(fs.existsSync(projectStoreFiles.premium), existedBefore.premium);
   assert.equal(fs.existsSync(projectStoreFiles.catalogue), existedBefore.catalogue);
 });

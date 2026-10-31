@@ -140,6 +140,22 @@ function SportMark({ sport }: { sport: PublicFixture["sport"] }) {
 }
 
 /**
+ * The title's type size, stepped down as the name gets longer.
+ *
+ * A card is half the page wide on a phone and a quarter of it on a desktop, so a long name has
+ * to give up its size before it gives up its place: the smaller the name, the smaller the type,
+ * until the whole thing fits the box instead of being cut off.
+ */
+function titleSizeClass(text: string): string {
+  const n = text.length;
+  if (n <= 18) return "text-[11px] sm:text-[12px] tracking-[0.12em]";
+  if (n <= 26) return "text-[10px] sm:text-[11px] tracking-[0.1em]";
+  if (n <= 34) return "text-[9px] sm:text-[10px] tracking-[0.08em]";
+  if (n <= 44) return "text-[8px] sm:text-[9px] tracking-[0.06em]";
+  return "text-[7px] sm:text-[8px] tracking-[0.04em]";
+}
+
+/**
  * What a live match with nothing to open says.
  *
  * When every choice gives the same reason, that reason is the card's line: a premium outage, a
@@ -193,9 +209,17 @@ function FixtureCard({
           the competition under it when the title did not already say it. The sport's mark sits
           beside the name, small enough to be read and not to shout. */}
       {title || competition ? (
-        <div className="relative flex items-center gap-1.5 min-w-0 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
-          <SportMark sport={fixture.sport} />
-          <span className="min-w-0 truncate text-[10px] sm:text-[11px] font-black uppercase tracking-[0.08em] sm:tracking-[0.12em] text-slate-200">
+        <div className="relative mb-1 flex items-center justify-center rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+          {/* The sport's mark sits at the edge of the box, so the name keeps the whole of the
+              middle to itself and stays centred on it. */}
+          <span className="absolute left-2 top-1/2 -translate-y-1/2">
+            <SportMark sport={fixture.sport} />
+          </span>
+          <span
+            className={`min-w-0 px-4 text-center font-normal uppercase leading-tight text-slate-200 ${titleSizeClass(
+              title || competition
+            )}`}
+          >
             {title || competition}
           </span>
         </div>

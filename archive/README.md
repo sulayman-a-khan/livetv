@@ -21,6 +21,14 @@ Local Server, and the 24/7 panel is how the site watches it. The Secured HLS tie
 depends on the box (it pushes channels onto it and signs playback URLs through it), so
 restoring `secured-hls-premium/` means restoring `local-server-box/` with it.
 
+**This archive stays inside the repository on purpose.** The public repository's CI runs
+`check:ci-gate` on every push, and the gate requires `archive/` to exist here; a test in
+`tests/` also reads a file inside it. Moving it to a sibling folder would turn every CI run
+red in a clean clone, and would make a restoration a file-copy instead of a `git mv`, losing
+the history of every restored file. The suite's other archived material — the old site
+snapshot, the Phase One audit record and the box logs — lives in
+`SoluPlay-Suite/archive/`, which is described in `SoluPlay-Suite/archive/README.md`.
+
 ---
 
 ## 1. What each component was, and where it came from

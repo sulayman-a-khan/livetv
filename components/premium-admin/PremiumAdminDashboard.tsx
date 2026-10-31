@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Database, Loader2, ShieldCheck } from "lucide-react";
-import FixturePanel from "./FixturePanel";
 import LivePanel from "./LivePanel";
 import PremiumChannelPanel from "./PremiumChannelPanel";
 import ProviderPanel from "./ProviderPanel";
@@ -14,18 +13,21 @@ interface PremiumAdminDashboardProps {
 
 const OPEN_KEY = "freetv_premium_admin_open_sections";
 
-const DEFAULT_OPEN = { providers: true, channels: true, live: true, fixtures: true };
+const DEFAULT_OPEN = { providers: true, channels: true, live: true };
 
 type OpenSections = typeof DEFAULT_OPEN;
 
 /**
- * The Secure / Premium & Fixtures control panel.
+ * The Secure / Premium control panel.
  *
  * This is the second admin surface, deliberately built beside the Direct HLS
  * dashboard rather than inside it: it has its own page, its own components, its
- * own API namespace (`/api/admin/premium/*`, `/api/admin/fixtures/*`) and its own
- * collections. It renders no Direct HLS section and calls no Direct HLS endpoint,
- * so nothing here can change how the existing panel looks or behaves.
+ * own API namespace (`/api/admin/premium/*`) and its own collections. It renders
+ * no Direct HLS section and calls no Direct HLS endpoint, so nothing here can
+ * change how the existing panel looks or behaves.
+ *
+ * Match cards are not here: they are the Direct HLS panel's own rows, and they are
+ * entered and edited in the Direct HLS panel.
  */
 export default function PremiumAdminDashboard({ secretKey }: PremiumAdminDashboardProps) {
   const [openSections, setOpenSections] = useState<OpenSections>(DEFAULT_OPEN);
@@ -83,11 +85,11 @@ export default function PremiumAdminDashboard({ secretKey }: PremiumAdminDashboa
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-base font-bold text-white">
-              Secure / Premium &amp; Fixtures Control Panel
+              Secure / Premium Control Panel
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Admin-supplied premium sources and hand-entered match cards. Separate from the Direct
-              HLS panel: its own collections, routes and screens.
+              Admin-supplied premium sources. Separate from the Direct HLS panel: its own
+              collections, routes and screens. Match cards are entered in the Direct HLS panel.
             </p>
           </div>
           <Link
@@ -128,12 +130,6 @@ export default function PremiumAdminDashboard({ secretKey }: PremiumAdminDashboa
         secretKey={secretKey}
         open={openSections.live}
         onToggle={() => toggle("live")}
-      />
-
-      <FixturePanel
-        secretKey={secretKey}
-        open={openSections.fixtures}
-        onToggle={() => toggle("fixtures")}
       />
     </div>
   );

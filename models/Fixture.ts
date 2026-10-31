@@ -4,7 +4,7 @@ import {
   FIXTURE_SOURCE_TYPES,
   type FixtureChannelRef,
   type FixtureSport,
-} from "@/lib/premiumFixtures";
+} from "@/lib/fixtures";
 
 // The lists live in the pure validation module, so the schema and the API can
 // never disagree about which sports a card may be entered for, or which tiers it may

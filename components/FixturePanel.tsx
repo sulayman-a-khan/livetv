@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import {
   endTimeAfter,
+  MAX_FIXTURE_CHANNELS,
   minutesBetween,
   toLocalInputValue,
   unresolvedFixtureRefs,
-} from "@/lib/premiumFixtures";
+} from "@/lib/fixtures";
 import { parseMatchTitle } from "@/lib/teamFlags";
 import {
   CalendarClock,
@@ -52,9 +53,6 @@ interface ChannelRef {
 interface SourceOption extends ChannelRef {
   name: string;
 }
-
-/** What a card can hold: a chooser on a phone screen, not a list to scroll for a minute. */
-const MAX_CHANNELS = 8;
 
 interface FormState {
   /** The admin's own wording for the match, as the board shows it when it says more than the teams do. */
@@ -115,10 +113,10 @@ function countdown(iso: string, now: number): string {
 }
 
 /**
- * One tier's worth of channels, as tap-to-link marks.
+ * The catalogue's channels as tap-to-link marks.
  *
- * A group with nothing in it says nothing: an admin with no secured rows should not have to read
- * an empty heading to find out why.
+ * A group with nothing in it says nothing: an admin whose catalogue has no pinned channel should
+ * not have to read an empty heading to find out why.
  */
 function ChannelSourceGroup({
   label,
@@ -240,9 +238,11 @@ function ChannelOrderList({
 }
 
 /**
- * The manual fixture board. Every match on it was typed in by the admin: there is
- * no schedule feed behind this panel, and a new fixture starts unpublished so an
- * entered match cannot appear to viewers until it is switched on.
+ * The manual fixture board, in the Direct HLS panel.
+ *
+ * Every match on it was typed in by the admin: there is no schedule feed behind this panel, and a
+ * new fixture starts unpublished so an entered match cannot appear to viewers until it is switched
+ * on. The cards live in MongoDB, so what the admin edits here is the same card the homepage shows.
  */
 export default function FixturePanel({
   secretKey,
@@ -255,7 +255,6 @@ export default function FixturePanel({
 }) {
   const [rows, setRows] = useState<FixtureRow[]>([]);
   const [directSources, setDirectSources] = useState<SourceOption[]>([]);
-  const [securedSources, setSecuredSources] = useState<SourceOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -291,7 +290,6 @@ export default function FixturePanel({
       }
       setRows((fixtures.fixtures || []) as FixtureRow[]);
       setDirectSources((sources.direct || []) as SourceOption[]);
-      setSecuredSources((sources.secured || []) as SourceOption[]);
       setLoadError(null);
     } catch (err: any) {
       if (seq !== loadSeq.current) return;
@@ -314,9 +312,9 @@ export default function FixturePanel({
   }, [open, editing, load]);
 
   // Opening the panel re-reads it: a closed panel does not poll, so what it
-  // shows can be a minute old — including the premium channels this board links
-  // a match to, which are entered in the panel above and may not have existed
-  // when this one first loaded.
+  // shows can be a minute old — including the catalogue channels this board links
+  // a match to, which are pinned and unpinned in the panel above and may not have
+  // existed when this one first loaded.
   const wasOpen = useRef(open);
   useEffect(() => {
     if (open && !wasOpen.current) load();
@@ -459,10 +457,13 @@ export default function FixturePanel({
           ),
         };
       }
-      if (current.channels.length >= MAX_CHANNELS) return current;
+      if (current.channels.length >= MAX_FIXTURE_CHANNELS) return current;
       return {
         ...current,
-        channels: [...current.channels, { channelId: option.channelId, sourceType: option.sourceType }],
+        channels: [
+          ...current.channels,
+          { channelId: option.channelId, sourceType: option.sourceType },
+        ],
       };
     });
   }
@@ -558,21 +559,20 @@ export default function FixturePanel({
   }
 
   /**
-   * What a linked channel is called, looked up in the tier the reference names. A channel that is
-   * no longer in that list shows its id: the link is stale rather than wrong, and the admin needs
-   * to see which one it is.
+   * What a linked channel is called, looked up in the catalogue. A channel that is no longer
+   * listed shows its id: the link is stale rather than wrong, and the admin needs to see which
+   * one it is.
    */
   function channelName(ref: ChannelRef): string {
-    const options = ref.sourceType === "direct" ? directSources : securedSources;
-    return options.find((option) => option.channelId === ref.channelId)?.name || ref.channelId;
+    return directSources.find((option) => option.channelId === ref.channelId)?.name || ref.channelId;
   }
 
   /**
-   * The links on this card that name a channel the editor cannot see: a secured channel that was
-   * deleted, or a direct channel the catalogue has stopped showing.
+   * The links on this card that name a catalogue channel the editor cannot see: one the catalogue
+   * has stopped showing, or one that was deleted.
    *
    * They are shown rather than left out, because a link the admin cannot see is a link they
-   * cannot take off the card. While the channel lists are loading or failed, nothing is called
+   * cannot take off the card. While the channel list is loading or failed, nothing is called
    * missing — an empty list is not evidence that every channel is gone.
    */
   const missingLinks =
@@ -580,7 +580,6 @@ export default function FixturePanel({
       ? []
       : unresolvedFixtureRefs(form.channels, {
           direct: directSources.map((option) => option.channelId),
-          secured: securedSources.map((option) => option.channelId),
         });
 
   const liveCount = rows.filter((r) => r.phase === "live").length;
@@ -726,20 +725,15 @@ export default function FixturePanel({
               <div className="sm:col-span-2 space-y-2.5">
                 <p className={LABEL_CLASS}>
                   Watch on · {form.channels.length} linked
-                  {form.channels.length >= MAX_CHANNELS ? ` (max ${MAX_CHANNELS})` : ""}
+                  {form.channels.length >= MAX_FIXTURE_CHANNELS
+                    ? ` (max ${MAX_FIXTURE_CHANNELS})`
+                    : ""}
                 </p>
-                <ChannelSourceGroup
-                  label="Secured HLS"
-                  options={securedSources}
-                  selected={form.channels}
-                  full={form.channels.length >= MAX_CHANNELS}
-                  onToggle={toggleChannel}
-                />
                 <ChannelSourceGroup
                   label="Direct HLS"
                   options={directSources}
                   selected={form.channels}
-                  full={form.channels.length >= MAX_CHANNELS}
+                  full={form.channels.length >= MAX_FIXTURE_CHANNELS}
                   onToggle={toggleChannel}
                 />
                 <ChannelOrderList
@@ -773,10 +767,9 @@ export default function FixturePanel({
                     </p>
                   </div>
                 )}
-                {securedSources.length === 0 && directSources.length === 0 && (
+                {directSources.length === 0 && (
                   <p className="text-[10px] text-slate-500">
-                    No channels to link yet — the direct catalogue and the secured list are both
-                    empty.
+                    No channels to link yet — the catalogue is not showing any channel.
                   </p>
                 )}
               </div>

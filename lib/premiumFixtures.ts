@@ -1,52 +1,23 @@
-import { parseMatchTitle } from "./teamFlags";
+import {
+  isHttpUrl,
+  toBool,
+  toIntInRange,
+  toOptionalUrl,
+  toText,
+  type Validation,
+} from "./validation";
+
+export type { Validation };
 
 /**
- * The pure half of the premium tier: what a valid admin entry looks like, and how
- * a fixture's clock maps to the badge a card shows. Nothing in here touches
- * MongoDB, the network or React, so `npm run test:premium-fixtures` can execute
- * it directly — the storing half lives in `lib/premiumStore.ts`.
+ * The pure half of the premium tier: what a valid admin entry looks like for a premium
+ * channel, a provider registration and a push to the stream box. Nothing in here touches
+ * MongoDB, the network or React, so `npm run test:premium-channels` can execute it
+ * directly — the storing half lives in `lib/premiumStore.ts`.
+ *
+ * The rules for a match card are not here: they belong to the Direct HLS panel that writes
+ * them, and live in `lib/fixtures.ts`.
  */
-
-/** The only sports a fixture card is entered for. */
-export const FIXTURE_SPORTS = ["football", "cricket"] as const;
-export type FixtureSport = (typeof FIXTURE_SPORTS)[number];
-
-export const FIXTURE_PHASES = ["upcoming", "live", "finished"] as const;
-export type FixturePhase = (typeof FIXTURE_PHASES)[number];
-
-/**
- * Which of the two tiers a linked channel belongs to. A card says this on purpose rather
- * than trusting a row to be findable in one list or the other: the same 24-character id
- * shape means a catalogue channel in one tier and could mean anything in the other, and a
- * tap has to know which playback route — and which authorization flow — it belongs to.
- */
-export const FIXTURE_SOURCE_TYPES = ["direct", "secured"] as const;
-export type FixtureSourceType = (typeof FIXTURE_SOURCE_TYPES)[number];
-
-/**
- * One channel a match can be watched on. `channelId` is the row's own id and nothing else:
- * a reference may not carry a URL, a header, a token or any other key, because a fixture row
- * is readable by the public board and by anyone who can open the admin panel's list.
- */
-export interface FixtureChannelRef {
-  channelId: string;
-  sourceType: FixtureSourceType;
-}
-
-/** The only keys a reference may arrive with. Anything else is refused, not stripped. */
-const FIXTURE_REF_KEYS = ["channelId", "sourceType"];
-
-/**
- * A card is drawn on a phone, so the choices it can offer are capped at what one screen
- * holds. A larger number would be a data-entry mistake rather than a schedule.
- */
-export const MAX_FIXTURE_CHANNELS = 8;
-
-/** What the direct catalogue names its rows by, in MongoDB and in its local mirror alike. */
-const OBJECT_ID_PATTERN = /^[0-9a-f]{24}$/i;
-
-/** A row id from either tier: no spaces, no punctuation a URL could be hiding in. */
-const CHANNEL_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * The handle the stream box files a provider or a channel under.
@@ -56,8 +27,8 @@ const CHANNEL_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  * not be able to carry a slash.
  *
  * The leading character is part of the rule and not an afterthought: the box refuses a handle
- * that starts with a dash or an underscore, so a handle accepted here and refused there would
- * be a form that says yes to a value the box will not take.
+ * that starts with a dash or an underscore, so a handle accepted here and refused there would be
+ * a form that says yes to a value the box will not take.
  */
 export const BOX_HANDLE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/;
 
@@ -106,95 +77,6 @@ export interface PremiumSourceInput {
   sourceUrl: string;
   userAgent: string;
   referer: string;
-}
-
-export interface FixtureInput {
-  /**
-   * The card's title, as the admin typed it: "Bangladesh vs India", "BAN vs IND".
-   *
-   * It is a convenience, not the truth: a title that names two teams says the same thing as
-   * the two team fields, so the teams are read out of it and the card still shows the title
-   * the admin wrote. A title that names no pair is kept as a title and nothing else.
-   */
-  title?: string;
-  sport: FixtureSport;
-  teamA: string;
-  teamB: string;
-  teamALogo: string;
-  teamBLogo: string;
-  competition: string;
-  startsAt: Date;
-  durationMinutes: number;
-  /** Every channel this match can be watched on, in the order the admin picked them. */
-  channels: FixtureChannelRef[];
-  visible: boolean;
-}
-
-export interface Validation<T> {
-  value: Partial<T>;
-  errors: string[];
-}
-
-/** True when the URL is something a browser or a fetch can actually reach. */
-function isHttpUrl(url: string): boolean {
-  return /^https?:\/\/\S+$/i.test(url);
-}
-
-function toBool(raw: unknown, fallback: boolean): boolean {
-  if (raw === undefined || raw === null || raw === "") return fallback;
-  if (typeof raw === "boolean") return raw;
-  return ["1", "true", "yes", "on"].includes(String(raw).trim().toLowerCase());
-}
-
-/**
- * Whole numbers only, and never outside the range the admin form itself offers,
- * so a hand-crafted request cannot store a value the panel then cannot display.
- */
-function toIntInRange(
-  raw: unknown,
-  fallback: number,
-  min: number,
-  max: number,
-  label: string,
-  errors: string[]
-): number {
-  if (raw === undefined || raw === null || raw === "") return fallback;
-  const n = Number(raw);
-  if (!Number.isInteger(n) || n < min || n > max) {
-    errors.push(`${label} must be a whole number between ${min} and ${max}`);
-    return fallback;
-  }
-  return n;
-}
-
-/** A trimmed string, refused when it is longer than the field on screen. */
-function toText(
-  raw: unknown,
-  label: string,
-  errors: string[],
-  options: { required?: boolean; max: number; fallback?: string }
-): string {
-  const value = typeof raw === "string" ? raw.trim() : "";
-  if (!value) {
-    if (options.required) errors.push(`${label} is required`);
-    return options.fallback ?? "";
-  }
-  if (value.length > options.max) {
-    errors.push(`${label} must be ${options.max} characters or fewer`);
-    return "";
-  }
-  return value;
-}
-
-/** An optional URL field: empty is allowed, a non-empty value must be http(s). */
-function toOptionalUrl(raw: unknown, label: string, errors: string[]): string {
-  const value = typeof raw === "string" ? raw.trim() : "";
-  if (!value) return "";
-  if (!isHttpUrl(value) || value.length > 2048) {
-    errors.push(`${label} must be a valid http(s) URL`);
-    return "";
-  }
-  return value;
 }
 
 /**
@@ -484,234 +366,4 @@ export function validatePremiumSourcePush(
     value: { sourceUrl, userAgent, referer },
     errors,
   };
-}
-
-/** Kickoff accepts a date-time, a plain date, or epoch milliseconds. */
-function toStartDate(raw: unknown, errors: string[]): Date | null {
-  if (raw === undefined || raw === null || raw === "") {
-    errors.push("Kickoff time is required");
-    return null;
-  }
-  const date = raw instanceof Date ? raw : new Date(typeof raw === "string" ? raw : Number(raw));
-  if (Number.isNaN(date.getTime())) {
-    errors.push("Kickoff time must be a real date and time");
-    return null;
-  }
-  return date;
-}
-
-/**
- * The channels a match is tied to, read from a payload that may have come from anywhere.
- *
- * A reference is only ever an id plus the tier it belongs to. Keys beyond those two are
- * refused rather than ignored, because the one thing this list must never end up holding is
- * a source line, a header or a token — and a fixture row is what the public board reads.
- */
-function toChannelRefs(raw: unknown, label: string, errors: string[]): FixtureChannelRef[] {
-  if (!Array.isArray(raw)) {
-    errors.push(`${label} must be a list of channels`);
-    return [];
-  }
-  if (raw.length > MAX_FIXTURE_CHANNELS) {
-    errors.push(`${label} can hold at most ${MAX_FIXTURE_CHANNELS} channels`);
-    return [];
-  }
-
-  const refs: FixtureChannelRef[] = [];
-  const seen = new Set<string>();
-
-  raw.forEach((entry, index) => {
-    const at = `${label} ${index + 1}`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      errors.push(`${at} must name a channel id and a source`);
-      return;
-    }
-    const ref = entry as Record<string, unknown>;
-    const extra = Object.keys(ref).filter((key) => !FIXTURE_REF_KEYS.includes(key));
-    if (extra.length > 0) {
-      errors.push(`${at} carries ${extra.join(", ")} — a linked channel stores only an id and a source`);
-      return;
-    }
-
-    const sourceRaw = typeof ref.sourceType === "string" ? ref.sourceType.trim().toLowerCase() : "";
-    if (!(FIXTURE_SOURCE_TYPES as readonly string[]).includes(sourceRaw)) {
-      errors.push(`${at} source must be one of: ${FIXTURE_SOURCE_TYPES.join(", ")}`);
-      return;
-    }
-    const sourceType = sourceRaw as FixtureSourceType;
-
-    const idRaw = typeof ref.channelId === "string" ? ref.channelId.trim() : "";
-    if (!CHANNEL_ID_PATTERN.test(idRaw)) {
-      errors.push(`${at} id is not valid`);
-      return;
-    }
-    // The direct catalogue's ids are ObjectIds, in production and in the local mirror that
-    // was exported from it. Anything looser would be a card pointing at nothing.
-    if (sourceType === "direct" && !OBJECT_ID_PATTERN.test(idRaw)) {
-      errors.push(`${at} id must be a 24-character catalogue channel id`);
-      return;
-    }
-
-    const key = `${sourceType}:${idRaw}`;
-    if (seen.has(key)) {
-      errors.push(`${at} is listed twice`);
-      return;
-    }
-    seen.add(key);
-    refs.push({ channelId: idRaw, sourceType });
-  });
-
-  return refs;
-}
-
-/**
- * The links on a card that name no channel in the lists the editor was given.
- *
- * The direct list holds only the channels the catalogue is currently showing, so a direct link
- * missing from it is either gone or deliberately taken off screen — two facts with two different
- * repairs, which is why the editor asks about them by tier rather than guessing. A secured link
- * missing from its list names a channel this tier no longer has.
- *
- * This is the editor's own question — "what is on this card that I cannot see?" — asked of the
- * lists the editor was handed. The server answers the same question separately, for a write.
- */
-export function unresolvedFixtureRefs(
-  refs: FixtureChannelRef[],
-  known: { direct: string[]; secured: string[] }
-): FixtureChannelRef[] {
-  const direct = new Set(known.direct);
-  const secured = new Set(known.secured);
-  return refs.filter((ref) =>
-    ref.sourceType === "direct" ? !direct.has(ref.channelId) : !secured.has(ref.channelId)
-  );
-}
-
-export function validateFixtureInput(
-  body: Record<string, unknown>,
-  creating: boolean
-): Validation<FixtureInput> {
-  const value: Partial<FixtureInput> = {};
-  const errors: string[] = [];
-  const has = (key: string) => Object.prototype.hasOwnProperty.call(body, key);
-
-  if (creating || has("sport")) {
-    const sport = typeof body.sport === "string" ? body.sport.trim().toLowerCase() : "";
-    if (!sport) errors.push("Sport is required");
-    else if (!(FIXTURE_SPORTS as readonly string[]).includes(sport))
-      errors.push(`Sport must be one of: ${FIXTURE_SPORTS.join(", ")}`);
-    else value.sport = sport as FixtureSport;
-  }
-
-  // A title that names two teams is the same answer as the two team fields, so the teams
-  // are read out of it rather than asked for twice. An explicit team field always wins: the
-  // admin may have typed the fixture in the other order.
-  const title = creating || has("title") ? toText(body.title, "Title", errors, { max: 120 }) : undefined;
-  if (creating || has("title")) value.title = title ?? "";
-  const parsed = title ? parseMatchTitle(title) : null;
-
-  if (creating || has("teamA")) {
-    const fromTitle = parsed && !has("teamA") ? parsed.teamA : "";
-    const teamA = fromTitle || toText(body.teamA, "Team A", errors, { required: true, max: 60 });
-    if (teamA) value.teamA = teamA;
-  }
-  if (creating || has("teamB")) {
-    const fromTitle = parsed && !has("teamB") ? parsed.teamB : "";
-    const teamB = fromTitle || toText(body.teamB, "Team B", errors, { required: true, max: 60 });
-    if (teamB) value.teamB = teamB;
-  }
-
-  if (creating || has("teamALogo")) value.teamALogo = toOptionalUrl(body.teamALogo, "Team A logo", errors);
-  if (creating || has("teamBLogo")) value.teamBLogo = toOptionalUrl(body.teamBLogo, "Team B logo", errors);
-
-  if (creating || has("competition")) {
-    value.competition = toText(body.competition, "Competition", errors, { max: 80 });
-  }
-
-  if (creating || has("startsAt")) {
-    const startsAt = toStartDate(body.startsAt, errors);
-    if (startsAt) value.startsAt = startsAt;
-  }
-
-  if (creating || has("durationMinutes")) {
-    value.durationMinutes = toIntInRange(body.durationMinutes, 120, 1, 720, "Match length", errors);
-  }
-
-  if (creating || has("channels")) {
-    // An absent field on a create is "no channel chosen yet" — the way the single-field version
-    // of this card stored null — while a field that is present and is not a list is a malformed
-    // payload. An empty list is the same answer stated outright.
-    value.channels =
-      creating && body.channels === undefined
-        ? []
-        : toChannelRefs(body.channels, "Linked channel", errors);
-  }
-
-  // The single-channel field this tier shipped with is gone from the write path on purpose:
-  // a request that still sends it would otherwise store a second, vaguer answer to "where is
-  // this match watched", and rows that predate the list are read through the projection
-  // instead (`toFixtureRecord` in `lib/premiumStore.ts`).
-  if (has("premiumChannelId")) {
-    errors.push("Linked channel is now sent as a channels list with a source for each entry");
-  }
-
-  if (creating || has("visible")) value.visible = toBool(body.visible, false);
-
-  return { value, errors };
-}
-
-/**
- * A date-time as the editor's own field shows it: local wall clock, no seconds, no zone.
- *
- * The panel is where a kickoff is typed, so the value it reads back has to be the shape it
- * writes — a `datetime-local` input with no seconds and no offset, in the reader's own zone.
- * Anything else round-trips through that input as a different minute.
- */
-export function toLocalInputValue(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
-    d.getMinutes()
-  )}`;
-}
-
-/**
- * The minutes between two local date-times, or null when either of them is not a time.
- *
- * A match's length and the end the admin typed are two ways of saying one thing, so the
- * number is derived from the two clock values rather than kept beside them: a card can never
- * claim one length and end at another.
- */
-export function minutesBetween(start: string, end: string): number | null {
-  if (!start || !end) return null;
-  const from = new Date(start).getTime();
-  const to = new Date(end).getTime();
-  if (Number.isNaN(from) || Number.isNaN(to)) return null;
-  return Math.round((to - from) / 60_000);
-}
-
-/**
- * The end of a match that starts at `start` and runs for `minutes`, as the editor shows it.
- */
-export function endTimeAfter(start: string, minutes: number): string {
-  const from = new Date(start);
-  if (Number.isNaN(from.getTime()) || !Number.isFinite(minutes)) return "";
-  return toLocalInputValue(new Date(from.getTime() + minutes * 60_000).toISOString());
-}
-
-/**
- * Which badge a fixture carries right now. Kickoff starts it and the expected
- * length ends it, so a finished match stops advertising itself without the admin
- * having to remember to switch it off. A match is never "live" before kickoff.
- */
-export function fixturePhase(startsAt: Date, durationMinutes: number, now: Date): FixturePhase {
-  const start = startsAt.getTime();
-  if (now.getTime() < start) return "upcoming";
-  const end = start + Math.max(1, durationMinutes) * 60_000;
-  return now.getTime() < end ? "live" : "finished";
-}
-
-/** Milliseconds until kickoff, clamped at zero for a match already underway. */
-export function countdownMs(startsAt: Date, now: Date): number {
-  return Math.max(0, startsAt.getTime() - now.getTime());
 }

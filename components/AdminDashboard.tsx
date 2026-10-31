@@ -6,6 +6,7 @@ import { getChannelLogo } from "@/lib/utils";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import ChannelEditModal, { EditableChannel } from "@/components/ChannelEditModal";
 import PlaylistSourcePanel from "@/components/PlaylistSourcePanel";
+import FixturePanel from "@/components/FixturePanel";
 import { CATEGORIES, getCategoryBySlug, isChannelInCategory, CHANNEL_CATEGORIES, type ChannelCategory } from "@/lib/categories";
 import {
   ShieldAlert,
@@ -377,7 +378,16 @@ function AutoHealthSection({
 }
 
 /** The dashboard's sections, each of which opens and closes on its own. */
-const SECTION_IDS = ["metrics", "autohealth", "ingest", "manual", "sources", "pinned", "channels"] as const;
+const SECTION_IDS = [
+  "metrics",
+  "autohealth",
+  "ingest",
+  "manual",
+  "sources",
+  "pinned",
+  "channels",
+  "fixtures",
+] as const;
 type SectionId = (typeof SECTION_IDS)[number];
 
 /** Only the counts are open by default — everything else waits until it is asked for. */
@@ -389,6 +399,7 @@ const DEFAULT_OPEN_SECTIONS: Record<SectionId, boolean> = {
   sources: false,
   pinned: false,
   channels: false,
+  fixtures: false,
 };
 
 const SECTIONS_STORAGE_KEY = "freetv_admin_open_sections";
@@ -2130,6 +2141,15 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           </table>
         </div>
       </AdminSection>
+
+      {/* ========================================================= */}
+      {/* 📅 MATCH FIXTURES (cards the homepage shows)              */}
+      {/* ========================================================= */}
+      <FixturePanel
+        secretKey={secretKey}
+        open={openSections.fixtures}
+        onToggle={() => toggleSection("fixtures")}
+      />
 
       {/* ========================================================= */}
       {/* ✏️ FULL CHANNEL EDITOR (metadata + manual server links)   */}

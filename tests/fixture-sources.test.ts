@@ -2,11 +2,10 @@
  * Regression tests for the one door a fixture card has to the Direct HLS catalogue
  * (`lib/fixtureSources.ts`).
  *
- * Run with `npm run test:fixture-sources`. It compiles the real module, the premium store and
- * the catalogue's own local store into `.tmp-tests/` and runs them with no database reachable,
- * so the branch under test is the one a local run takes. The catalogue is seeded from a file
- * this test writes into a temporary directory: nothing here reads or rewrites this project's
- * own `data/`.
+ * Run with `npm run test:fixture-sources`. It compiles the real module and the catalogue's own
+ * local store into `.tmp-tests/` and runs them with no database reachable, so the branch under
+ * test is the one a local run takes. The catalogue is seeded from a file this test writes into
+ * a temporary directory: nothing here reads or rewrites this project's own `data/`.
  *
  * The point of the file is the promise the Direct HLS system is protected by: a fixture may
  * name a direct channel, and naming it must not be able to change it.
@@ -23,6 +22,11 @@ type NodeModuleWithHook = typeof Module & {
   _resolveFilename: (request: string, ...rest: unknown[]) => string;
 };
 
+/**
+ * The compiled modules reach their siblings through the app's `@/` alias, which the compiler
+ * leaves in the emitted `require`. Point it at the compiled output so the code under test is
+ * the real one.
+ */
 const nodeModule = Module as NodeModuleWithHook;
 const originalResolve = nodeModule._resolveFilename;
 const compiledRoot = path.resolve(__dirname, "..");
@@ -99,11 +103,9 @@ fs.writeFileSync(
 );
 
 type FixtureSources = typeof import("../lib/fixtureSources");
-type PremiumStore = typeof import("../lib/premiumStore");
 type InMemoryStore = typeof import("../lib/inMemoryStore");
 
 const sources: FixtureSources = require("../lib/fixtureSources");
-const store: PremiumStore = require("../lib/premiumStore");
 const { inMemoryDb }: InMemoryStore = require("../lib/inMemoryStore");
 
 after(() => {
@@ -160,7 +162,7 @@ test("a board's links are resolved in one read, and by both facts that matter", 
   assert.equal(printed.includes("origin.example"), false);
   assert.equal(printed.includes("m3u8"), false);
 
-  // An empty list asks nothing at all, so a board of premium-only cards costs no catalogue read.
+  // An empty list asks nothing at all, so a board of catalogue-only cards costs no catalogue read.
   assert.deepEqual(await sources.listDirectChannelsByIds([]), []);
 });
 
@@ -211,68 +213,35 @@ test("a direct channel is offered only when the catalogue is showing it", async 
   assert.deepEqual(await sources.unknownFixtureRefs([]), []);
 });
 
-test("a mixed list is checked against each tier it names", async () => {
-  const channel = await store.createPremiumChannel({
-    name: "Example Sports HD",
-    category: "Premium",
-    logoUrl: "",
-    active: true,
-    sortOrder: 99,
-    note: "",
-    proxyChannelKey: "",
-  });
+test("a link that names no channel at all is refused, and named", async () => {
+  const unknown = await sources.unknownFixtureRefs([
+    { channelId: PINNED._id, sourceType: "direct" },
+    { channelId: "6ab5c72de29c995275489e5e", sourceType: "direct" },
+  ]);
 
-  const valid = [
-    { channelId: PINNED._id, sourceType: "direct" as const },
-    { channelId: channel._id, sourceType: "secured" as const },
-  ];
-  assert.deepEqual(await sources.unknownFixtureRefs(valid), []);
-
-  const broken = [
-    { channelId: PINNED._id, sourceType: "direct" as const },
-    { channelId: "pc_ghost", sourceType: "secured" as const },
-    { channelId: UNPINNED._id, sourceType: "direct" as const },
-  ];
-  const unknown = await sources.unknownFixtureRefs(broken);
-
-  // Every mistake in one answer, and each one says which tier it was looked for in — an id that
-  // exists in the catalogue is still an unknown *secured* channel, and the admin has to be told
-  // that rather than that the channel does not exist. The unpinned direct row is refused too, but
-  // with the reason that fits it: a channel that is there and not shown.
+  // A card links catalogue channels, and an id with no row behind it names none. The reason
+  // says that, and not the other one — a channel that exists and is hidden is a different fact
+  // with a different repair.
   assert.deepEqual(
-    unknown.map(({ ref, reason }) => `${ref.channelId}/${ref.sourceType}/${reason}`),
-    [
-      "pc_ghost/secured/is not a channel in the secured list",
-      `${UNPINNED._id}/direct/is not on the public channel list`,
-    ]
+    unknown.map(({ ref, reason }) => `${ref.channelId}/${reason}`),
+    ["6ab5c72de29c995275489e5e/is not a channel on the direct catalogue"]
   );
   assert.equal(typeof sources.describeUnknownFixtureRefs(unknown), "string");
 });
 
-test("linking a match to a direct channel changes nothing about that channel", async () => {
+test("a link from the other tier is not judged against this list", async () => {
+  // This list is the catalogue's, and a card may still carry a premium link from before this
+  // panel owned it. Judging it here would report a channel the catalogue knows nothing about as
+  // missing from the catalogue.
+  const unknown = await sources.unknownFixtureRefs([
+    { channelId: "pc_one", sourceType: "secured" },
+  ]);
+  assert.deepEqual(unknown, []);
+});
+
+test("reading the catalogue changes nothing about it", async () => {
   const before = catalogueSnapshot();
 
-  const fixture = await store.createFixture({
-    sport: "football",
-    teamA: "Mohammedan",
-    teamB: "Bashundhara",
-    teamALogo: "",
-    teamBLogo: "",
-    competition: "BPL",
-    startsAt: new Date("2026-10-26T16:00:00.000Z"),
-    durationMinutes: 120,
-    channels: [{ channelId: PINNED._id, sourceType: "direct" }],
-    visible: true,
-  });
-  assert.deepEqual(fixture.channels, [{ channelId: PINNED._id, sourceType: "direct" }]);
-
-  await store.updateFixture(fixture._id, {
-    channels: [
-      { channelId: PINNED._id, sourceType: "direct" },
-      { channelId: UNPINNED._id, sourceType: "direct" },
-    ],
-  });
-  await store.deleteFixture(fixture._id);
   await sources.listDirectChannelOptions();
   await sources.listDirectChannelsByIds([PINNED._id, UNPINNED._id]);
   await sources.unknownFixtureRefs([
@@ -281,9 +250,8 @@ test("linking a match to a direct channel changes nothing about that channel", a
   ]);
 
   // Channels, links, pin state, priority, probe bookkeeping: not one field moved, through the
-  // whole write-read-delete life of a card that named two of them.
+  // whole read life of a card that named two of them.
   assert.equal(catalogueSnapshot(), before);
-  assert.equal(fs.existsSync(path.join(sandbox, "data", "premium-store.json")), true);
 });
 
 test("a deployment with no database refuses to guess whether a direct channel exists", async () => {

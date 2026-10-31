@@ -1,14 +1,14 @@
 /**
  * The viewer-facing half of the fixture board: which published matches are worth
  * showing, in what order, and what a card is allowed to say about them. Pure —
- * no MongoDB, no network, no React — so `npm run test:premium-fixtures` executes
+ * no MongoDB, no network, no React — so `npm run test:fixtures` executes
  * the same rules the homepage renders.
  *
  * A projected card never carries a source URL or an upstream header. Those live
  * on the admin record, and this module is the only path a viewer takes.
  */
 
-import type { FixtureChannelRef, FixturePhase, FixtureSourceType, FixtureSport } from "./premiumFixtures";
+import type { FixtureChannelRef, FixturePhase, FixtureSourceType, FixtureSport } from "./fixtures";
 
 /** Kickoffs further out than this are the admin's schedule, not today's board. */
 const UPCOMING_WINDOW_MS = 24 * 60 * 60_000;

@@ -369,7 +369,6 @@ afterEach(() => {
   // created one would leave it standing for the next. Every case starts from an empty rail,
   // and the store is told so directly rather than by deleting the file it writes.
   globalThis.__freetv_premium_channels = [];
-  globalThis.__freetv_premium_fixtures = [];
 });
 
 /** A request the admin routes accept: the secret in the header it is read from. */

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectFixtures, referencedChannelIds } from "@/lib/fixtureBoard";
 import { listDirectChannelsByIds } from "@/lib/fixtureSources";
-import { listFixtures, listPremiumBoardChannels } from "@/lib/premiumStore";
+import { listFixtures } from "@/lib/fixtureStore";
+import { listPremiumBoardChannels } from "@/lib/premiumStore";
 import { isPremiumReady, readPremiumReadiness } from "@/lib/premiumReadiness";
 
 export const dynamic = "force-dynamic";

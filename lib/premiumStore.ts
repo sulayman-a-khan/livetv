@@ -1,9 +1,13 @@
 /**
  * The storing half of the premium tier: every read and write of a premium channel
- * or a fixture goes through here, and each read answers from MongoDB when it is
- * reachable and from the tier's own local store file when it is not, so the admin
- * panel behaves identically on a developer machine and in production. A write is
- * held to a stricter rule than a read — see `requirePersistingStore`.
+ * goes through here, and each read answers from MongoDB when it is reachable and from
+ * the tier's own local store file when it is not, so the admin panel behaves
+ * identically on a developer machine and in production. A write is held to a stricter
+ * rule than a read — see `requirePersistingStore`.
+ *
+ * Match cards are not stored here. They are the Direct HLS panel's own rows and live
+ * in `lib/fixtureStore.ts`; this tier only reads them, to find the card that carries a
+ * premium channel and to take a deleted channel's link off the cards that named it.
  *
  * Nothing in this file is read by the Direct HLS catalogue, its ranking pass or its
  * maintenance sweep — those keep their own collections and their own local store
@@ -11,22 +15,13 @@
  */
 
 import mongoose from "mongoose";
-import { connectToDatabase, mustUseDatabase } from "./db";
-import {
-  premiumLocalStore,
-  type LocalFixture,
-  type LocalPremiumChannel,
-} from "./premiumLocalStore";
-import FixtureModel from "@/models/Fixture";
+import { connectToDatabase, requirePersistingStore } from "./db";
+import { premiumLocalStore, type LocalPremiumChannel } from "./premiumLocalStore";
 import PremiumChannelModel from "@/models/PremiumChannel";
-import {
-  FIXTURE_SOURCE_TYPES,
-  fixturePhase,
-  type FixtureChannelRef,
-  type FixtureInput,
-  type FixtureSourceType,
-  type PremiumChannelInput,
-} from "./premiumFixtures";
+import { checkFixtureRefs } from "./fixtureSources";
+import { listFixtures, updateFixture } from "./fixtureStore";
+import type { FixtureChannelRef } from "./fixtures";
+import type { PremiumChannelInput } from "./premiumFixtures";
 
 export interface PremiumChannelRecord {
   _id: string;
@@ -75,61 +70,10 @@ export interface PremiumBoardChannel {
   proxyChannelKey: string;
 }
 
-export interface FixtureRecord {
-  _id: string;
-  /** The card's title, as the admin wrote it. */
-  title: string;
-  sport: "football" | "cricket";
-  teamA: string;
-  teamB: string;
-  teamALogo: string;
-  teamBLogo: string;
-  competition: string;
-  startsAt: string;
-  durationMinutes: number;
-  /** Every channel this match can be watched on, each naming the tier it comes from. */
-  channels: FixtureChannelRef[];
-  visible: boolean;
-  /** Derived from the kickoff clock, so the admin sees the badge a card would show. */
-  phase: "upcoming" | "live" | "finished";
-  createdAt: string;
-  updatedAt: string;
-}
-
 /** Rail order: the admin's own numbering first, then the name. */
 function bySortOrder(a: PremiumChannelRecord, b: PremiumChannelRecord): number {
   if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
   return a.name.localeCompare(b.name);
-}
-
-/**
- * Refuse a premium write that has nowhere to persist.
- *
- * This tier's local store is developer data: on a deployment there is no
- * `data/premium-store.json` to fall back to, and the filesystem cannot be written
- * to, so an accepted create would be answered with a fresh id and then lost when
- * the lambda cooled down — the panel would show a row that no viewer's request can
- * ever read back, and an accepted delete would report a row gone that is still on
- * air. Off a deployment the same fallback is the entire point of running locally,
- * so only a deployment is required to have a database (see `mustUseDatabase`).
- *
- * Reads are deliberately not guarded: a list that answers from an empty local tier
- * advertises nothing, and the admin routes already report which store they read
- * from (`dbMode`). A 503 there would turn a database blip into a blank panel with
- * less evidence, not more.
- *
- * The thrown `status` is what every one of these routes' own `fail()` already maps
- * into its response, so the refusal arrives as a 503 carrying this sentence.
- *
- * Exported because `lib/fixtureSources.ts` answers the same question about a channel list the
- * writes consult before they accept a reference, and must refuse for the same reason.
- */
-export function requirePersistingStore(
-  conn: typeof mongoose | null,
-  action: string
-): void {
-  if (conn || !mustUseDatabase()) return;
-  throw Object.assign(new Error(`Database unavailable — ${action}`), { status: 503 });
 }
 
 function toPremiumRecord(row: {
@@ -187,84 +131,6 @@ function readBackupStreamIds(raw: unknown): string[] {
     out.push(value);
   }
   return out;
-}
-
-/**
- * The channels a stored row says this match can be watched on, in the order it stored them.
- *
- * Two shapes have to read as one answer. A row written after a card could name several
- * channels carries the list; a row written before it carries only `premiumChannelId`, and that
- * field always named a premium row, so it reads as one secured reference instead of being
- * dropped — an existing board keeps showing its matches on the channel the admin chose.
- * An entry that is not an id plus a known source is skipped rather than guessed at.
- */
-function readFixtureChannels(row: {
-  channels?: unknown;
-  premiumChannelId?: string | null;
-}): FixtureChannelRef[] {
-  const refs: FixtureChannelRef[] = [];
-  const stored = Array.isArray(row.channels) ? row.channels : [];
-  for (const entry of stored) {
-    const record = entry as { channelId?: unknown; sourceType?: unknown };
-    const channelId = typeof record?.channelId === "string" ? record.channelId.trim() : "";
-    const sourceType =
-      typeof record?.sourceType === "string" ? record.sourceType.trim().toLowerCase() : "";
-    if (!channelId) continue;
-    if (!(FIXTURE_SOURCE_TYPES as readonly string[]).includes(sourceType)) continue;
-    const typed = sourceType as FixtureSourceType;
-    if (refs.some((ref) => ref.channelId === channelId && ref.sourceType === typed)) continue;
-    refs.push({ channelId, sourceType: typed });
-  }
-
-  const legacy = typeof row.premiumChannelId === "string" ? row.premiumChannelId.trim() : "";
-  if (legacy && !refs.some((ref) => ref.sourceType === "secured" && ref.channelId === legacy)) {
-    refs.push({ channelId: legacy, sourceType: "secured" });
-  }
-  return refs;
-}
-
-/**
- * A stored row — in either shape — as the rest of the tier reads it.
- */
-function toFixtureRecord(
-  row: {
-    _id: unknown;
-    title?: string;
-    sport?: string;
-    teamA?: string;
-    teamB?: string;
-    teamALogo?: string;
-    teamBLogo?: string;
-    competition?: string;
-    startsAt?: Date;
-    durationMinutes?: number;
-    channels?: unknown;
-    premiumChannelId?: string | null;
-    visible?: boolean;
-    createdAt?: Date;
-    updatedAt?: Date;
-  },
-  now: Date
-): FixtureRecord {
-  const startsAt = row.startsAt ? new Date(row.startsAt) : now;
-  const duration = typeof row.durationMinutes === "number" ? row.durationMinutes : 120;
-  return {
-    _id: String(row._id),
-    title: row.title || "",
-    sport: row.sport === "cricket" ? "cricket" : "football",
-    teamA: row.teamA || "",
-    teamB: row.teamB || "",
-    teamALogo: row.teamALogo || "",
-    teamBLogo: row.teamBLogo || "",
-    competition: row.competition || "",
-    startsAt: startsAt.toISOString(),
-    durationMinutes: duration,
-    channels: readFixtureChannels(row),
-    visible: row.visible === true,
-    phase: fixturePhase(startsAt, duration, now),
-    createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
-    updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : "",
-  };
 }
 
 export async function listPremiumChannels(): Promise<PremiumChannelRecord[]> {
@@ -476,7 +342,15 @@ export async function updatePremiumChannel(
  * action, so a single list is cheaper than a query per card.
  */
 async function clearFixtureLinks(channelId: string): Promise<void> {
-  const fixtures = await listFixtures();
+  let fixtures: Awaited<ReturnType<typeof listFixtures>>;
+  try {
+    fixtures = await listFixtures();
+  } catch {
+    // The cards live in the Direct HLS panel's own store, and that store refuses to answer
+    // when the database is out of reach. A channel this tier owns is already gone by then, and
+    // refusing the delete as well would report a row that is still there.
+    return;
+  }
   for (const fixture of fixtures) {
     const kept = fixture.channels.filter(
       (ref) => !(ref.sourceType === "secured" && ref.channelId === channelId)
@@ -508,18 +382,13 @@ export async function deletePremiumChannel(id: string): Promise<boolean> {
   return true;
 }
 
-/** Soonest kickoff first, so the board reads like the schedule it is. */
-function byKickoff(a: FixtureRecord, b: FixtureRecord): number {
-  return a.startsAt.localeCompare(b.startsAt);
-}
-
 /**
  * Which of these ids name a premium channel this store actually has.
  *
- * One pass for a whole list rather than a query per entry, because a fixture write checks every
- * channel on the card. Guarded like a write even though it reads: it is reached only from the two
- * fixture writes, and "channel is not in the premium list" is a wrong diagnosis when the truth is
- * that nothing could be read at all.
+ * One pass for a whole list rather than a query per entry, because a card that names a
+ * premium channel is checked against it. Guarded like a write even though it reads:
+ * "channel is not in the premium list" is a wrong diagnosis when the truth is that nothing
+ * could be read at all.
  */
 export async function existingPremiumChannelIds(ids: string[]): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
@@ -537,103 +406,34 @@ export async function existingPremiumChannelIds(ids: string[]): Promise<Set<stri
   return new Set(ids.filter((id) => present.has(id)));
 }
 
-export async function listFixtures(): Promise<FixtureRecord[]> {
-  const now = new Date();
-  const conn = await connectToDatabase();
-  if (conn) {
-    const rows = await FixtureModel.find().lean();
-    return rows.map((row) => toFixtureRecord(row, now)).sort(byKickoff);
-  }
-  return premiumLocalStore.listFixtures().map((row) => toFixtureRecord(row, now)).sort(byKickoff);
-}
-
 /**
- * One card by id, projected. Returns null when no card carries that id.
+ * The channels of the match card that names a premium channel, in the order the admin set them.
  *
- * A read, and unguarded like the other reads: a card that cannot be found is a card that is not
- * there, which is a fact the editor can act on.
+ * The order is the priority the card is watched on — the first channel on it is the one that is
+ * tried first, and the ones after it are what a failure moves to — so it is read from the card
+ * rather than rebuilt here. Only a published card that has not finished counts: a card nobody
+ * can see is not a reason to move a viewer anywhere.
+ *
+ * A link that names no channel is left out, because a fallback to a channel that is not there is
+ * not a fallback.
  */
-export async function getFixture(id: string): Promise<FixtureRecord | null> {
-  const now = new Date();
-  const conn = await connectToDatabase();
-  if (conn) {
-    if (!mongoose.isValidObjectId(id)) return null;
-    const row = await FixtureModel.findById(id).lean();
-    return row ? toFixtureRecord(row, now) : null;
-  }
-  const local = premiumLocalStore.getFixture(id);
-  return local ? toFixtureRecord(local, now) : null;
-}
+export async function listCardChannelsFor(channelId: string): Promise<FixtureChannelRef[]> {
+  if (!channelId) return [];
+  const fixtures = await listFixtures();
+  const cards = fixtures.filter(
+    (fixture) =>
+      fixture.visible &&
+      fixture.phase !== "finished" &&
+      fixture.channels.some(
+        (ref) => ref.sourceType === "secured" && ref.channelId === channelId
+      )
+  );
+  if (cards.length === 0) return [];
 
-export async function createFixture(input: FixtureInput): Promise<FixtureRecord> {
-  const now = new Date();
-  const conn = await connectToDatabase();
-  requirePersistingStore(conn, "nothing was saved");
-  if (conn) {
-    const created = await FixtureModel.create({
-      title: input.title ?? "",
-      sport: input.sport,
-      teamA: input.teamA,
-      teamB: input.teamB,
-      teamALogo: input.teamALogo,
-      teamBLogo: input.teamBLogo,
-      competition: input.competition,
-      startsAt: input.startsAt,
-      durationMinutes: input.durationMinutes,
-      channels: input.channels,
-      visible: input.visible,
-    });
-    return toFixtureRecord(created.toObject(), now);
-  }
-
-  const record: LocalFixture = {
-    _id: `fx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    title: input.title ?? "",
-    sport: input.sport,
-    teamA: input.teamA,
-    teamB: input.teamB,
-    teamALogo: input.teamALogo,
-    teamBLogo: input.teamBLogo,
-    competition: input.competition,
-    startsAt: input.startsAt,
-    durationMinutes: input.durationMinutes,
-    channels: input.channels,
-    premiumChannelId: null,
-    visible: input.visible,
-    createdAt: now,
-    updatedAt: now,
-  };
-  premiumLocalStore.addFixture(record);
-  return toFixtureRecord(record, now);
-}
-
-export async function updateFixture(
-  id: string,
-  patch: Partial<FixtureInput>
-): Promise<FixtureRecord | null> {
-  const now = new Date();
-  // A row whose list was just edited owns that list: the single-column link it may still carry
-  // is cleared in the same write, or re-reading it would put a channel back on the card the
-  // admin just took off.
-  const stored = patch.channels ? { ...patch, premiumChannelId: null } : patch;
-  const conn = await connectToDatabase();
-  requirePersistingStore(conn, "nothing was saved");
-  if (conn) {
-    if (!mongoose.isValidObjectId(id)) return null;
-    const updated = await FixtureModel.findByIdAndUpdate(id, stored, { new: true }).lean();
-    return updated ? toFixtureRecord(updated, now) : null;
-  }
-  const updated = premiumLocalStore.updateFixture(id, stored);
-  return updated ? toFixtureRecord(updated, now) : null;
-}
-
-export async function deleteFixture(id: string): Promise<boolean> {
-  const conn = await connectToDatabase();
-  requirePersistingStore(conn, "nothing was deleted");
-  if (conn) {
-    if (!mongoose.isValidObjectId(id)) return false;
-    const result = await FixtureModel.deleteOne({ _id: id });
-    return result.deletedCount > 0;
-  }
-  return premiumLocalStore.deleteFixture(id);
+  const card = cards[0];
+  const { refused } = await checkFixtureRefs(card.channels);
+  const gone = new Set(
+    refused.map((finding) => `${finding.ref.sourceType}:${finding.ref.channelId}`)
+  );
+  return card.channels.filter((ref) => !gone.has(`${ref.sourceType}:${ref.channelId}`));
 }

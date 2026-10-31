@@ -7,21 +7,20 @@
  * break the card. Three things follow from it, and each is checked here against the real
  * modules:
  *
- *  - the board keeps a match whose channel is gone, and says how many links are missing;
- *  - the admin can still edit that match — a link the card already carried is kept, not
- *    refused, because refusing it would lock the admin out of the card they are fixing;
+ *  - the editor is told which of its links name no channel;
+ *  - the admin can still edit a card whose link has gone stale — a link the card already carried
+ *    is kept, not refused, because refusing it would lock the admin out of the card they are
+ *    fixing;
  *  - deleting a channel takes its link off every card, so a dangling id does not survive the
  *    one operation that is able to repair it.
  *
- * Nothing here reaches a database or the network. The catalogue is seeded into a temporary
- * directory, the tier writes to its own store file in the same directory, and this project's own
- * `data/` is never read or written.
+ * Nothing here reaches a database or the network: the catalogue and the cards are stood in for
+ * (`tests/helpers/fakeFixtureModel.ts`), and this project's own `data/` is never read or written.
  */
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import Module from "node:module";
-import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 
@@ -45,101 +44,94 @@ nodeModule._resolveFilename = function resolveAppAlias(request: string, ...rest:
 };
 
 const projectCwd = process.cwd();
-const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "freetv-fixture-stale-"));
-const projectStoreFiles = {
-  premium: path.join(projectCwd, "data", "premium-store.json"),
-  catalogue: path.join(projectCwd, "data", "store.json"),
-};
-const existedBefore = {
-  premium: fs.existsSync(projectStoreFiles.premium),
-  catalogue: fs.existsSync(projectStoreFiles.catalogue),
-};
 
-process.chdir(sandbox);
 delete process.env.MONGODB_URI;
 delete process.env.VERCEL;
 process.env.ADMIN_SECRET_KEY = "stale-links-test-secret";
 
-/** A pinned catalogue row and an unpinned one — the two ways a direct link can fail. */
+/** A catalogue row the app is showing, and one it is deliberately not. */
 const PINNED = "6ab5c72de29c995275489e5c";
 const UNPINNED = "6ab5c72de29c995275489e5d";
+const GONE = "6ab5c72de29c995275489e5e";
 const STAMPED_AT = new Date("2026-10-27T09:00:00.000Z").toISOString();
 
-const catalogueFile = path.join(sandbox, "data", "store.json");
-fs.mkdirSync(path.dirname(catalogueFile), { recursive: true });
-fs.writeFileSync(
-  catalogueFile,
-  JSON.stringify({
-    channels: [
-      {
-        _id: PINNED,
-        name: "Pinned Sports One",
-        normalizedName: "pinned-sports-one",
-        logo: "",
-        category: "Sports",
-        isPinned: true,
-        priorityOrder: 3,
-        createdAt: STAMPED_AT,
-        updatedAt: STAMPED_AT,
-      },
-      {
-        _id: UNPINNED,
-        name: "Hidden Sports Two",
-        normalizedName: "hidden-sports-two",
-        logo: "",
-        category: "Sports",
-        isPinned: false,
-        priorityOrder: 1,
-        createdAt: STAMPED_AT,
-        updatedAt: STAMPED_AT,
-      },
-    ],
-    streams: [],
-  }),
-  "utf-8"
-);
+const { installFakeDatabase } = require("./helpers/fakeFixtureModel") as typeof import("./helpers/fakeFixtureModel");
+
+const db = installFakeDatabase({
+  channels: [
+    {
+      _id: PINNED,
+      name: "Pinned Sports One",
+      normalizedName: "pinned-sports-one",
+      logo: "",
+      category: "Sports",
+      isPinned: true,
+      priorityOrder: 3,
+      createdAt: STAMPED_AT,
+      updatedAt: STAMPED_AT,
+    },
+    {
+      _id: UNPINNED,
+      name: "Hidden Sports Two",
+      normalizedName: "hidden-sports-two",
+      logo: "",
+      category: "Sports",
+      isPinned: false,
+      priorityOrder: 1,
+      createdAt: STAMPED_AT,
+      updatedAt: STAMPED_AT,
+    },
+  ],
+});
+
+/**
+ * The premium tier's own rows, as far as the delete below reaches them: one channel, and the
+ * one call a delete makes on it.
+ */
+const premiumModule = require("@/models/PremiumChannel") as { default: unknown };
+const originalPremiumModel = premiumModule.default;
+let premiumRows: { _id: string }[] = [];
+premiumModule.default = {
+  async deleteOne(filter: { _id?: string }) {
+    const index = premiumRows.findIndex((row) => String(row._id) === String(filter?._id));
+    if (index < 0) return { deletedCount: 0 };
+    premiumRows.splice(index, 1);
+    return { deletedCount: 1 };
+  },
+};
+
+after(() => {
+  premiumModule.default = originalPremiumModel;
+  db.restore();
+});
 
 type FixtureSources = typeof import("../lib/fixtureSources");
 type PremiumStore = typeof import("../lib/premiumStore");
-type PremiumFixtures = typeof import("../lib/premiumFixtures");
-type InMemoryStore = typeof import("../lib/inMemoryStore");
+type FixtureStore = typeof import("../lib/fixtureStore");
 
 const sources: FixtureSources = require("../lib/fixtureSources");
 const store: PremiumStore = require("../lib/premiumStore");
-const { unresolvedFixtureRefs }: PremiumFixtures = require("../lib/premiumFixtures");
-const { inMemoryDb }: InMemoryStore = require("../lib/inMemoryStore");
-
-after(() => {
-  process.chdir(projectCwd);
-  fs.rmSync(sandbox, { recursive: true, force: true });
-});
-
-/** The catalogue exactly as it stands, so a later comparison means "not one field moved". */
-const catalogueSnapshot = () => JSON.stringify(inMemoryDb.getChannels());
+const fixtureStore: FixtureStore = require("../lib/fixtureStore");
 
 // --- the editor's own question: which links name a channel it cannot see? ---
 
-test("a link is unresolved only against the tier it names", () => {
-  const known = { direct: [PINNED], secured: ["pc_one"] };
+/** The panel's own rule, read from the module it uses. */
+const unresolvedRefs = (
+  refs: { channelId: string; sourceType: "direct" | "secured" }[],
+  known: { direct: string[] }
+) => require("../lib/fixtures").unresolvedFixtureRefs(refs, known);
 
-  assert.deepEqual(unresolvedFixtureRefs([{ channelId: PINNED, sourceType: "direct" }], known), []);
-  assert.deepEqual(unresolvedFixtureRefs([{ channelId: "pc_one", sourceType: "secured" }], known), []);
+test("a link is unresolved only against the list it names", () => {
+  const known = { direct: [PINNED] };
 
-  // The same id in the other tier is a different channel, so it is not resolved by the first
-  // tier's list. A link is looked for where it says it came from and nowhere else.
-  assert.deepEqual(unresolvedFixtureRefs([{ channelId: PINNED, sourceType: "secured" }], known), [
-    { channelId: PINNED, sourceType: "secured" },
+  assert.deepEqual(unresolvedRefs([{ channelId: PINNED, sourceType: "direct" }], known), []);
+  assert.deepEqual(unresolvedRefs([{ channelId: GONE, sourceType: "direct" }], known), [
+    { channelId: GONE, sourceType: "direct" },
   ]);
-  assert.deepEqual(unresolvedFixtureRefs([{ channelId: "pc_one", sourceType: "direct" }], known), [
-    { channelId: "pc_one", sourceType: "direct" },
-  ]);
 
-  // An empty list of known channels means every link is unresolved — the lists are the answer,
-  // and there is no second place to look.
-  assert.equal(unresolvedFixtureRefs([{ channelId: PINNED, sourceType: "direct" }], {
-    direct: [],
-    secured: [],
-  }).length, 1);
+  // A link from the other tier is not judged against the catalogue's list: it names no channel
+  // *there*, and a card may still carry one from before this panel owned it.
+  assert.deepEqual(unresolvedRefs([{ channelId: "pc_one", sourceType: "secured" }], known), []);
 });
 
 // --- the write's question: refused, or stale? ---
@@ -147,7 +139,7 @@ test("a link is unresolved only against the tier it names", () => {
 test("a link the card already carried is stale, and a link the admin is adding is refused", async () => {
   const refs = [
     { channelId: PINNED, sourceType: "direct" as const },
-    { channelId: "pc_ghost", sourceType: "secured" as const },
+    { channelId: GONE, sourceType: "direct" as const },
     { channelId: UNPINNED, sourceType: "direct" as const },
   ];
 
@@ -155,10 +147,10 @@ test("a link the card already carried is stale, and a link the admin is adding i
   // create is held to.
   const fresh = await sources.checkFixtureRefs(refs);
   assert.deepEqual(
-    fresh.refused.map(({ ref, reason }) => `${ref.channelId}/${ref.sourceType}/${reason}`),
+    fresh.refused.map(({ ref, reason }) => `${ref.channelId}/${reason}`),
     [
-      "pc_ghost/secured/is not a channel in the secured list",
-      `${UNPINNED}/direct/is not on the public channel list`,
+      `${GONE}/is not a channel on the direct catalogue`,
+      `${UNPINNED}/is not on the public channel list`,
     ]
   );
   assert.deepEqual(fresh.stale, []);
@@ -168,126 +160,58 @@ test("a link the card already carried is stale, and a link the admin is adding i
   const carried = await sources.checkFixtureRefs(refs, refs);
   assert.deepEqual(carried.refused, []);
   assert.deepEqual(
-    carried.stale.map(({ ref, reason }) => `${ref.channelId}/${ref.sourceType}/${reason}`),
+    carried.stale.map(({ ref, reason }) => `${ref.channelId}/${reason}`),
     [
-      "pc_ghost/secured/is not a channel in the secured list",
-      `${UNPINNED}/direct/is not on the public channel list`,
+      `${GONE}/is not a channel on the direct catalogue`,
+      `${UNPINNED}/is not on the public channel list`,
     ]
   );
 
   // The split is per link, not per request: one link the admin is adding is refused even while
   // another link on the same card is merely stale.
   const mixed = await sources.checkFixtureRefs(
-    [...refs, { channelId: "pc_never", sourceType: "secured" as const }],
+    [...refs, { channelId: "6ab5c72de29c995275489fff", sourceType: "direct" as const }],
     refs
   );
   assert.deepEqual(
     mixed.refused.map(({ ref }) => ref.channelId),
-    ["pc_never"]
+    ["6ab5c72de29c995275489fff"]
   );
   assert.equal(mixed.stale.length, 2);
 });
 
 // --- deleting a channel repairs every card that named it ---
 
-test("deleting a channel takes its link off every card and leaves the match alone", async () => {
-  const channel = await store.createPremiumChannel({
-    name: "Example Sports HD",
-    category: "Premium",
-    logoUrl: "",
-    active: true,
-    sortOrder: 99,
-    note: "",
-    proxyChannelKey: "",
-  });
+test("deleting a premium channel takes its link off every card and leaves the match alone", async () => {
+  premiumRows = [{ _id: "64b5c72de29c995275489e01" }];
 
-  const fixture = await store.createFixture({
+  db.fixtures.push({
+    _id: "64b5c72de29c995275489e10",
+    title: "Mohammedan v Bashundhara",
     sport: "football",
     teamA: "Mohammedan",
     teamB: "Bashundhara",
     teamALogo: "",
     teamBLogo: "",
     competition: "BPL",
-    startsAt: new Date("2026-10-27T16:00:00.000Z"),
+    startsAt: new Date("2026-11-05T16:00:00.000Z"),
     durationMinutes: 120,
     channels: [
-      { channelId: channel._id, sourceType: "secured" },
+      { channelId: "64b5c72de29c995275489e01", sourceType: "secured" },
       { channelId: PINNED, sourceType: "direct" },
     ],
     visible: true,
   });
 
-  assert.equal(await store.deletePremiumChannel(channel._id), true);
+  assert.equal(await store.deletePremiumChannel("64b5c72de29c995275489e01"), true);
 
   // The match is still there — only the admin decides a match is gone — and the link to the
   // deleted channel is not.
-  const cards = await store.listFixtures();
-  const kept = cards.find((entry) => entry._id === fixture._id);
+  const cards = await fixtureStore.listFixtures();
+  const kept = cards.find((entry) => entry._id === "64b5c72de29c995275489e10");
   assert.ok(kept, "deleting a channel must not delete the match");
   assert.equal(kept.teamA, "Mohammedan");
   assert.deepEqual(kept.channels, [{ channelId: PINNED, sourceType: "direct" }]);
-
-  // The direct link is untouched: the catalogue is not this tier's to edit.
-  assert.equal(catalogueSnapshot().includes("Pinned Sports One"), true);
-});
-
-test("a card written in the old single-channel shape loses its link as well", async () => {
-  const file = path.join(sandbox, "data", "premium-store.json");
-  const written = JSON.parse(fs.readFileSync(file, "utf-8"));
-  written.premiumChannels.push({
-    _id: "pc_legacy",
-    name: "Legacy Sports HD",
-    category: "Premium",
-    logoUrl: "",
-    sourceUrl: "",
-    headers: { userAgent: "", referer: "" },
-    proxyChannelKey: "",
-    proxyPushedAt: null,
-    active: true,
-    sortOrder: 99,
-    note: "",
-    createdAt: STAMPED_AT,
-    updatedAt: STAMPED_AT,
-  });
-  written.fixtures.push({
-    _id: "fx_legacy",
-    sport: "football",
-    teamA: "Legacy A",
-    teamB: "Legacy B",
-    teamALogo: "",
-    teamBLogo: "",
-    competition: "Old Cup",
-    startsAt: new Date("2026-10-27T16:00:00.000Z"),
-    durationMinutes: 120,
-    premiumChannelId: "pc_legacy",
-    visible: true,
-    createdAt: STAMPED_AT,
-    updatedAt: STAMPED_AT,
-  });
-  fs.writeFileSync(file, JSON.stringify(written), "utf-8");
-
-  // Re-read the tier through a fresh module graph, so the store's own loader runs against the
-  // file above rather than against what this process already holds.
-  const shared = globalThis as unknown as Record<string, unknown>;
-  shared.__freetv_premium_channels = undefined;
-  shared.__freetv_premium_fixtures = undefined;
-  for (const request of ["../lib/premiumLocalStore", "../lib/premiumStore"]) {
-    delete require.cache[require.resolve(request)];
-  }
-  const fresh: PremiumStore = require("../lib/premiumStore");
-
-  assert.equal(await fresh.deletePremiumChannel("pc_legacy"), true);
-
-  const cards = await fresh.listFixtures();
-  const legacy = cards.find((entry) => entry._id === "fx_legacy");
-  assert.ok(legacy, "the card written in the old shape is still on the board");
-  assert.deepEqual(legacy.channels, []);
-
-  // The old column is cleared too, so a re-read cannot bring the link back.
-  const onDisk = JSON.parse(fs.readFileSync(file, "utf-8")).fixtures.find(
-    (row: { _id: string }) => row._id === "fx_legacy"
-  );
-  assert.equal(onDisk.premiumChannelId, null);
 });
 
 // --- the route the admin actually calls ---
@@ -314,24 +238,26 @@ async function patch(
 }
 
 test("the admin can still change a card whose link has gone stale", async () => {
-  const card = await store.createFixture({
+  db.fixtures.push({
+    _id: "64b5c72de29c995275489e11",
+    title: "Dhaka Tigers v Chattogram Challengers",
     sport: "cricket",
     teamA: "Dhaka Tigers",
     teamB: "Chattogram Challengers",
     teamALogo: "",
     teamBLogo: "",
     competition: "BPL",
-    startsAt: new Date("2026-10-27T16:00:00.000Z"),
+    startsAt: new Date("2026-11-05T16:00:00.000Z"),
     durationMinutes: 120,
-    channels: [{ channelId: "pc_ghost", sourceType: "secured" }],
+    channels: [{ channelId: GONE, sourceType: "direct" }],
     visible: false,
   });
 
   // The link the card carries names no channel — it is kept, and the rest of the edit goes
   // through. Before this, the whole save was refused and the card could not be edited at all.
-  const answer = await patch(card._id, {
+  const answer = await patch("64b5c72de29c995275489e11", {
     competition: "BPL 2026",
-    channels: [{ channelId: "pc_ghost", sourceType: "secured" }],
+    channels: [{ channelId: GONE, sourceType: "direct" }],
   });
   assert.equal(answer.status, 200, `the save was refused: ${JSON.stringify(answer.body)}`);
   assert.equal(answer.body.success, true);
@@ -340,40 +266,42 @@ test("the admin can still change a card whose link has gone stale", async () => 
   // The card kept its stale link rather than losing it: a channel that comes back is on the
   // card again with no repair step in between.
   assert.deepEqual((answer.body.fixture as { channels: unknown[] }).channels, [
-    { channelId: "pc_ghost", sourceType: "secured" },
+    { channelId: GONE, sourceType: "direct" },
   ]);
 });
 
 test("the admin is still refused a link that names no channel", async () => {
-  const card = await store.createFixture({
+  db.fixtures.push({
+    _id: "64b5c72de29c995275489e12",
+    title: "One v Two",
     sport: "football",
     teamA: "One",
     teamB: "Two",
     teamALogo: "",
     teamBLogo: "",
     competition: "",
-    startsAt: new Date("2026-10-27T16:00:00.000Z"),
+    startsAt: new Date("2026-11-05T16:00:00.000Z"),
     durationMinutes: 120,
     channels: [{ channelId: PINNED, sourceType: "direct" }],
     visible: false,
   });
 
-  const answer = await patch(card._id, {
+  const answer = await patch("64b5c72de29c995275489e12", {
     channels: [
       { channelId: PINNED, sourceType: "direct" },
-      { channelId: "pc_never", sourceType: "secured" },
+      { channelId: "6ab5c72de29c995275489fff", sourceType: "direct" },
     ],
   });
   assert.equal(answer.status, 400);
   assert.equal(answer.body.success, false);
   assert.ok(
-    String(answer.body.error).includes("pc_never"),
+    String(answer.body.error).includes("6ab5c72de29c995275489fff"),
     `the refusal must name the link: ${String(answer.body.error)}`
   );
 
   // And the card is unchanged: a refused write writes nothing.
-  const cards = await store.listFixtures();
-  const stored = cards.find((entry) => entry._id === card._id);
+  const cards = await fixtureStore.listFixtures();
+  const stored = cards.find((entry) => entry._id === "64b5c72de29c995275489e12");
   assert.deepEqual(stored?.channels, [{ channelId: PINNED, sourceType: "direct" }]);
 });
 
@@ -383,10 +311,7 @@ test("the panel shows a link it cannot see, so the admin can take it off", () =>
   // The panel is a client component and this project has no renderer for it, so the check is
   // made against its source: the rule that finds the missing links has to be the one the
   // panel asks, and the result has to reach the screen.
-  const source = fs.readFileSync(
-    path.join(projectCwd, "components", "premium-admin", "FixturePanel.tsx"),
-    "utf-8"
-  );
+  const source = fs.readFileSync(path.join(projectCwd, "components", "FixturePanel.tsx"), "utf-8");
   assert.ok(
     source.includes("unresolvedFixtureRefs"),
     "the panel has to ask which of its links name no channel"
@@ -394,7 +319,13 @@ test("the panel shows a link it cannot see, so the admin can take it off", () =>
   assert.ok(source.includes("missingLinks"), "the missing links have to reach the screen");
 });
 
-test("this run never touched this project's own data files", () => {
-  assert.equal(fs.existsSync(projectStoreFiles.premium), existedBefore.premium);
-  assert.equal(fs.existsSync(projectStoreFiles.catalogue), existedBefore.catalogue);
+test("the premium panel no longer carries a fixture editor", () => {
+  // The match card is the Direct HLS panel's own row now, so the premium panel must not offer a
+  // second place to enter one.
+  const source = fs.readFileSync(
+    path.join(projectCwd, "components", "premium-admin", "PremiumAdminDashboard.tsx"),
+    "utf-8"
+  );
+  assert.equal(source.includes("FixturePanel"), false);
+  assert.equal(fs.existsSync(path.join(projectCwd, "components", "premium-admin", "FixturePanel.tsx")), false);
 });

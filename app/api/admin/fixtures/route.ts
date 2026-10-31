@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest, isAuthorizedAdmin } from "@/lib/adminAuth";
-import { connectToDatabase } from "@/lib/db";
-import { createFixture, listFixtures } from "@/lib/premiumStore";
+import { createFixture, listFixtures } from "@/lib/fixtureStore";
 import { describeUnknownFixtureRefs, unknownFixtureRefs } from "@/lib/fixtureSources";
-import { validateFixtureInput, type FixtureChannelRef } from "@/lib/premiumFixtures";
+import { validateFixtureInput, type FixtureChannelRef } from "@/lib/fixtures";
 
 export const dynamic = "force-dynamic";
 
@@ -35,15 +34,18 @@ async function refRejection(channels: FixtureChannelRef[]): Promise<NextResponse
 /**
  * GET /api/admin/fixtures
  * The whole board, unpublished matches included, soonest kickoff first.
+ *
+ * The cards live in MongoDB and nowhere else, so this answers from the database or it
+ * refuses: a board that read as empty because nothing could be read is a board the admin
+ * would start filling again.
  */
 export async function GET(req: NextRequest) {
   try {
     if (!isAuthorizedAdmin(req)) return unauthorized();
     const fixtures = await listFixtures();
-    const conn = await connectToDatabase();
     return NextResponse.json({
       success: true,
-      dbMode: conn ? "mongodb" : "local",
+      dbMode: "mongodb",
       count: fixtures.length,
       fixtures,
     });

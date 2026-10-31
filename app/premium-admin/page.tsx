@@ -10,7 +10,7 @@ import { AlertCircle, KeyRound, Lock, LogOut, RefreshCw } from "lucide-react";
 const STORAGE_KEY = "freetv_admin_secret";
 
 /**
- * The Secure / Premium & Fixtures admin surface, on its own route.
+ * The Secure / Premium admin surface, on its own route.
  *
  * Verification here goes to `/api/admin/premium/session` only: this page never
  * calls a Direct HLS endpoint, so the tier can be opened, used and signed out of
@@ -98,11 +98,11 @@ export default function PremiumAdminPage() {
                 <Lock className="w-7 h-7" />
               </div>
 
-              <h1 className="text-xl font-bold text-white mb-2">Premium &amp; Fixtures Admin</h1>
+              <h1 className="text-xl font-bold text-white mb-2">Premium Admin</h1>
               <p className="text-xs text-slate-400 mb-6">
                 Enter your{" "}
                 <code className="text-brand-400 font-mono">ADMIN_SECRET_KEY</code> to manage
-                premium sources and match fixtures.
+                premium sources. Match cards are entered in the Direct HLS panel.
               </p>
 
               <form onSubmit={handleVerify} className="space-y-4">

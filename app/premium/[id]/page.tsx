@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
-import { getPublicPremiumChannel } from "@/lib/premiumStore";
-import { listCardChannelsFor } from "@/lib/fixtureSources";
+import { getPublicPremiumChannel, listCardChannelsFor } from "@/lib/premiumStore";
 import PremiumPlayer from "@/components/premium/PremiumPlayer";
 
 export const dynamic = "force-dynamic";

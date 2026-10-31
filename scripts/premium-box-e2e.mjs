@@ -33,7 +33,7 @@
  *      offered again with the stale count back at zero, and a deleted channel's id appears nowhere
  *      in what a viewer is sent. The stale-reference shape itself — a card that keeps a link to a
  *      channel that is gone and survives it as a count — is measured by
- *      tests/premium-fixtures.test.ts, because the local store clears a deleted channel's links on
+ *      tests/fixtures.test.ts, because the local store clears a deleted channel's links on
  *      the way out, which is a thing this run is not allowed to undo from outside the validator.
  *  11. the site is started with **no address at all**, and every claim above is therefore measured
  *      against an address the box published rather than one the site was configured with: a
@@ -1295,7 +1295,7 @@ async function main() {
     // measure the one it lives in: the local store clears a deleted channel's link from every card
     // that named it, so the card ends up naming no channel at all — the one state that does take a
     // match off the board. An Atlas row keeps the reference no delete removed, and its card
-    // survives as a count; that shape is measured by tests/premium-fixtures.test.ts and in the
+    // survives as a count; that shape is measured by tests/fixtures.test.ts and in the
     // browser, because nothing in this run writes a fixture row behind the validator's back.
     section("a card whose channel has been deleted");
     const staleBoard = await getJson(`${site}/api/fixtures`, {});

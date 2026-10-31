@@ -124,6 +124,44 @@ export function mustUseDatabase(): boolean {
 }
 
 /**
+ * Refuse a write that has nowhere to persist.
+ *
+ * Some stores have a local file to fall back on and some do not. A tier with a file can
+ * answer a write off a developer machine and only has to refuse on a deployment, where
+ * the file cannot be written to (`mustUseDatabase`); a tier whose rows live only in
+ * MongoDB has nowhere to answer from at all, so it refuses wherever the database is not
+ * there.
+ *
+ * The thrown `status` is what every one of these routes' own `fail()` already maps into
+ * its response, so the refusal arrives as a 503 carrying this sentence.
+ */
+export function requireDatabase(conn: typeof mongoose | null, action: string): void {
+  if (conn) return;
+  throw Object.assign(new Error(`Database unavailable — ${action}`), { status: 503 });
+}
+
+/**
+ * Refuse a write that has nowhere to persist, on a deployment only.
+ *
+ * This tier's local store is developer data: on a deployment there is no
+ * `data/premium-store.json` to fall back to, and the filesystem cannot be written
+ * to, so an accepted create would be answered with a fresh id and then lost when
+ * the lambda cooled down — the panel would show a row that no viewer's request can
+ * ever read back, and an accepted delete would report a row gone that is still on
+ * air. Off a deployment the same fallback is the entire point of running locally,
+ * so only a deployment is required to have a database (see `mustUseDatabase`).
+ *
+ * Reads are deliberately not guarded: a list that answers from an empty local tier
+ * advertises nothing, and the admin routes already report which store they read
+ * from (`dbMode`). A 503 there would turn a database blip into a blank panel with
+ * less evidence, not more.
+ */
+export function requirePersistingStore(conn: typeof mongoose | null, action: string): void {
+  if (conn || !mustUseDatabase()) return;
+  throw Object.assign(new Error(`Database unavailable — ${action}`), { status: 503 });
+}
+
+/**
  * The response a route should return instead of reaching for the in-memory
  * store: 503 so a client can retry, `no-store` so the edge cannot freeze the
  * outage into 30 seconds of an empty-looking site. Returns null when the caller

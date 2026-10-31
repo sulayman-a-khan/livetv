@@ -67,8 +67,8 @@ export default function AdminPanelChooser({ secretKey }: AdminPanelChooserProps)
             </div>
             <h2 className="text-sm font-bold text-white mt-3">Direct HLS Control Panel</h2>
             <p className="text-[11px] text-slate-400 mt-1">
-              M3U ingestion, stream health checks, sources, pinned channels and the channel
-              catalogue.
+              M3U ingestion, stream health checks, sources, pinned channels, the channel
+              catalogue and the match fixtures the homepage shows.
             </p>
             <span className="flex items-center gap-1 text-[11px] font-bold text-brand-400 mt-3">
               Open panel
@@ -84,12 +84,11 @@ export default function AdminPanelChooser({ secretKey }: AdminPanelChooserProps)
               <ShieldCheck className="w-5 h-5" />
             </div>
             <h2 className="text-sm font-bold text-white mt-3 flex items-center gap-1.5">
-              Secure / Premium &amp; Fixtures
+              Secure / Premium
               <Crown className="w-3.5 h-3.5 text-violet-300" />
             </h2>
             <p className="text-[11px] text-slate-400 mt-1">
-              Premium stream sources and hand-entered match cards, on their own screens and
-              collections.
+              Premium stream sources, on their own screens and collections.
             </p>
             <span className="flex items-center gap-1 text-[11px] font-bold text-violet-300 mt-3">
               <CalendarClock className="w-3.5 h-3.5" />

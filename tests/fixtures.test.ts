@@ -1,12 +1,18 @@
 /**
- * Focused tests for the premium tier's entry rules (`lib/premiumFixtures.ts`) and for what the
+ * Focused tests for the match card's entry rules (`lib/fixtures.ts`) and for what the
  * public board does with them (`lib/fixtureBoard.ts`) — including the links a card holds that no
  * longer name a channel.
  *
- * Run with `npm run test:premium-fixtures` — that compiles the pure rule modules
- * plus this file into `.tmp-tests/` and runs them on Node's own test runner.
- * Nothing here touches MongoDB, the network or a running server; the reads that do belong to the
- * board are counted in `npm run test:fixture-sources`.
+ * Run with `npm run test:fixtures` — that compiles the pure rule modules plus this file into
+ * `.tmp-tests/` and runs them on Node's own test runner. Nothing here touches MongoDB, the
+ * network or a running server; the reads that do belong to the board are counted in
+ * `npm run test:fixture-sources`, and the database half of the store is in
+ * `npm run test:fixture-store`.
+ *
+ * A card names channels from the Direct HLS catalogue, so a new link may only be a catalogue
+ * channel. The board still renders the links of cards written before that rule — the secured
+ * half of the projection is unchanged — which is why the projection tests below still speak of
+ * premium channels.
  */
 
 import assert from "node:assert/strict";
@@ -18,10 +24,9 @@ import {
   fixturePhase,
   minutesBetween,
   toLocalInputValue,
+  unresolvedFixtureRefs,
   validateFixtureInput,
-  validatePremiumChannelInput,
-  validatePremiumSourcePush,
-} from "../lib/premiumFixtures";
+} from "../lib/fixtures";
 import {
   dedupeRefs,
   nextFallbackChannel,
@@ -73,103 +78,6 @@ const DIRECT_UNLISTED: BoardDirectChannel = {
   listed: false,
 };
 
-const GOOD_CHANNEL = {
-  name: "Example Sports HD",
-  proxyChannelKey: "prem-example-sports",
-};
-
-test("a premium channel needs a name, and its box handle must be a lane name", () => {
-  assert.deepEqual(validatePremiumChannelInput({}, true).errors, ["Channel name is required"]);
-
-  // A handle is the only thing a row keeps about where the stream comes from, so it has to
-  // be spellable by the box: a space or a slash would be refused there over an unrelated field.
-  const badKey = validatePremiumChannelInput(
-    { name: "X", proxyChannelKey: "Prem Example/sports" },
-    true
-  );
-  assert.deepEqual(badKey.errors, [
-    "Stream box handle must be 2-64 characters of letters, digits, - or _",
-  ]);
-
-  const good = validatePremiumChannelInput(GOOD_CHANNEL, true);
-  assert.deepEqual(good.errors, []);
-  // The fields the admin left alone arrive as their defaults, so a stored row is
-  // always complete rather than partly absent.
-  assert.equal(good.value.category, "Premium");
-  assert.equal(good.value.active, true);
-  assert.equal(good.value.sortOrder, 99);
-  assert.equal(good.value.proxyChannelKey, "prem-example-sports");
-
-  const noKey = validatePremiumChannelInput({ name: "X" }, true);
-  assert.deepEqual(noKey.errors, []);
-  assert.equal(noKey.value.proxyChannelKey, "");
-
-  // Entered in any case, stored in the box's own.
-  assert.equal(
-    validatePremiumChannelInput({ proxyChannelKey: "Prem-MixEd1" }, false).value.proxyChannelKey,
-    "prem-mixed1"
-  );
-});
-
-test("a patch only validates the keys that were sent", () => {
-  // A single switch flip is the commonest write and must never re-ask for the name.
-  const toggle = validatePremiumChannelInput({ active: false }, false);
-  assert.deepEqual(toggle.errors, []);
-  assert.deepEqual(toggle.value, { active: false });
-
-  // With `creating` the same body is rejected, so a create cannot arrive half-empty.
-  assert.equal(validatePremiumChannelInput({ active: false }, true).errors.length, 1);
-});
-
-test("a rail position outside the form's own range is refused", () => {
-  assert.equal(validatePremiumChannelInput({ sortOrder: 0 }, false).errors.length, 1);
-  assert.equal(validatePremiumChannelInput({ sortOrder: 1000 }, false).errors.length, 1);
-  assert.equal(validatePremiumChannelInput({ sortOrder: 3 }, false).value.sortOrder, 3);
-});
-
-test("a push to the box carries one manifest URL and at most two headers", () => {
-  assert.deepEqual(validatePremiumSourcePush({}).errors, ["Source URL is required"]);
-  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "ftp://host/one.m3u8" }).errors, [
-    "Source URL must be a valid http(s) URL",
-  ]);
-  assert.deepEqual(
-    validatePremiumSourcePush({ sourceUrl: `https://host/${"x".repeat(2100)}` }).errors,
-    ["Source URL must be a valid http(s) URL"]
-  );
-
-  const ok = validatePremiumSourcePush({
-    sourceUrl: "https://host/live/one/index.m3u8?token=abc",
-    userAgent: "Mozilla/5.0",
-    referer: "https://partner.example",
-  });
-  assert.deepEqual(ok.errors, []);
-  // All three keys are always answered, so the route that pushes never has to guess at
-  // an absent header.
-  assert.deepEqual(ok.value, {
-    sourceUrl: "https://host/live/one/index.m3u8?token=abc",
-    userAgent: "Mozilla/5.0",
-    referer: "https://partner.example",
-  });
-
-  // A header value with a line break in it is a second header by the time it reaches the
-  // origin, so it is refused here rather than arriving as an unexplained transport error.
-  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", userAgent: "A\r\nX-Injected: 1" }).errors, [
-    "User-Agent must not contain a line break",
-  ]);
-  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", referer: "/relative" }).errors, [
-    "Referer must be an absolute URL, or empty",
-  ]);
-  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8", referer: "ftp://h" }).errors, [
-    "Referer must be an http(s) URL",
-  ]);
-  // No headers at all is the normal case: the source needs nothing of its own.
-  assert.deepEqual(validatePremiumSourcePush({ sourceUrl: "https://h/a.m3u8" }).value, {
-    sourceUrl: "https://h/a.m3u8",
-    userAgent: "",
-    referer: "",
-  });
-});
-
 const GOOD_FIXTURE = {
   sport: "football",
   teamA: "Mohammedan",
@@ -208,7 +116,7 @@ test("a fixture is football or cricket, needs both teams and a real kickoff", ()
 const firstError = (body: Record<string, unknown>) =>
   validateFixtureInput({ ...GOOD_FIXTURE, channels: body.channels }, true).errors;
 
-test("a card can be linked to one channel, several, or channels from both tiers", () => {
+test("a card links catalogue channels, and only catalogue channels", () => {
   const directOnly = validateFixtureInput(
     { channels: [direct("6ab5c72de29c995275489e5c")] },
     false
@@ -218,19 +126,40 @@ test("a card can be linked to one channel, several, or channels from both tiers"
     { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct" },
   ]);
 
-  const securedOnly = validateFixtureInput({ channels: [secured("pc_one")] }, false);
-  assert.deepEqual(securedOnly.errors, []);
+  // A premium channel is not something this panel can offer any more, so a new link to one is
+  // refused rather than stored: the card would name a channel the Direct HLS catalogue does not
+  // have, and the admin would be editing a board it cannot show.
+  const premiumLink = validateFixtureInput({ channels: [secured("pc_one")] }, false);
+  assert.deepEqual(premiumLink.errors, [
+    "Linked channel 1 must be a Direct HLS channel — a match links catalogue channels only",
+  ]);
 
-  const mixed = validateFixtureInput({
-    channels: [direct("6ab5c72de29c995275489e5c"), secured("pc_one"), secured("pc_two")],
-  }, false);
-  assert.deepEqual(mixed.errors, []);
+  // A link the card already carried is the one exception: it is kept, because dropping it would
+  // silently change a card the admin opened to fix something else, and refusing it would lock
+  // them out of that card entirely.
+  const carried = validateFixtureInput(
+    { channels: [secured("pc_one")] },
+    false,
+    [secured("pc_one")]
+  );
+  assert.deepEqual(carried.errors, []);
+  assert.deepEqual(carried.value.channels, [{ channelId: "pc_one", sourceType: "secured" }]);
+
+  const several = validateFixtureInput(
+    {
+      channels: [
+        direct("6ab5c72de29c995275489e5c"),
+        direct("6ab5c72de29c995275489e5d"),
+      ],
+    },
+    false
+  );
+  assert.deepEqual(several.errors, []);
   // Order is the admin's, not the store's: the card offers the choices in the order they were
   // picked, so the projection must not sort them into a canonical shape.
-  assert.deepEqual(mixed.value.channels, [
+  assert.deepEqual(several.value.channels, [
     { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct" },
-    { channelId: "pc_one", sourceType: "secured" },
-    { channelId: "pc_two", sourceType: "secured" },
+    { channelId: "6ab5c72de29c995275489e5d", sourceType: "direct" },
   ]);
 
   // Nothing linked at all is an answer, not a missing field: a match can be entered with its
@@ -242,25 +171,26 @@ test("a card can be linked to one channel, several, or channels from both tiers"
 
 test("a reference that is not an id plus a known source is refused", () => {
   // The tier is what tells a tap which playback route and which authorization flow it belongs
-  // to, so a card cannot be allowed to guess it.
+  // to, so a card cannot be allowed to guess it — and a card in this panel names catalogue
+  // channels only, so a tier it cannot offer is refused with that fact named.
   assert.deepEqual(firstError({ channels: [{ channelId: "pc_one", sourceType: "premium" }] }), [
-    "Linked channel 1 source must be one of: direct, secured",
+    "Linked channel 1 must be a Direct HLS channel — a match links catalogue channels only",
   ]);
   assert.deepEqual(firstError({ channels: [{ channelId: "pc_one" }] }), [
-    "Linked channel 1 source must be one of: direct, secured",
+    "Linked channel 1 must be a Direct HLS channel — a match links catalogue channels only",
   ]);
   assert.deepEqual(firstError({ channels: ["pc_one"] }), [
     "Linked channel 1 must name a channel id and a source",
   ]);
 
   // An id is an id: no spaces, no path, no URL dressed as one.
-  assert.deepEqual(firstError({ channels: [{ channelId: "https://host/a.m3u8", sourceType: "secured" }] }), [
+  assert.deepEqual(firstError({ channels: [{ channelId: "https://host/a.m3u8", sourceType: "direct" }] }), [
     "Linked channel 1 id is not valid",
   ]);
-  assert.deepEqual(firstError({ channels: [{ channelId: "pc one", sourceType: "secured" }] }), [
+  assert.deepEqual(firstError({ channels: [{ channelId: "pc one", sourceType: "direct" }] }), [
     "Linked channel 1 id is not valid",
   ]);
-  assert.deepEqual(firstError({ channels: [{ channelId: "", sourceType: "secured" }] }), [
+  assert.deepEqual(firstError({ channels: [{ channelId: "", sourceType: "direct" }] }), [
     "Linked channel 1 id is not valid",
   ]);
 
@@ -274,11 +204,13 @@ test("a reference that is not an id plus a known source is refused", () => {
   // The list is a list, and short enough to choose from.
   assert.deepEqual(firstError({ channels: "pc_one" }), ["Linked channel must be a list of channels"]);
   assert.deepEqual(
-    firstError({ channels: Array.from({ length: 9 }, (_, i) => secured(`pc_${i}`)) }),
+    firstError({
+      channels: Array.from({ length: 9 }, (_, i) => direct(`6ab5c72de29c995275489${String(i).padStart(2, "0")}`)),
+    }),
     ["Linked channel can hold at most 8 channels"]
   );
   assert.deepEqual(
-    firstError({ channels: [secured("pc_one"), secured("pc_one")] }),
+    firstError({ channels: [direct("6ab5c72de29c995275489e5c"), direct("6ab5c72de29c995275489e5c")] }),
     ["Linked channel 2 is listed twice"]
   );
 });
@@ -290,19 +222,48 @@ test("a reference carries no key beyond an id and a source, because a card is pu
   assert.deepEqual(
     firstError({
       channels: [
-        { channelId: "pc_one", sourceType: "secured", sourceUrl: "https://origin.internal/a.m3u8" },
+        {
+          channelId: "6ab5c72de29c995275489e5c",
+          sourceType: "direct",
+          sourceUrl: "https://origin.internal/a.m3u8",
+        },
       ],
     }),
     ["Linked channel 1 carries sourceUrl — a linked channel stores only an id and a source"]
   );
   assert.deepEqual(
-    firstError({ channels: [{ channelId: "pc_one", sourceType: "secured", headers: { userAgent: "X" } }] }),
+    firstError({
+      channels: [
+        { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct", headers: { userAgent: "X" } },
+      ],
+    }),
     ["Linked channel 1 carries headers — a linked channel stores only an id and a source"]
   );
   assert.deepEqual(
-    firstError({ channels: [{ channelId: "pc_one", sourceType: "secured", token: "hunter2" }] }),
+    firstError({
+      channels: [
+        { channelId: "6ab5c72de29c995275489e5c", sourceType: "direct", token: "hunter2" },
+      ],
+    }),
     ["Linked channel 1 carries token — a linked channel stores only an id and a source"]
   );
+});
+
+test("the editor is told which of its links name no channel in the list it was given", () => {
+  const known = { direct: ["6ab5c72de29c995275489e5c"] };
+
+  assert.deepEqual(
+    unresolvedFixtureRefs([direct("6ab5c72de29c995275489e5c")], known),
+    []
+  );
+  // A link the catalogue no longer shows is the one thing the editor has to say out loud.
+  assert.deepEqual(
+    unresolvedFixtureRefs([direct("6ab5c72de29c995275489e5d")], known),
+    [direct("6ab5c72de29c995275489e5d")]
+  );
+  // A link from the other tier is not judged here: this list is the catalogue's, and a card may
+  // still carry a premium link from before this panel owned it.
+  assert.deepEqual(unresolvedFixtureRefs([secured("pc_one")], known), []);
 });
 
 test("a title that names two teams is the same answer as the two team fields", () => {
@@ -377,7 +338,7 @@ test("the single-channel field is refused instead of being reinterpreted", () =>
   ]);
   assert.equal(validateFixtureInput({ premiumChannelId: "pc_one" }, false).value.channels, undefined);
   // Reading a row that still holds it is a different question, and is answered in
-  // `tests/premium-store.test.ts`.
+  // `tests/fixture-store.test.ts`.
 });
 
 test("a fixture is upcoming before kickoff, live until its length runs out", () => {
@@ -1196,7 +1157,14 @@ test("the board asks each tier once, for the ids its cards actually name", () =>
     now,
     true
   );
-  assert.equal(board.reduce((total, card) => total + card.staleReferences, 0), 1);
+  // Two of them, not one: `pc_gone` and `pc_three` both name no row behind them, and each card
+  // counts its own. A card whose channel is delisted is not one of these — it is still named, so
+  // it is a choice the viewer can be told about rather than a link that has gone.
+  assert.equal(board.reduce((total, card) => total + card.staleReferences, 0), 2);
+  assert.deepEqual(
+    board.map((card) => card.staleReferences),
+    [0, 1, 0, 1]
+  );
 });
 
 test("a channel that cannot play moves to the next one on the card, in the card's order", () => {

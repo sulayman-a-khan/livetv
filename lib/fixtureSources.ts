@@ -1,23 +1,22 @@
 /**
  * The read-only door between a fixture card and the channels it can name.
  *
- * A fixture may now point at a channel from either tier, and the Direct HLS catalogue is a
- * protected existing system, so this module is the only place the premium tier looks at it —
- * and it only ever looks. It selects ids, names and logos, and calls no write method on the
+ * A card names channels from the Direct HLS catalogue, and that catalogue is a protected
+ * existing system, so this module is the only place the fixture tier looks at it — and it
+ * only ever looks. It selects ids, names and logos, and calls no write method on the
  * catalogue's model or its local store; a fixture edit can therefore never change a direct
  * channel, its links, its health bookkeeping or its pin state.
  *
  * An id alone is not enough to know where to look, which is why every reference carries the
- * tier it came from (`sourceType` in `lib/premiumFixtures.ts`) rather than being searched for
- * in both lists.
+ * tier it came from (`sourceType` in `lib/fixtures.ts`) rather than being searched for in
+ * both lists.
  */
 
 import mongoose from "mongoose";
 import Channel from "@/models/Channel";
-import { connectToDatabase } from "./db";
+import { connectToDatabase, requirePersistingStore } from "./db";
 import { inMemoryDb } from "./inMemoryStore";
-import { existingPremiumChannelIds, listFixtures, requirePersistingStore } from "./premiumStore";
-import type { FixtureChannelRef, FixtureSourceType } from "./premiumFixtures";
+import type { FixtureChannelRef, FixtureSourceType } from "./fixtures";
 
 /** One channel an admin may link a match to, as the editor shows it. */
 export interface FixtureSourceOption {
@@ -95,7 +94,7 @@ export async function listDirectChannelOptions(): Promise<FixtureSourceOption[]>
 export async function listDirectChannelsByIds(ids: string[]): Promise<BoardDirectRow[]> {
   if (ids.length === 0) return [];
   const conn = await connectToDatabase();
-  // Guarded like a write, for the same reason the premium check is: this answers both a fixture
+  // Guarded like a write, for the same reason: this answers both a fixture
   // write and the public board, and "that channel does not exist" is the wrong sentence when the
   // truth is that nothing could be read at all.
   requirePersistingStore(conn, "the channel catalogue could not be checked");
@@ -147,41 +146,9 @@ export function describeUnknownFixtureRefs(unknown: FixtureRefFinding[]): string
 }
 
 /**
- * The channels of the match card that names a premium channel, in the order the admin set them.
- *
- * The order is the priority the card is watched on — the first channel on it is the one that is
- * tried first, and the ones after it are what a failure moves to — so it is read from the card
- * rather than rebuilt here. Only a published card that has not finished counts: a card nobody
- * can see is not a reason to move a viewer anywhere.
- *
- * A link that names no channel is left out, because a fallback to a channel that is not there is
- * not a fallback.
- */
-export async function listCardChannelsFor(channelId: string): Promise<FixtureChannelRef[]> {
-  if (!channelId) return [];
-  const fixtures = await listFixtures();
-  const cards = fixtures.filter(
-    (fixture) =>
-      fixture.visible &&
-      fixture.phase !== "finished" &&
-      fixture.channels.some(
-        (ref) => ref.sourceType === "secured" && ref.channelId === channelId
-      )
-  );
-  if (cards.length === 0) return [];
-
-  const card = cards[0];
-  const { refused } = await checkFixtureRefs(card.channels);
-  const gone = new Set(
-    refused.map((finding) => `${finding.ref.sourceType}:${finding.ref.channelId}`)
-  );
-  return card.channels.filter((ref) => !gone.has(`${ref.sourceType}:${ref.channelId}`));
-}
-
-/**
- * The references a write cannot be accepted for: each one asks its own tier, in one query for
- * that tier, and the answer is the reference rather than an index, so the caller can name the
- * channel that is missing.
+ * The references a write cannot be accepted for: each one asks the catalogue, in one query for
+ * the whole set, and the answer is the reference rather than an index, so the caller can name
+ * the channel that is missing.
  *
  * The direct half distinguishes the two ways a link can be wrong, because they want different
  * repairs: an id with no row behind it is a reference to a channel that is gone, and a row that
@@ -205,7 +172,7 @@ export async function unknownFixtureRefs(refs: FixtureChannelRef[]): Promise<Fix
  * repair itself, which is that a channel that comes back is on the card again with no repair
  * step in between.
  *
- * The two lists come out of the same two queries, so the split costs no extra read.
+ * The two lists come out of the same query, so the split costs no extra read.
  */
 export async function checkFixtureRefs(
   refs: FixtureChannelRef[],
@@ -213,11 +180,7 @@ export async function checkFixtureRefs(
 ): Promise<{ refused: FixtureRefFinding[]; stale: FixtureRefFinding[] }> {
   if (refs.length === 0) return { refused: [], stale: [] };
   const direct = refs.filter((ref) => ref.sourceType === "direct").map((ref) => ref.channelId);
-  const secured = refs.filter((ref) => ref.sourceType === "secured").map((ref) => ref.channelId);
-  const [directRows, knownSecured] = await Promise.all([
-    listDirectChannelsByIds(direct),
-    existingPremiumChannelIds(secured),
-  ]);
+  const directRows = await listDirectChannelsByIds(direct);
   const listedDirect = new Set(directRows.filter((row) => row.listed).map((row) => row._id));
   const existingDirect = new Set(directRows.map((row) => row._id));
   const carriedKeys = new Set(carried.map((ref) => `${ref.sourceType}:${ref.channelId}`));
@@ -225,17 +188,17 @@ export async function checkFixtureRefs(
   const refused: FixtureRefFinding[] = [];
   const stale: FixtureRefFinding[] = [];
   for (const ref of refs) {
-    let reason: string | null = null;
-    if (ref.sourceType === "direct" && !listedDirect.has(ref.channelId)) {
-      reason = existingDirect.has(ref.channelId)
+    // A card links catalogue channels. A reference to the premium tier is one this panel
+    // cannot offer and cannot check, so it is left alone rather than judged here.
+    if (ref.sourceType !== "direct") continue;
+    const reason = listedDirect.has(ref.channelId)
+      ? null
+      : existingDirect.has(ref.channelId)
         ? "is not on the public channel list"
         : "is not a channel on the direct catalogue";
-    } else if (ref.sourceType === "secured" && !knownSecured.has(ref.channelId)) {
-      reason = "is not a channel in the secured list";
-    }
     if (!reason) continue;
     const finding: FixtureRefFinding = { ref, reason };
-    if (carriedKeys.has(`${ref.sourceType}:${ref.channelId}`)) stale.push(finding);
+    if (carriedKeys.has(`direct:${ref.channelId}`)) stale.push(finding);
     else refused.push(finding);
   }
   return { refused, stale };

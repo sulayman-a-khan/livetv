@@ -9,14 +9,6 @@ import { teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/**
- * The height of a card on the phone's stage.
- *
- * Every card on the stage has to be exactly as tall as the one it covers, or the card sliding in
- * would leave a strip of the card underneath showing at the edge.
- */
-const STAGE_HEIGHT = "h-[178px]";
-
 /** The four numbers a countdown is made of, so the two forms of it cannot disagree. */
 function countdownParts(ms: number): { d: number; h: number; m: number; s: number } {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -181,16 +173,10 @@ function noOfferText(choices: FixtureChoice[]): string {
 function FixtureCard({
   fixture,
   now,
-  stage,
   onChoose,
 }: {
   fixture: PublicFixture;
   now: number;
-  /**
-   * The card is on the phone's stage, where every card has to be exactly as tall as the one it
-   * covers — so the height is fixed there instead of being left to the content.
-   */
-  stage: boolean;
   onChoose: (id: string) => void;
 }) {
   const live = fixture.phase === "live";
@@ -208,9 +194,7 @@ function FixtureCard({
 
   const card = (
     <article
-      className={`relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex flex-col gap-2 w-full ${
-        stage ? `${STAGE_HEIGHT} sm:h-auto` : ""
-      }`}
+      className="relative isolate overflow-hidden rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#111d33] via-[#0b1322] to-[#080d18] p-2.5 sm:p-3 flex flex-col gap-2 w-full h-full sm:h-auto"
     >
       {/* The two corners the card carries: the theme's indigo and its mint, both held low so the
           teams stay the brightest thing on the card. */}
@@ -244,8 +228,9 @@ function FixtureCard({
       ) : null}
 
       {/* The two teams, spread across the card: the flags take the two ends and the middle says
-          when the match begins — or, once it has begun, that it is running now. */}
-      <div className="relative flex items-center justify-between gap-1.5 sm:gap-2">
+          when the match begins — or, once it has begun, that it is running now. The row is pushed
+          down, so the air a taller card leaves lands above the flags and never above the bar. */}
+      <div className="relative mt-auto flex items-center justify-between gap-1.5 sm:gap-2">
         <div className="flex w-[38px] sm:w-[48px] flex-col items-center gap-1">
           <TeamFlag name={fixture.teamA} logo={fixture.teamALogo} />
           <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wide text-white text-center leading-tight line-clamp-2">
@@ -281,8 +266,8 @@ function FixtureCard({
       </div>
 
       {/* The foot of the card: the countdown for a match that has not started, and the way in for
-          one that has. It is pushed to the bottom so the clocks of a row of cards line up. */}
-      <div className="relative mt-auto flex items-center justify-center gap-1.5 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
+          one that has. It sits directly under the teams, so nothing opens up between them. */}
+      <div className="relative flex items-center justify-center gap-1.5 rounded-lg border border-slate-800/80 bg-black/30 px-2 py-1.5">
         {live ? (
           noOffer ? (
             <span className="text-center text-[9px] sm:text-[10px] font-bold text-amber-300/90">
@@ -315,7 +300,7 @@ function FixtureCard({
     return (
       <Link
         href={fixture.watchPath}
-        className="block text-left transition-transform active:scale-[0.99]"
+        className="block h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </Link>
@@ -328,7 +313,7 @@ function FixtureCard({
         type="button"
         onClick={() => onChoose(fixture.id)}
         aria-haspopup="dialog"
-        className="block text-left transition-transform active:scale-[0.99]"
+        className="block h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </button>
@@ -431,34 +416,30 @@ export default function FixtureBoard({ children }: { children: ReactNode }) {
           the row starts at the page's left edge and nothing needs a margin to be narrower. */}
       <div className="grid gap-2 sm:gap-3 grid-cols-2 lg:grid-cols-4">
         {/* The first card keeps its place and is never covered by anything. */}
-        <FixtureCard
-          key={fixtures[0].id}
-          fixture={fixtures[0]}
-          now={now}
-          stage={stage}
-          onChoose={setChoosingId}
-        />
+        <FixtureCard key={fixtures[0].id} fixture={fixtures[0]} now={now} onChoose={setChoosingId} />
 
         {turns > 0 ? (
           /* The stage: on a phone it is the second column, and the cards take turns on it; from
-              a tablet up it is no box at all, and its cards are the rest of the row. */
+              a tablet up it is no box at all, and its cards are the rest of the row. On the phone
+              the cards share one grid cell, so the cell is as tall as the tallest of them and
+              every card covers the one it replaces down to the last pixel. */
           <div
             className={`${
-              stage ? `relative overflow-hidden ${STAGE_HEIGHT}` : ""
+              stage ? "relative grid grid-cols-1 overflow-hidden" : ""
             } sm:contents`}
           >
             {fixtures.slice(1).map((fixture, index) => (
               <div
                 key={fixture.id}
-                className={
+                className={`h-full ${
                   stage
-                    ? `absolute inset-0 transition-transform duration-700 ease-out sm:static sm:translate-x-0 ${
+                    ? `max-sm:[grid-area:1/1] transition-transform duration-700 ease-out sm:translate-x-0 ${
                         index === onStage ? "z-10 translate-x-0" : "z-0 translate-x-full"
                       }`
                     : ""
-                }
+                }`}
               >
-                <FixtureCard fixture={fixture} now={now} stage={stage} onChoose={setChoosingId} />
+                <FixtureCard fixture={fixture} now={now} onChoose={setChoosingId} />
               </div>
             ))}
           </div>

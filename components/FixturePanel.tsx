@@ -64,12 +64,10 @@ interface FormState {
   teamB: string;
   teamALogo: string;
   teamBLogo: string;
-  competition: string;
   /** Local wall clock as typed into the datetime field. */
   startsAt: string;
   /** The estimated end, in the same local wall clock the kickoff uses. */
   endsAt: string;
-  durationMinutes: string;
   channels: ChannelRef[];
   visible: boolean;
   /** Whether the team fields are still following the title rather than the admin's own typing. */
@@ -83,10 +81,8 @@ const EMPTY_FORM: FormState = {
   teamB: "",
   teamALogo: "",
   teamBLogo: "",
-  competition: "",
   startsAt: "",
   endsAt: "",
-  durationMinutes: "120",
   channels: [],
   visible: false,
   autoTeams: true,
@@ -410,10 +406,8 @@ export default function FixturePanel({
       teamB: row.teamB,
       teamALogo: row.teamALogo,
       teamBLogo: row.teamBLogo,
-      competition: row.competition,
       startsAt,
       endsAt: endTimeAfter(startsAt, row.durationMinutes),
-      durationMinutes: String(row.durationMinutes),
       channels: row.channels.map((ref) => ({ ...ref })),
       visible: row.visible,
       // A card whose title already names its two teams keeps following that title, so a corrected
@@ -458,24 +452,9 @@ export default function FixturePanel({
     });
   }
 
-  /** An end time is the same fact as the length, so the length is derived from it. */
+  /** The end time is the match's length: it is what says when the card stops being live. */
   function setEnd(value: string) {
-    setForm((current) => {
-      const minutes = minutesBetween(current.startsAt, value);
-      if (minutes === null || minutes <= 0) return { ...current, endsAt: value };
-      return { ...current, endsAt: value, durationMinutes: String(Math.min(720, minutes)) };
-    });
-  }
-
-  /** And the other way round, so the two fields can never disagree about the same match. */
-  function setDuration(value: string) {
-    setForm((current) => {
-      const minutes = Number(value);
-      if (!current.startsAt || !Number.isFinite(minutes) || minutes <= 0) {
-        return { ...current, durationMinutes: value };
-      }
-      return { ...current, durationMinutes: value, endsAt: endTimeAfter(current.startsAt, minutes) };
-    });
+    setForm((current) => ({ ...current, endsAt: value }));
   }
 
   /**
@@ -535,17 +514,11 @@ export default function FixturePanel({
     setSaving(true);
     setMessage(null);
     try {
-      // The end the admin typed is the same fact as the length, and it is the one the card is
-      // judged by — a match is finished when it reaches its end — so the end wins where the two
-      // can disagree, and the length is what is left when no end was typed.
+      // The end the admin typed is the match's length: a match is finished when it reaches its
+      // end, and that end is what the card is judged by. Two hours is the length of a match that
+      // was given no end.
       const fromEnd = minutesBetween(form.startsAt, form.endsAt);
-      const typed = Number(form.durationMinutes);
-      const durationMinutes =
-        fromEnd !== null && fromEnd > 0
-          ? Math.min(720, fromEnd)
-          : Number.isFinite(typed) && typed > 0
-            ? Math.min(720, Math.round(typed))
-            : 120;
+      const durationMinutes = fromEnd !== null && fromEnd > 0 ? Math.min(720, fromEnd) : 120;
       const body = {
         title: form.title,
         sport: form.sport,
@@ -553,7 +526,6 @@ export default function FixturePanel({
         teamB: form.teamB,
         teamALogo: form.teamALogo,
         teamBLogo: form.teamBLogo,
-        competition: form.competition,
         startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : "",
         durationMinutes,
         channels: form.channels,
@@ -712,15 +684,6 @@ export default function FixturePanel({
                 </select>
               </div>
               <div>
-                <label className={LABEL_CLASS}>Competition</label>
-                <input
-                  className={FIELD_CLASS}
-                  value={form.competition}
-                  onChange={(e) => setForm({ ...form, competition: e.target.value })}
-                  placeholder="BPL · Premier League"
-                />
-              </div>
-              <div>
                 <label className={LABEL_CLASS}>Team A</label>
                 <input
                   className={FIELD_CLASS}
@@ -770,17 +733,6 @@ export default function FixturePanel({
                   className={FIELD_CLASS}
                   value={form.endsAt}
                   onChange={(e) => setEnd(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className={LABEL_CLASS}>Length (minutes live)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  className={FIELD_CLASS}
-                  value={form.durationMinutes}
-                  onChange={(e) => setDuration(e.target.value)}
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
                   The match is finished — and the card disappears — when it reaches its end time.

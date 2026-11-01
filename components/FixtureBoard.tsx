@@ -311,11 +311,15 @@ function FixtureCard({
   // than guessed here: one thing to offer means a tap can go straight to it, several mean the
   // viewer has to pick, and nothing means the card stays a poster — the match is still on the
   // board, the watch is not.
+  //
+  // The link and the button are both full width on purpose. A button is an atomic box: it keeps
+  // the width of its own content instead of filling its column, so a card with several channels
+  // came out narrower than the cards around it.
   if (fixture.watchPath) {
     return (
       <Link
         href={fixture.watchPath}
-        className="block h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
+        className="block w-full h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </Link>
@@ -328,7 +332,7 @@ function FixtureCard({
         type="button"
         onClick={() => onChoose(fixture.id)}
         aria-haspopup="dialog"
-        className="block h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
+        className="block w-full h-full sm:h-auto text-left transition-transform active:scale-[0.99]"
       >
         {card}
       </button>

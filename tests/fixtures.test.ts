@@ -438,19 +438,20 @@ test("unpublished, finished and far-future matches stay off the board", () => {
 
   assert.equal(READY_BOARD([{ ...base, visible: false }], [channel], now).length, 0);
   assert.equal(READY_BOARD([{ ...base, phase: "finished" }], [channel], now).length, 0);
-  // Two weeks out is the admin's schedule, not today's board.
+  // Three days and an hour out is the admin's schedule, not the board's.
   assert.equal(
     READY_BOARD(
-      [{ ...base, startsAt: new Date("2026-11-08T14:00:00.000Z").toISOString() }],
+      [{ ...base, startsAt: new Date("2026-10-28T13:00:00.000Z").toISOString() }],
       [channel],
       now
     ).length,
     0
   );
-  // 23 hours out still shows.
+  // Three days minus an hour is still on the board: a card published today for the day
+  // after tomorrow has to reach the site today, not tomorrow.
   assert.equal(
     READY_BOARD(
-      [{ ...base, startsAt: new Date("2026-10-26T11:00:00.000Z").toISOString() }],
+      [{ ...base, startsAt: new Date("2026-10-28T11:00:00.000Z").toISOString() }],
       [channel],
       now
     ).length,

@@ -4,11 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import AdminSection, { SectionBadge } from "@/components/AdminSection";
 import {
   endTimeAfter,
+  fixturePhase,
   MAX_FIXTURE_CHANNELS,
   minutesBetween,
   toLocalInputValue,
   unresolvedFixtureRefs,
 } from "@/lib/fixtures";
+import { MAX_CARDS, UPCOMING_WINDOW_MS } from "@/lib/fixtureBoard";
 import { parseMatchTitle } from "@/lib/teamFlags";
 import {
   CalendarClock,
@@ -110,6 +112,67 @@ function countdown(iso: string, now: number): string {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
+/** Which badge a card carries right now, worked out from its own kickoff and length. */
+function rowPhase(row: FixtureRow, now: number): FixtureRow["phase"] {
+  return fixturePhase(new Date(row.startsAt), row.durationMinutes, new Date(now));
+}
+
+/**
+ * The cards the board itself would be showing right now.
+ *
+ * The board keeps a published card that has a channel and a kickoff inside its window,
+ * live matches first, and only the first four of the rest. The panel repeats that
+ * arithmetic so a card that is entered but not on the site can be named as such
+ * instead of looking like a card that was lost.
+ */
+function boardCards(rows: FixtureRow[], now: number): Set<string> {
+  const cutoff = now + UPCOMING_WINDOW_MS;
+  return new Set(
+    rows
+      .filter((row) => {
+        if (!row.visible || row.channels.length === 0) return false;
+        const starts = new Date(row.startsAt).getTime();
+        if (Number.isNaN(starts)) return false;
+        const phase = rowPhase(row, now);
+        if (phase === "finished") return false;
+        return phase === "live" || starts <= cutoff;
+      })
+      .sort((a, b) => {
+        const aPhase = rowPhase(a, now);
+        const bPhase = rowPhase(b, now);
+        if (aPhase !== bPhase) return aPhase === "live" ? -1 : 1;
+        return a.startsAt.localeCompare(b.startsAt);
+      })
+      .slice(0, MAX_CARDS)
+      .map((row) => row._id)
+  );
+}
+
+/**
+ * When this card reaches the screen, said in the admin's own words.
+ *
+ * A published card can still be off the site: the board keeps a fixed number of cards and
+ * only the kickoffs inside its window. This says which side of that line the card is on.
+ */
+function screenHint(row: FixtureRow, onBoard: boolean, now: number) {
+  const starts = new Date(row.startsAt).getTime();
+  const phase = rowPhase(row, now);
+  const line = "text-[10px] font-semibold truncate";
+
+  if (!row.visible) return <p className={`${line} text-slate-500`}>Not published</p>;
+  if (row.channels.length === 0) return <p className={`${line} text-slate-500`}>No channel linked</p>;
+  if (phase === "finished") return <p className={`${line} text-slate-500`}>Finished</p>;
+  if (onBoard) return <p className={`${line} text-emerald-400`}>On screen now</p>;
+  if (phase === "upcoming" && starts > now + UPCOMING_WINDOW_MS) {
+    return (
+      <p className={`${line} text-amber-300`}>
+        On screen from {new Date(starts - UPCOMING_WINDOW_MS).toLocaleString()}
+      </p>
+    );
+  }
+  return <p className={`${line} text-amber-300`}>Waiting for a board slot</p>;
 }
 
 /**
@@ -584,6 +647,7 @@ export default function FixturePanel({
 
   const liveCount = rows.filter((r) => r.phase === "live").length;
   const visibleCount = rows.filter((r) => r.visible).length;
+  const onScreen = boardCards(rows, now);
 
   return (
     <AdminSection
@@ -596,7 +660,7 @@ export default function FixturePanel({
           ? "Loading the fixture board…"
           : `${rows.length} entered · ${visibleCount} published · ${liveCount} live. Typed in by hand, no schedule feed.`
       }
-      badge={<SectionBadge text={loading ? "…" : `${visibleCount}/${rows.length} shown`} />}
+      badge={<SectionBadge text={loading ? "…" : `${onScreen.size}/${rows.length} on screen`} />}
       actions={
         <button
           type="button"
@@ -842,6 +906,7 @@ export default function FixturePanel({
                       ? ` · ${row.channels.map(channelName).join(" · ")}`
                       : ""}
                   </p>
+                  {screenHint(row, onScreen.has(row._id), now)}
                 </div>
                 <span
                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${PHASE_STYLE[row.phase]}`}

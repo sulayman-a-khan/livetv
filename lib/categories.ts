@@ -1,5 +1,5 @@
 /**
- * The catalogue's five and only five channel categories.
+ * The catalogue's seven and only seven channel categories.
  *
  * Every channel carries exactly ONE of these as `Channel.category` — there are
  * no subcategories and no multi-category channels. Rails, the category pages,
@@ -13,6 +13,8 @@ export const CHANNEL_CATEGORIES = [
   "Indian",
   "Pakistani",
   "Documentary",
+  "Kids",
+  "Global",
 ] as const;
 
 export type ChannelCategory = (typeof CHANNEL_CATEGORIES)[number];
@@ -92,6 +94,28 @@ export const CATEGORIES: CategoryConfig[] = [
       "Explore documentary channels covering wildlife, science, history, travel and the natural world in crystal clear HD.",
     category: "Documentary",
   },
+  {
+    slug: "kids",
+    name: "Kids",
+    title: "Kids TV",
+    badge: "🧸",
+    flag: "🧸",
+    subtitle: "Cartoon • Animation & Learning",
+    description:
+      "Safe, colourful children's channels with cartoons, animation and learning shows for the little ones.",
+    category: "Kids",
+  },
+  {
+    slug: "global",
+    name: "Global",
+    title: "Global TV",
+    badge: "🌐",
+    flag: "🌐",
+    subtitle: "International • Music • Lifestyle & More",
+    description:
+      "Channels from around the world — international news, music, lifestyle and documentaries from every continent.",
+    category: "Global",
+  },
 ];
 
 /**
@@ -137,12 +161,12 @@ export function isChannelCategory(value: unknown): value is ChannelCategory {
 }
 
 /**
- * Canonicalises any category-ish string to one of the five.
+ * Canonicalises any category-ish string to one of the seven.
  *
- * Recognises the five values themselves (case-insensitive), then falls back to
+ * Recognises the seven values themselves (case-insensitive), then falls back to
  * classifying the free text (`legacy` is usually an old category like "Live
  * Sports" or an M3U group title) together with the channel name.
- * Never returns an unknown value, so no code path has to handle a sixth one.
+ * Never returns an unknown value, so no code path has to handle an eighth one.
  */
 export function normalizeCategory(
   legacy: string | undefined | null,
@@ -174,6 +198,9 @@ const PAKISTANI_RE =
  * (or legacy category text). Sports and Documentary are decided by content
  * keywords first — a Bangladeshi sports channel is a Sports channel — then the
  * station-name heuristics decide the regional rail.
+ *
+ * Kids and Global are never guessed: no keyword lands a channel on either rail,
+ * so both stay empty until an admin puts a channel there by hand.
  */
 export function classifyCategory(name = "", groupTitle = ""): ChannelCategory {
   const combined = `${name} ${groupTitle}`.toLowerCase();

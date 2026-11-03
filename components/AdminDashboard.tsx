@@ -77,6 +77,7 @@ interface ChannelWithStreams {
     priority?: number;
     lastCheckedAt?: string | Date | null;
     manual?: boolean;
+    pinned?: boolean;
     adminDisabled?: boolean;
     browserBlocker?: string | null;
     deliveryHidden?: boolean;
@@ -1077,10 +1078,10 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
     }
   };
 
-  /** Test now / Disable / Restore for one mirror link, from the table row. */
+  /** Test now / Disable / Restore / Pin for one mirror link, from the table row. */
   const handleLinkAction = async (
     streamId: string,
-    action: "test" | "disable" | "restore"
+    action: "test" | "disable" | "restore" | "pin" | "unpin"
   ) => {
     setLinkActionId(`${streamId}:${action}`);
     try {
@@ -1308,12 +1309,39 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
           >
             <div className="flex items-center gap-1 min-w-0 truncate">
               <LinkHealthBadge link={st} />
+              {st.pinned ? (
+                <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                  Pinned
+                </span>
+              ) : null}
               <span className="truncate text-[10px]" title={st.url}>
                 #{idx + 1}: {st.url.replace(/^https?:\/\//, "").substring(0, 20)}...
               </span>
             </div>
 
             <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                onClick={() => handleLinkAction(st._id, st.pinned ? "unpin" : "pin")}
+                disabled={busy}
+                className={`transition-colors p-0.5 disabled:opacity-40 ${
+                  st.pinned
+                    ? "text-amber-300 hover:text-amber-200"
+                    : "text-slate-500 hover:text-amber-300"
+                }`}
+                title={
+                  st.pinned
+                    ? "Unpin this link — stop trying it before the others"
+                    : "Pin this link — try it before every other mirror of this channel"
+                }
+              >
+                {linkActionId === `${st._id}:pin` || linkActionId === `${st._id}:unpin` ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : st.pinned ? (
+                  <PinOff className="w-3 h-3" />
+                ) : (
+                  <Pin className="w-3 h-3" />
+                )}
+              </button>
               <button
                 onClick={() => handleLinkAction(st._id, "test")}
                 disabled={busy}

@@ -54,6 +54,8 @@ export interface InMemoryStreamLink {
   deliveryHidden?: boolean;
   /** Hand-added link: automation may probe and rank it, never delete it. */
   manual?: boolean;
+  /** Admin's choice: this link is tried before the channel's other links. */
+  pinned?: boolean;
   /** Admin took the link out of service; hidden until an admin restores it. */
   adminDisabled?: boolean;
   createdAt: Date;

@@ -7,6 +7,7 @@ import { inMemoryDb } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { isUsableViewerLink } from "@/lib/streamHealth";
 import { rankStreams } from "@/lib/channelMaintenance";
+import { orderStreamsForPlayback } from "@/lib/streamOrder";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ const CHANNEL_CACHE = "public, s-maxage=15, stale-while-revalidate=120";
  * `lastCheck` diagnostics blob are server-side only: no browser can set a
  * Referer, so shipping them just leaks the upstream configuration.
  */
-const STREAM_FIELDS = "_id url priority status latency failedAttempts";
+const STREAM_FIELDS = "_id url priority status latency failedAttempts pinned";
 
 /**
  * Read for the visibility gate only, and stripped by `projectStream` on the way
@@ -104,7 +105,11 @@ export async function GET(
           // the player a URL that is already known to stall. The same holds for a
           // link already marked "Not delivering": another usable mirror on this
           // channel still carries it, but that link alone no longer does.
-          const usableStreams = rankStreams(streams.filter(isUsableViewerLink));
+          // A pinned link leads the ladder whatever the ranking says about it,
+          // and the links after it are walked in the order they were ranked into.
+          const usableStreams = orderStreamsForPlayback(
+            rankStreams(streams.filter(isUsableViewerLink))
+          );
 
           return NextResponse.json(
             {
@@ -141,7 +146,7 @@ export async function GET(
     }
 
     const candidates = streams.filter((s) => s.channelId === id && !s.adminDisabled);
-    const chStreams = rankStreams(candidates.filter(isUsableViewerLink));
+    const chStreams = orderStreamsForPlayback(rankStreams(candidates.filter(isUsableViewerLink)));
 
     return NextResponse.json(
       {

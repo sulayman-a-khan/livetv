@@ -6,6 +6,7 @@ import { inMemoryDb, type InMemoryStreamLink } from "@/lib/inMemoryStore";
 import { getChannelLogo } from "@/lib/utils";
 import { isAuthorizedAdmin } from "@/lib/adminAuth";
 import { rankStreams } from "@/lib/channelMaintenance";
+import { orderStreamsForPlayback } from "@/lib/streamOrder";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export const dynamic = "force-dynamic";
  * the prober reads it, the browser never does.
  */
 const ADMIN_STREAM_FIELDS =
-  "_id channelId url priority status latency failedAttempts lastCheckedAt adminDisabled browserBlocker deliveryHidden deliveryMisses manual lastCheck";
+  "_id channelId url priority status latency failedAttempts lastCheckedAt adminDisabled browserBlocker deliveryHidden deliveryMisses manual lastCheck pinned";
 
 /** The same projection for the in-memory store, which holds the same records. */
 function pickAdminStreamFields(s: InMemoryStreamLink) {
@@ -33,6 +34,7 @@ function pickAdminStreamFields(s: InMemoryStreamLink) {
     deliveryHidden: s.deliveryHidden,
     deliveryMisses: s.deliveryMisses,
     manual: s.manual,
+    pinned: s.pinned === true,
     lastCheck: s.lastCheck,
   };
 }
@@ -80,10 +82,14 @@ export async function GET(req: NextRequest) {
 
       // Ranked by the same rule the public catalogue uses, because the gate numbers
       // these rows `#1…#n` and `#1` has to mean the Server 1 a viewer is handed.
+      // A pinned link leads that numbering too — the order here is the order the
+      // viewer is handed, pinned first.
       const channelsWithLinks = allChannels.map((ch) => ({
         ...ch,
         logo: getChannelLogo(ch.name, ch.logo),
-        streams: rankStreams(streamsByChannel.get(String(ch._id)) || []),
+        streams: orderStreamsForPlayback(
+          rankStreams(streamsByChannel.get(String(ch._id)) || [])
+        ),
       }));
 
       return NextResponse.json({
@@ -115,7 +121,9 @@ export async function GET(req: NextRequest) {
       });
 
       const channelsWithLinks = sortedChannels.map((ch) => {
-        const chStreams = rankStreams(streams.filter((s) => s.channelId === ch._id));
+        const chStreams = orderStreamsForPlayback(
+          rankStreams(streams.filter((s) => s.channelId === ch._id))
+        );
         return { ...ch, streams: chStreams };
       });
 

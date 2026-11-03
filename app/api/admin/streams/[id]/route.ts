@@ -39,6 +39,7 @@ function linkView(link: {
   deliveryMisses?: number | null;
   deliveryHidden?: boolean;
   manual?: boolean;
+  pinned?: boolean;
   adminDisabled?: boolean;
 }) {
   return {
@@ -54,6 +55,7 @@ function linkView(link: {
     deliveryMisses: link.deliveryMisses ?? 0,
     deliveryHidden: Boolean(link.deliveryHidden),
     manual: Boolean(link.manual),
+    pinned: Boolean(link.pinned),
     adminDisabled: Boolean(link.adminDisabled),
     health: classifyLinkHealth({
       status: link.status as StoredStreamStatus,
@@ -69,7 +71,8 @@ function linkView(link: {
 }
 
 /**
- * PATCH /api/admin/streams/[id]  { action: "test" | "disable" | "restore" }
+ * PATCH /api/admin/streams/[id]
+ *   { action: "test" | "disable" | "restore" | "pin" | "unpin" }
  *
  * The manual controls over one server link, which is the point where admin
  * intent beats automation:
@@ -80,6 +83,9 @@ function linkView(link: {
  *     the dead-link purge — only an admin can bring it back.
  *   - `restore` clears the flag, wipes the failure streak and re-probes, so a
  *     link only becomes visible again once it has been verified to play.
+ *   - `pin` / `unpin` mark the link as the one to try first. A pinned link is
+ *     handed to the viewer before the channel's other links, whatever the
+ *     speed ranking says about it; the rest keep the order they had.
  */
 export async function PATCH(
   req: NextRequest,
@@ -96,9 +102,9 @@ export async function PATCH(
     const body = auth.body;
 
     const action = String(body.action || "").toLowerCase();
-    if (!["test", "disable", "restore"].includes(action)) {
+    if (!["test", "disable", "restore", "pin", "unpin"].includes(action)) {
       return NextResponse.json(
-        { success: false, error: 'action must be "test", "disable" or "restore"' },
+        { success: false, error: 'action must be "test", "disable", "restore", "pin" or "unpin"' },
         { status: 400 }
       );
     }
@@ -113,6 +119,14 @@ export async function PATCH(
       const stream = await StreamLink.findById(id);
       if (stream) {
         const channelId = String(stream.channelId);
+
+        // The pin is a label, not a health verdict: it changes nothing else about
+        // the link, so it is saved on its own and no probe is run.
+        if (action === "pin" || action === "unpin") {
+          stream.pinned = action === "pin";
+          await stream.save();
+          return NextResponse.json({ success: true, action, stream: linkView(stream.toObject()) });
+        }
 
         if (action === "disable") {
           stream.adminDisabled = true;
@@ -186,6 +200,12 @@ export async function PATCH(
     const mem = inMemoryDb.getStreams().find((s) => s._id === id);
     if (!mem) {
       return NextResponse.json({ success: false, error: "Stream link not found" }, { status: 404 });
+    }
+
+    if (action === "pin" || action === "unpin") {
+      mem.pinned = action === "pin";
+      inMemoryDb.saveState();
+      return NextResponse.json({ success: true, action, stream: linkView(mem) });
     }
 
     if (action === "disable") {

@@ -43,6 +43,12 @@ export interface IStreamLink extends Document {
   deliveryHidden: boolean;
   /** Hand-added by an admin: automation may test and rank it, never delete it. */
   manual: boolean;
+  /**
+   * An admin's own choice: this link is offered to viewers before every other
+   * link of its channel, whatever the speed ranking says about it. The ranking
+   * still decides the order inside the pinned group and the order of the rest.
+   */
+  pinned: boolean;
   /** Admin took this link out of service: hidden, and automation won't restore it. */
   adminDisabled: boolean;
   headers?: Record<string, string>;
@@ -72,6 +78,9 @@ const StreamLinkSchema = new Schema<IStreamLink>(
     lastDeliveryMissAt: { type: Date, default: null },
     deliveryHidden: { type: Boolean, default: false, index: true },
     manual: { type: Boolean, default: false },
+    // No index: the pin is applied to the whole ladder after it is read, and no
+    // query ever filters on this field.
+    pinned: { type: Boolean, default: false },
     adminDisabled: { type: Boolean, default: false },
     // Some providers require a Referer or Origin; retain it for probes.
     headers: { type: Schema.Types.Mixed, default: undefined },

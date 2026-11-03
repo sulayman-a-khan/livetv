@@ -1174,30 +1174,9 @@ export default function DirectHlsPlayer({
           )}
         </div>
 
-        {/* Multi-server ladder switcher */}
-        {streams.length > 1 && (
-          <div className="flex items-center gap-1 bg-[#080e1b]/85 backdrop-blur-md p-1 rounded-xl border border-slate-700/60 shadow-xl pointer-events-auto">
-            {streams.map((st, idx) => {
-              const active = idx === activeIndex;
-              return (
-                <button
-                  key={st._id}
-                  onClick={() => {
-                    if (controlledIndex === undefined) setInternalIndex(idx);
-                    onStreamIndexChange?.(idx);
-                  }}
-                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
-                    active
-                      ? "bg-emerald-500 text-slate-950 shadow-sm"
-                      : "text-slate-300 hover:bg-slate-800"
-                  }`}
-                >
-                  Server {idx + 1}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* No manual ladder switcher: the viewer is never offered a choice of
+            mirror. The ladder still steps by itself when a server stalls — that
+            runs inside the player, not behind a button. */}
       </div>
 
       {/* Bottom Control Bar — shared by both transports. For a YouTube mirror the

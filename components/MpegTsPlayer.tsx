@@ -114,7 +114,7 @@ export default function MpegTsPlayer({
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [displayedChannelName, setDisplayedChannelName] = useState(channelName);
-  const [displayedIndex, setDisplayedIndex] = useState(currentStreamIndex);
+  const [, setDisplayedIndex] = useState(currentStreamIndex);
   const [controlsVisible, setControlsVisible] = useState(false);
 
   // ---- Switching state ----
@@ -571,19 +571,6 @@ export default function MpegTsPlayer({
     }
   };
 
-  const handleManualServerSelect = (idx: number) => {
-    if (idx === indexRef.current) return;
-    const target = streamsRef.current[idx];
-    if (!target) return;
-    indexRef.current = idx;
-    setDisplayedIndex(idx);
-    lastAppliedIdRef.current = target._id;
-    setCurrentStreamIndex(idx);
-    setSwitching(true);
-    setPendingChannelLabel(channelName);
-    createAndLoad(target.url);
-  };
-
   // ---- Fullscreen (native API + rotate frame + CSS fallback, parity w/ DirectHlsPlayer) ----
   useEffect(() => {
     const onFsChange = () => {
@@ -691,8 +678,6 @@ export default function MpegTsPlayer({
     topBarText = "Connecting to live stream…";
   }
   const topBarActive = switching || isLoading;
-
-  const mirrors = streams || [];
 
   return (
     <div className="w-full space-y-3">
@@ -810,9 +795,6 @@ export default function MpegTsPlayer({
             </div>
           </div>
           <div className="flex items-center gap-2.5 sm:gap-3">
-            <span className="hidden lg:inline text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              Server {displayedIndex + 1}
-            </span>
             <button onClick={toggleFullscreen} className="text-slate-300 hover:text-white transition-colors">
               <Maximize className="w-4 h-4" />
             </button>
@@ -820,28 +802,9 @@ export default function MpegTsPlayer({
         </div>
       </div>
 
-      {/* Server selector (desktop) */}
-      {mirrors.length > 1 && (
-        <div className="hidden lg:flex flex-wrap items-center gap-2 pt-0.5">
-          {mirrors.map((st, idx) => {
-            const isSelected = idx === displayedIndex;
-            return (
-              <button
-                key={st._id}
-                onClick={() => handleManualServerSelect(idx)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  isSelected
-                    ? "bg-[#00c978] text-slate-950 shadow-md shadow-emerald-500/20 ring-1 ring-emerald-400/50"
-                    : "bg-[#0d1628] text-slate-300 hover:text-white hover:bg-slate-800/80 border border-slate-800"
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-slate-950" : "bg-emerald-400"}`} />
-                <span>Server {idx + 1}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* No manual server switcher: the viewer is never offered a choice of
+          mirror. The ladder still steps by itself when a server stalls — that
+          runs inside the player, not behind a button. */}
     </div>
   );
 }

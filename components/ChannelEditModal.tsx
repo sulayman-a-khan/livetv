@@ -7,6 +7,7 @@ import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
 import LinkHealthBadge, { linkHealthLabel, type LinkProbeDetail } from "@/components/LinkHealthBadge";
 import { DirectHlsPlayer } from "@/components/players";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
+import { orderStreamsForPlayback } from "@/lib/streamOrder";
 import {
   X,
   Save,
@@ -20,6 +21,8 @@ import {
   Activity,
   Ban,
   RotateCcw,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 export interface EditableStream {
@@ -32,6 +35,8 @@ export interface EditableStream {
   lastCheckedAt?: string | Date | null;
   manual?: boolean;
   adminDisabled?: boolean;
+  /** An admin's choice: this link is tried before the channel's other links. */
+  pinned?: boolean;
   browserBlocker?: string | null;
   deliveryHidden?: boolean;
   deliveryMisses?: number | null;
@@ -155,10 +160,13 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
   };
 
   /**
-   * Test now / Disable / Restore — all three go through one PATCH endpoint so
-   * the manual action follows exactly the same day-gated rules as the scheduler.
+   * Test now / Disable / Restore / Pin — all four go through one PATCH endpoint
+   * so the manual action follows exactly the same day-gated rules as the scheduler.
    */
-  const handleLinkAction = async (streamId: string, action: "test" | "disable" | "restore") => {
+  const handleLinkAction = async (
+    streamId: string,
+    action: "test" | "disable" | "restore" | "pin" | "unpin"
+  ) => {
     setLinkActionId(`${streamId}:${action}`);
     setMessage(null);
     try {
@@ -177,7 +185,17 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
       // working and left in the viewer ladder. A failed probe always lands on
       // `temporarily-failed` or worse, so this can never read a failure as success.
       const inService = data.stream?.health === "healthy" || data.stream?.health === "slow";
-      if (action === "test") {
+      if (action === "pin") {
+        setMessage({
+          type: "ok",
+          text: "Link pinned. Viewers try it before this channel's other links, however fast the others are.",
+        });
+      } else if (action === "unpin") {
+        setMessage({
+          type: "ok",
+          text: "Pin removed. The link goes back to the automatic fastest-first order.",
+        });
+      } else if (action === "test") {
         setMessage({
           type: data.probe?.ok || inService ? "ok" : "err",
           text: data.probe?.ok
@@ -230,8 +248,10 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
     }
   };
 
-  const sortedStreams = [...channel.streams].sort(
-    (a, b) => (a.priority ?? 99) - (b.priority ?? 99)
+  // A pinned link leads the ladder whatever the ranking says about it, so the
+  // number shown here is the one a viewer is handed as Server 1.
+  const sortedStreams = orderStreamsForPlayback(
+    [...channel.streams].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
   );
 
   /**
@@ -389,6 +409,11 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                   #{idx + 1}
                 </span>
                 <LinkHealthBadge link={st} />
+                {st.pinned ? (
+                  <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+                    Pinned
+                  </span>
+                ) : null}
                 <span className="flex-1 truncate text-[10px] text-slate-300" title={st.url}>
                   {st.url.replace(/^https?:\/\//, "")}
                 </span>
@@ -396,6 +421,28 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                   <Zap className="w-2.5 h-2.5" />
                   {st.latency || "—"}ms
                 </span>
+                <button
+                  onClick={() => handleLinkAction(st._id, st.pinned ? "unpin" : "pin")}
+                  disabled={busy}
+                  className={`transition-colors shrink-0 disabled:opacity-40 ${
+                    st.pinned
+                      ? "text-amber-300 hover:text-amber-200"
+                      : "text-slate-500 hover:text-amber-300"
+                  }`}
+                  title={
+                    st.pinned
+                      ? "Unpin this link — stop trying it before the others"
+                      : "Pin this link — try it before every other mirror of this channel"
+                  }
+                >
+                  {linkActionId === `${st._id}:pin` || linkActionId === `${st._id}:unpin` ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : st.pinned ? (
+                    <PinOff className="w-3.5 h-3.5" />
+                  ) : (
+                    <Pin className="w-3.5 h-3.5" />
+                  )}
+                </button>
                 <button
                   onClick={() => handleLinkAction(st._id, "test")}
                   disabled={busy}

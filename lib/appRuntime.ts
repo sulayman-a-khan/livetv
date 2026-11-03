@@ -5,8 +5,8 @@
 // browsers like Facebook/Instagram, whose users still need the download prompt.
 export const EMBEDDED_APP_UA_TOKEN = "SoluPlayApp";
 
-// Placeholder until the real app download URL exists
-export const APP_DOWNLOAD_URL = "https://example.com/soluplay-app";
+// The download page for the phone and Android TV builds.
+export const APP_DOWNLOAD_URL = "https://soluplay-download.vercel.app";
 
 export function isEmbeddedApp(userAgent?: string): boolean {
   const ua = userAgent ?? (typeof navigator !== "undefined" ? navigator.userAgent : "");

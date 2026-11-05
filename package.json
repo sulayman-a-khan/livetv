@@ -27,6 +27,7 @@
     "test:fixture-stale-links": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/fixture-stale-links.test.js",
     "test:fixture-editor": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/fixture-editor.test.js",
     "test:youtube-resolve-guard": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/youtube-resolve-guard.test.js",
+    "test:app-release": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/app-release.test.js",
     "test:team-flags": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/team-flags.test.js",
     "test:all": "tsc -p tsconfig.tests.json && node --test .tmp-tests/tests/*.test.js",
     "check:health-workflow": "node scripts/verify-health-check-workflow.mjs",

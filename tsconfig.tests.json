@@ -24,6 +24,7 @@
     "app/api/fixtures/route.ts",
     "app/api/youtube/resolve/route.ts",
     "lib/adminAuth.ts",
+    "lib/appRelease.ts",
     "lib/channelMaintenance.ts",
     "lib/channelIdentity.ts",
     "lib/db.ts",

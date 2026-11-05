@@ -74,8 +74,11 @@ export async function GET(req: NextRequest) {
     );
   } catch (error: any) {
     console.error("GET /api/app/bootstrap error:", error);
+    // The reason the bootstrap failed is not sent on: a message that came
+    // from the database can carry the address of the cluster, and the app
+    // needs nothing from it beyond knowing that the answer did not arrive.
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to load the app bootstrap" },
+      { success: false, error: "Failed to load the app bootstrap" },
       { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }

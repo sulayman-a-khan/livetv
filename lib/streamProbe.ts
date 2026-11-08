@@ -35,16 +35,13 @@
  *                           not just the headers — fetch()'s timeout stops at the
  *                           headers, and an origin that stalls after them would
  *                           otherwise report a minute of waiting as 10 seconds.
- *   9. Chain tolerance     — Node verifies a certificate chain only from the
- *                           roots it ships with, so an origin that omits its
- *                           intermediate fails here while a browser, which
- *                           closes that gap, plays it. When — and only when — the
- *                           failure is a chain-building one on a link the browser
- *                           fetches itself, the origin is asked again with that
- *                           tolerance; a real playlist plus a segment is then
- *                           filed as DEGRADED with the gap named, never as a link
- *                           that delivers nothing, and never over stored
- *                           credentials.
+ *   9. Chain re-check     — Node verifies a chain only against the roots it
+ *                           ships with; a browser also trusts the OS store. When
+ *                           a chain fails only against Node's snapshot, a second
+ *                           media walk uses that wider anchor set (verification
+ *                           still on, direct HTTPS only, no stored headers), and
+ *                           proven media is filed DEGRADED with the gap named —
+ *                           never ONLINE, and never over a credential.
  *
  * A normal HTTP 200 is never treated as "online" by itself — every one of
  * the steps above has to agree the stream is actually serving playable
@@ -57,13 +54,15 @@
  */
 
 import { execFile } from "child_process";
-import { request as httpsRequest } from "https";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { promisify } from "util";
 import { isYouTubeUrl } from "@/lib/youtube";
 import { isMpegTsUrl } from "@/lib/streamType";
-import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
-import { checkPublicUrlSafety, checkRedirectTarget } from "@/lib/ssrfGuard";
-import { safeFetch, UnsafeUrlError, checkHostResolvesPublic } from "@/lib/safeFetch";
+import { checkPublicUrlSafety } from "@/lib/ssrfGuard";
+import { safeFetch, UnsafeUrlError, type SafeFetchOptions } from "@/lib/safeFetch";
+import { normaliseOrigin, resolveSiteOrigin } from "@/lib/siteOrigin";
+import { browserGateApplies } from "@/lib/browserGate";
+import { createBrowserTrustFetch } from "@/lib/browserTrustFetch";
 
 const execFileAsync = promisify(execFile);
 
@@ -161,7 +160,7 @@ export interface HlsCheckResult {
    * Never treat null as "blocked".
    */
   browserCors: boolean | null;
-  /** Set only when `status === "UNPLAYABLE"`. */
+  /** Browser-only diagnostic, independent of the media health verdict. */
   browserBlocker: BrowserBlocker | null;
   /**
    * Delivery attempts that ran out the 10-second budget inside this probe run.
@@ -193,7 +192,18 @@ export interface ProbeOptions {
   deliveryConfirmDelayMs?: number;
   /** Extra headers merged over the defaults (User-Agent, Referer, Origin, Authorization, Cookie...). */
   headers?: Record<string, string>;
+  /** Isolated transport/DNS overrides for deterministic probe tests. */
+  transport?: Pick<SafeFetchOptions, "fetchImpl" | "resolver"> & {
+    /** Test-only override for the fully verified chain-recovery transport. */
+    chainRecoveryFetchImpl?: typeof fetch;
+  };
 }
+
+const probeContext = new AsyncLocalStorage<{
+  transport?: ProbeOptions["transport"];
+  credentialOrigin: string;
+  mixedContent: boolean;
+}>();
 
 const DEFAULTS = {
   timeoutMs: 5000,
@@ -280,6 +290,20 @@ function resolveUrl(uri: string, baseUrl: string): string | null {
   }
 }
 
+function notePlaylistResources(text: string, baseUrl: string): void {
+  const context = probeContext.getStore();
+  if (!context) return;
+  for (const line of text.split(/\r?\n/).map((value) => value.trim())) {
+    const uris = line.startsWith("#")
+      ? Array.from(line.matchAll(/\bURI="([^"]+)"/g), (match) => match[1])
+      : line ? [line] : [];
+    for (const uri of uris) {
+      const resolved = resolveUrl(uri, baseUrl);
+      if (resolved?.startsWith("http:")) context.mixedContent = true;
+    }
+  }
+}
+
 function buildHeaders(extra?: Record<string, string>): Record<string, string> {
   const origin = siteOrigin();
   return {
@@ -298,63 +322,19 @@ function buildHeaders(extra?: Record<string, string>): Record<string, string> {
  * runs). The CORS verdict needs it: an `Origin` we never sent is a CORS answer
  * we never got, so without it the gate stays silent instead of guessing.
  */
+function corsAllowsSite(value: string | null): boolean {
+  if (value === "*") return true;
+  const site = siteOrigin();
+  const answer = normaliseOrigin(value);
+  // A grant written with a trailing slash, a path or different host case still
+  // names the same origin; compare the normalised form, not the raw header.
+  return site !== null && answer === site;
+}
+
 function siteOrigin(): string | null {
-  const host = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  return host ? `https://${host}` : null;
+  return resolveSiteOrigin();
 }
 
-function isLocalHost(host: string): boolean {
-  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
-  const parts = host.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-  const [a, b] = parts;
-  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a === 169;
-}
-
-/**
- * The URL a viewer's browser really requests. `normalizeDirectPublicUrl` builds
- * the watch page's ladder, so probing anything else would test a URL nobody
- * ever plays — notably an `http://` link the app upgrades to HTTPS before use.
- */
-function browserPlaybackUrl(rawUrl: string): string {
-  return normalizeDirectPublicUrl(rawUrl) || rawUrl.trim();
-}
-
-/**
- * The direct-play rules bind only links the browser fetches from the origin
- * itself. Local/LAN hosts, Cloudflare tunnels and `/live/` forwarder paths are
- * reached through the secured relay, whose own rules are not these ones, so
- * they keep the ordinary checks.
- */
-function isRelayedUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.toLowerCase();
-    return (
-      isLocalHost(host) ||
-      host.endsWith(".trycloudflare.com") ||
-      parsed.pathname.includes("/live/")
-    );
-  } catch {
-    return true; // unreadable URL: nothing to judge from a browser's point of view
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Certificate-chain tolerance — direct links only
- * ------------------------------------------------------------------ */
-
-/**
- * The chain-building failures, as distinct from untrustworthy certificates.
- *
- * These codes say Node was handed too little of the chain, or a root newer than
- * the store it ships with. A viewer's browser closes that gap — Windows
- * retrieves the missing intermediate, other trust stores carry the newer root —
- * which is why the same channel plays in VLC and in the admin panel's own test
- * player while our probe filed it as delivering nothing. Expired, revoked,
- * self-signed and wrong-hostname certificates are deliberately not here: a
- * browser refuses those as well, so they stay plain failures.
- */
 const CHAIN_BUILDING_CODES: string[] = [
   "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
   "UNABLE_TO_GET_ISSUER_CERT",
@@ -365,259 +345,6 @@ const CHAIN_BUILDING_CODES: string[] = [
 
 function isChainBuildingCode(code: string): boolean {
   return CHAIN_BUILDING_CODES.includes(code);
-}
-
-interface BrowserTrustResponse {
-  status: number | null;
-  finalUrl: string;
-  contentType: string;
-  acao: string | null;
-  text: string;
-  bytes: number;
-  error: string | null;
-}
-
-/**
- * One request made the way the viewer's browser makes it: same URL, only headers
- * a browser is allowed to send, and a deadline that covers the body as well as
- * the headers. Certificate verification is off for this request alone — that is
- * its entire purpose, and the reason its answer is never filed as a clean
- * ONLINE. Per-link credentials never ride on it.
- */
-function browserTrustGet(url: string, maxBytes: number, timeoutMs: number): Promise<BrowserTrustResponse> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (patch: Partial<BrowserTrustResponse>) => {
-      if (settled) return;
-      settled = true;
-      resolve({ status: null, finalUrl: url, contentType: "", acao: null, text: "", bytes: 0, error: null, ...patch });
-    };
-
-    if (!url.toLowerCase().startsWith("https://")) {
-      done({ error: "not an HTTPS origin" });
-      return;
-    }
-
-    // The URL can come out of a playlist (a variant or a segment), so it is
-    // checked here too: a playlist may point a segment at the server's own
-    // network, and this request must not go there.
-    void (async () => {
-      let hostname: string;
-      try {
-        hostname = new URL(url).hostname;
-      } catch {
-        done({ error: "unreadable URL" });
-        return;
-      }
-
-      const hostVerdict = await checkHostResolvesPublic(hostname);
-      if (!hostVerdict.ok) {
-        done({ error: hostVerdict.reason || "refused an internal destination" });
-        return;
-      }
-
-      const req = httpsRequest(
-        url,
-        { method: "GET", headers: buildHeaders(), rejectUnauthorized: false, timeout: timeoutMs },
-        (res) => {
-          const code = res.statusCode || 0;
-          const location = res.headers.location;
-          if (code >= 300 && code < 400 && location) {
-            res.resume();
-            let next: string;
-            try {
-              next = new URL(location, url).toString();
-            } catch {
-              done({ status: code, error: "unreadable redirect" });
-              return;
-            }
-            if (!next.toLowerCase().startsWith("https://")) {
-              done({ status: code, error: "redirect left HTTPS" });
-              return;
-            }
-            // The hop is checked before it is followed, not after.
-            const hop = checkRedirectTarget(url, next);
-            if (!hop.ok) {
-              done({ status: code, error: hop.reason || "redirect to a refused destination" });
-              return;
-            }
-            browserTrustGet(next, maxBytes, Math.max(1, timeoutMs - 250)).then(done);
-            return;
-          }
-
-          const contentType = String(res.headers["content-type"] || "").toLowerCase();
-          const acao = res.headers["access-control-allow-origin"] || null;
-          const chunks: Buffer[] = [];
-          let kept = 0;
-          let bytes = 0;
-          const collect = () => Buffer.concat(chunks).subarray(0, maxBytes).toString("utf8");
-          res.on("data", (chunk: Buffer) => {
-            bytes += chunk.length;
-            if (kept < maxBytes) {
-              chunks.push(chunk);
-              kept += chunk.length;
-            } else {
-              req.destroy();
-            }
-          });
-          res.on("end", () => done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes }));
-          res.on("error", () =>
-            done({ status: code, finalUrl: url, contentType, acao, text: collect(), bytes, error: "body transfer failed" })
-          );
-        }
-      );
-
-      req.on("timeout", () => {
-        req.destroy();
-        done({ error: `no response within ${timeoutMs}ms` });
-      });
-      req.on("error", (e: { code?: string; message?: string }) => done({ error: e?.code || e?.message || "request failed" }));
-      req.end();
-    })();
-  });
-}
-
-interface BrowserTrustVerdict {
-  delivered: boolean;
-  playlistType: PlaylistType;
-  isLive: boolean | null;
-  segmentCount: number | null;
-  httpStatus: number | null;
-  browserCors: boolean | null;
-  ms: number;
-  /**
-   * The first request alone — the playlist, or the feed itself when there is no
-   * playlist. Every other probe path reports `responseTime` this way, and
-   * `SLOW_LATENCY_MS` is a threshold on one request, so the recovery walk reports
-   * the same quantity rather than the sum of its playlist, variant and segment legs.
-   */
-  playlistMs: number;
-  detail: string;
-}
-
-/**
- * Walks the same first steps the player walks — the playlist, a variant if the
- * playlist is a master, then one segment — under the browser's chain tolerance,
- * and answers exactly one question: does this origin put media in a viewer's
- * hands? Anything that is not a playlist, or a segment that will not transfer,
- * is answered "no", so a tolerant handshake can never invent a working channel.
- */
-async function browserTrustDeliveryCheck(url: string, budgetMs: number): Promise<BrowserTrustVerdict> {
-  const started = Date.now();
-  /** Elapsed time of the first request; 1 rather than 0 — a falsy latency reads as "never timed". */
-  let playlistMs = 0;
-  const left = () => Math.max(1, budgetMs - (Date.now() - started));
-  const originKnown = Boolean(siteOrigin());
-  let acaoSeen: boolean | null = originKnown ? true : null;
-  const noteCors = (value: string | null) => {
-    if (originKnown && !value) acaoSeen = false;
-  };
-
-  const fail = (detail: string, httpStatus: number | null, playlistType: PlaylistType = null): BrowserTrustVerdict => ({
-    delivered: false,
-    playlistType,
-    isLive: null,
-    segmentCount: null,
-    httpStatus,
-    browserCors: acaoSeen,
-    ms: Date.now() - started,
-    playlistMs,
-    detail,
-  });
-
-  // A raw MPEG-TS feed has no playlist to parse; for it the player's whole
-  // question is whether bytes flow.
-  if (isMpegTsUrl(url)) {
-    const firstRequestAt = Date.now();
-    const ts = await browserTrustGet(url, 8192, left());
-    playlistMs = Math.max(1, Date.now() - firstRequestAt);
-    noteCors(ts.acao);
-    if (ts.status === null) return fail(ts.error || "origin did not answer", null);
-    if ((ts.status === 200 || ts.status === 206) && ts.bytes > 0 && !looksLikeHtmlErrorPage(ts.text, ts.contentType)) {
-      return {
-        delivered: true,
-        playlistType: null,
-        isLive: true,
-        segmentCount: null,
-        httpStatus: ts.status,
-        browserCors: acaoSeen,
-        ms: Date.now() - started,
-        playlistMs,
-        detail: `${ts.bytes} bytes of MPEG-TS transferred`,
-      };
-    }
-    return fail(`MPEG-TS feed gave no bytes (HTTP ${ts.status})`, ts.status);
-  }
-
-  const playlistRequestAt = Date.now();
-  const playlist = await browserTrustGet(url, 256 * 1024, left());
-  playlistMs = Math.max(1, Date.now() - playlistRequestAt);
-  noteCors(playlist.acao);
-  if (playlist.status === null) return fail(playlist.error || "origin did not answer", null);
-  if (playlist.status !== 200 && playlist.status !== 206) return fail(`HTTP ${playlist.status}`, playlist.status);
-
-  const parsed = parseM3U8(playlist.text);
-  if (!parsed.isValidHls || looksLikeHtmlErrorPage(playlist.text, playlist.contentType)) {
-    return fail("answered without an HLS playlist", playlist.status);
-  }
-
-  let media = parsed;
-  let mediaUrl = playlist.finalUrl;
-  let playlistType: PlaylistType = parsed.isMaster ? "MASTER" : "MEDIA";
-
-  if (parsed.isMaster) {
-    const cheapest = [...parsed.variants].sort((a, b) => (a.bandwidth ?? 0) - (b.bandwidth ?? 0))[0];
-    const variantUrl = cheapest ? resolveUrl(cheapest.uri, playlist.finalUrl) : null;
-    if (!variantUrl) return fail("master playlist declares no variant", playlist.status, "MASTER");
-    const variant = await browserTrustGet(variantUrl, 256 * 1024, left());
-    noteCors(variant.acao);
-    const variantParsed = parseM3U8(variant.text);
-    if (!variantParsed.isValidHls || variantParsed.isMaster || looksLikeHtmlErrorPage(variant.text, variant.contentType)) {
-      return fail("its variant is not a media playlist", variant.status ?? playlist.status, "MASTER");
-    }
-    media = variantParsed;
-    mediaUrl = variant.finalUrl;
-    playlistType = "MEDIA";
-  }
-
-  if (media.segments.length === 0) {
-    // The strict probe calls an momentarily empty live window DEGRADED, not
-    // missing, so this one does too: the manifest is being served.
-    return {
-      delivered: true,
-      playlistType,
-      isLive: media.isLive,
-      segmentCount: 0,
-      httpStatus: playlist.status,
-      browserCors: acaoSeen,
-      ms: Date.now() - started,
-      playlistMs,
-      detail: "playlist served, no segments listed right now",
-    };
-  }
-
-  const segmentUrl = resolveUrl(media.segments[media.segments.length - 1].uri, mediaUrl);
-  if (!segmentUrl) return fail("a segment URI could not be resolved", playlist.status, playlistType);
-  const segment = await browserTrustGet(segmentUrl, 8192, left());
-  noteCors(segment.acao);
-  if (segment.status !== 200 && segment.status !== 206) {
-    return fail(`segment answered HTTP ${segment.status ?? "nothing"}`, segment.status, playlistType);
-  }
-  if (segment.bytes === 0 || looksLikeHtmlErrorPage(segment.text, segment.contentType)) {
-    return fail("segment handed over no media bytes", segment.status, playlistType);
-  }
-
-  return {
-    delivered: true,
-    playlistType,
-    isLive: media.isLive,
-    segmentCount: media.segments.length,
-    httpStatus: playlist.status,
-    browserCors: acaoSeen,
-    ms: Date.now() - started,
-    playlistMs,
-    detail: `playlist + 1 of ${media.segments.length} segments transferred`,
-  };
 }
 
 interface FetchOutcome {
@@ -642,7 +369,14 @@ async function timedFetch(
   try {
     // Every hop is checked (lib/safeFetch.ts): the URL itself, every redirect
     // it hands out, and the variant/segment URLs a playlist points at.
-    const response = await safeFetch(url, { ...init, signal: controller.signal });
+    const context = probeContext.getStore();
+    const response = await safeFetch(url, { ...init, signal: controller.signal }, {
+      ...context?.transport,
+      credentialOrigin: context?.credentialOrigin,
+      onRequest: (target) => {
+        if (context && new URL(target).protocol === "http:") context.mixedContent = true;
+      },
+    });
     return { response, responseTime: Date.now() - start, errorCode: null, errorMessage: null };
   } catch (err: unknown) {
     const responseTime = Date.now() - start;
@@ -960,21 +694,24 @@ async function runFfprobe(
   headers: Record<string, string>,
   timeoutMs: number
 ): Promise<FfprobeOutcome> {
-  const headerBlock = Object.entries(headers)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join("\r\n");
+  // ffprobe must never open URLs itself: its redirects bypass safeFetch.
+  const started = Date.now();
+  const fetched = await timedFetch(url, { headers }, timeoutMs);
+  const bytes = fetched.response?.ok
+    ? await readBytesCapped(fetched.response, 2_000_000, Math.max(1, timeoutMs - (Date.now() - started)))
+    : new Uint8Array(0);
 
   const args = [
     "-hide_banner",
     "-loglevel",
     "error",
-    ...(headerBlock ? ["-headers", `${headerBlock}\r\n`] : []),
+    "-protocol_whitelist", "pipe",
     "-analyzeduration",
     "3000000", // 3s of analysis, microseconds
     "-probesize",
     "2000000", // ~2MB max probe read
     "-i",
-    url,
+    "pipe:0",
     "-t",
     "2", // never read more than ~2s of media
     "-show_entries",
@@ -985,9 +722,13 @@ async function runFfprobe(
   ];
 
   try {
-    const { stdout } = await execFileAsync("ffprobe", args, {
-      timeout: timeoutMs, // hard wall-clock cap — kills ffprobe if it runs long
-      maxBuffer: 2 * 1024 * 1024,
+    const stdout = await new Promise<string>((resolve, reject) => {
+      const child = execFile("ffprobe", args, {
+        timeout: Math.max(1, timeoutMs - (Date.now() - started)),
+        maxBuffer: 2 * 1024 * 1024,
+      }, (error, output) => error ? reject(error) : resolve(output));
+      child.stdin?.on("error", () => {}); // ffprobe may close stdin early.
+      child.stdin?.end(bytes);
     });
 
     const parsed = JSON.parse(stdout || "{}") as {
@@ -1064,32 +805,6 @@ function baseResult(overrides: Partial<HlsCheckResult>): HlsCheckResult {
   };
 }
 
-/** Rewrites an otherwise-healthy result as "the browser can never fetch this". */
-function asUnplayable(
-  result: HlsCheckResult,
-  blocker: BrowserBlocker,
-  checkedUrl: string
-): HlsCheckResult {
-  const reason = BROWSER_BLOCKER_REASON[blocker];
-  const errorCode: HlsErrorCode =
-    blocker === "MIXED_CONTENT"
-      ? "BROWSER_MIXED_CONTENT"
-      : blocker === "CORS_BLOCKED"
-        ? "BROWSER_CORS_BLOCKED"
-        : "BROWSER_HEADERS_UNSUPPORTED";
-  return {
-    ...result,
-    ok: false,
-    status: "UNPLAYABLE",
-    errorCode,
-    latency: result.responseTime,
-    reason,
-    finalUrl: checkedUrl || result.finalUrl,
-    error: reason,
-    browserBlocker: blocker,
-  };
-}
-
 /** Classifies a non-2xx/206 HTTP status into a health status + error code. */
 function classifyHttpStatus(status: number, url: string): { status: HlsHealthStatus; errorCode: HlsErrorCode } {
   if (status === 404) return { status: "OFFLINE", errorCode: "PLAYLIST_NOT_FOUND" };
@@ -1157,7 +872,9 @@ async function probeOnce(
   let corsGranted: boolean | null = originKnown ? true : null;
   const noteCors = (response: Response | null) => {
     if (!originKnown) return;
-    if (!response || !response.headers.get("access-control-allow-origin")) corsGranted = false;
+    if (!response || !corsAllowsSite(response.headers.get("access-control-allow-origin"))) {
+      corsGranted = false;
+    }
   };
 
   // ---- STEP 1: HTTP request for the playlist itself ----
@@ -1220,6 +937,7 @@ async function probeOnce(
   }
 
   // ---- STEP 2: Validate this is actually an HLS playlist ----
+  notePlaylistResources(body, finalUrl);
   const parsed = parseM3U8(body);
   if (!parsed.isValidHls) {
     return baseResult({
@@ -1276,6 +994,7 @@ async function probeOnce(
       ) {
         continue;
       }
+      notePlaylistResources(variantBody.text, variantFetch.response.url || variantUrl);
       const parsedVariant = parseM3U8(variantBody.text);
       if (!parsedVariant.isValidHls || parsedVariant.isMaster) continue; // a master pointing to another master is unusual; don't recurse further
 
@@ -1342,7 +1061,7 @@ async function probeOnce(
   const latestSegment = mediaParsed.segments[mediaParsed.segments.length - 1]?.uri || null;
   // A downloadable segment the browser is not allowed to read is as good as
   // missing for a viewer — the player fails on the very first fragment.
-  if (originKnown && segmentResults.some((s) => s.ok && !s.acao)) corsGranted = false;
+  if (originKnown && segmentResults.some((s) => s.ok && !corsAllowsSite(s.acao))) corsGranted = false;
 
   if (okSegments === 0) {
     if (outOfTime()) return deliveryMiss(options.deliveryDeadlineMs, elapsed());
@@ -1476,10 +1195,10 @@ async function applyBrowserGate(
   gateApplies: boolean
 ): Promise<HlsCheckResult> {
   if (!gateApplies) return result;
-  if (result.status !== "ONLINE" && result.status !== "DEGRADED") return result;
+  if (!browserGateApplies(result.status, result.errorCode)) return result;
 
   if (result.browserCors === false) {
-    return asUnplayable(result, "CORS_BLOCKED", url);
+    return { ...result, browserBlocker: "CORS_BLOCKED" };
   }
 
   // The probe may have leaned on an identity a browser cannot copy: the admin's
@@ -1496,13 +1215,13 @@ async function applyBrowserGate(
   const response = bare.response;
   if (!response) return result; // silence proves nothing
   if (!response.ok && response.status !== 206) {
-    return asUnplayable(result, "HEADERS_REQUIRED", url);
+    return { ...result, browserBlocker: "HEADERS_REQUIRED" };
   }
 
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   const { text } = await readBodyCapped(response, 4096);
   if (looksLikeHtmlErrorPage(text, contentType)) {
-    return asUnplayable(result, "HEADERS_REQUIRED", url);
+    return { ...result, browserBlocker: "HEADERS_REQUIRED" };
   }
   return result;
 }
@@ -1727,6 +1446,193 @@ async function probeTsStream(
   });
 }
 
+/** A media answer that can stand in for a chain Node could not build. */
+function chainRecoveryDelivered(result: HlsCheckResult): boolean {
+  // A rate limit is reachability, not media; the health verdict calls it
+  // DEGRADED, but it is not evidence that the viewer can watch anything.
+  return deliveredMedia(result) && result.errorCode !== "RATE_LIMITED";
+}
+
+/**
+ * The raw-MPEG-TS half of the browser-trust re-check. `probeTsStream` forges a
+ * player User-Agent, which a browser cannot send, so the fallback asks for the
+ * feed's first bytes with only browser headers.
+ */
+async function browserTrustTsResult(
+  url: string,
+  options: typeof DEFAULTS & { headers?: Record<string, string> }
+): Promise<HlsCheckResult> {
+  const startedAt = Date.now();
+  const res = await timedFetch(
+    url,
+    { method: "GET", headers: { ...buildHeaders(), Accept: "*/*", Range: "bytes=0-3759" } },
+    Math.max(1, Math.min(options.timeoutMs, options.deliveryDeadlineMs))
+  );
+
+  if (!res.response) {
+    return baseResult({
+      status: res.errorCode === "TIMEOUT" ? "TIMEOUT" : "OFFLINE",
+      errorCode: res.errorCode || "UNKNOWN_ERROR",
+      responseTime: res.responseTime,
+      playlistType: null,
+      isLive: true,
+      error: res.errorMessage,
+    });
+  }
+
+  const response = res.response;
+  const finalUrl = response.url || url;
+  const browserCors = siteOrigin()
+    ? corsAllowsSite(response.headers.get("access-control-allow-origin"))
+    : null;
+
+  if (!response.ok && response.status !== 206) {
+    const { status, errorCode } = classifyHttpStatus(response.status, url);
+    return baseResult({
+      status,
+      errorCode,
+      httpStatus: response.status,
+      responseTime: res.responseTime,
+      finalUrl,
+      playlistType: null,
+      isLive: true,
+      browserCors,
+      error: `HTTP ${response.status}`,
+    });
+  }
+
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const bytes = await readBytesCapped(
+    response,
+    3760,
+    Math.max(1, options.deliveryDeadlineMs - (Date.now() - startedAt))
+  );
+
+  if (bytes.length === 0) {
+    return baseResult({
+      status: "OFFLINE",
+      errorCode: "SEGMENTS_UNAVAILABLE",
+      httpStatus: response.status,
+      responseTime: res.responseTime,
+      finalUrl,
+      playlistType: null,
+      isLive: true,
+      browserCors,
+      error: "The feed handed over no bytes",
+    });
+  }
+
+  const isTs =
+    looksLikeMpegTs(bytes) ||
+    contentType.includes("mp2t") ||
+    contentType.includes("mpegts") ||
+    contentType.includes("octet-stream");
+
+  if (!isTs) {
+    return baseResult({
+      status: "INVALID",
+      errorCode: "NOT_HLS_PLAYLIST",
+      httpStatus: response.status,
+      responseTime: res.responseTime,
+      finalUrl,
+      playlistType: null,
+      isLive: true,
+      browserCors,
+      error: "Response is not a recognisable MPEG-TS stream",
+    });
+  }
+
+  return baseResult({
+    status: "ONLINE",
+    errorCode: "OK",
+    httpStatus: response.status,
+    responseTime: res.responseTime,
+    finalUrl,
+    playlistType: null,
+    isLive: true,
+    video: true,
+    audio: true,
+    browserCors,
+    error: null,
+  });
+}
+
+/**
+ * The guarded browser-trust re-check for a chain Node could not build.
+ *
+ * Node's bundled roots are narrower than the store a browser trusts, so a link
+ * whose chain only fails against Node's snapshot can still be playable. When the
+ * probe ended on exactly that failure and the re-check gets media, the link is
+ * reported DEGRADED — active and visible, never ONLINE — because Node still
+ * cannot verify the chain.
+ *
+ * Only a direct HTTPS link with no stored headers is re-checked: the fallback
+ * must send nothing a browser could not send. Verification is never disabled —
+ * the transport merely trusts the same anchors a browser does — and every hop
+ * still passes safeFetch's SSRF and redirect checks.
+ */
+async function recoverChainUnverifiedMedia(
+  final: HlsCheckResult,
+  url: string,
+  options: typeof DEFAULTS & { headers?: Record<string, string> },
+  gateApplies: boolean
+): Promise<HlsCheckResult> {
+  if (!gateApplies) return final;
+  if (final.errorCode !== "TLS_CHAIN_UNVERIFIED") return final;
+  if (final.deliveryMisses <= 0) return final;
+  if (!url.toLowerCase().startsWith("https://")) return final;
+  // A stored credential would have to travel on the re-check; a browser has none.
+  if (options.headers && Object.keys(options.headers).length > 0) return final;
+
+  const outer = probeContext.getStore();
+  const transport = outer?.transport;
+  const nested = {
+    ...(outer ?? { transport: undefined, credentialOrigin: "", mixedContent: false }),
+    transport: {
+      fetchImpl: transport?.chainRecoveryFetchImpl ?? createBrowserTrustFetch(),
+      resolver: transport?.resolver,
+    },
+  };
+
+  const browserOptions = { ...options, headers: undefined, checkLiveRefresh: false, useFfprobe: false };
+  const recovered = await probeContext.run(nested, () =>
+    isMpegTsUrl(url) ? browserTrustTsResult(url, browserOptions) : probeOnce(url, browserOptions)
+  );
+  // A fallback playlist may itself list plain-HTTP media; that is mixed content.
+  if (outer && nested.mixedContent) outer.mixedContent = true;
+
+  if (!chainRecoveryDelivered(recovered)) {
+    const detail = recovered.error || `${recovered.status}/${recovered.errorCode}`;
+    return {
+      ...final,
+      error: `${final.error || "Certificate chain incomplete"} — and the browser-trust re-check got no media either (${detail})`,
+    };
+  }
+
+  return baseResult({
+    status: "DEGRADED",
+    errorCode: "TLS_CHAIN_UNVERIFIED",
+    httpStatus: recovered.httpStatus,
+    responseTime: recovered.responseTime,
+    finalUrl: recovered.finalUrl ?? url,
+    playlistType: recovered.playlistType,
+    isLive: recovered.isLive,
+    segmentCount: recovered.segmentCount,
+    latestSegment: recovered.latestSegment,
+    newSegmentDetected: recovered.newSegmentDetected,
+    video: recovered.video,
+    audio: recovered.audio,
+    resolution: recovered.resolution,
+    codec: recovered.codec,
+    fps: recovered.fps,
+    browserCors: recovered.browserCors,
+    browserBlocker: recovered.browserBlocker,
+    attempts: final.attempts,
+    error:
+      "Certificate chain not trusted by Node's bundled roots, but the browser trust store verified it and delivered media",
+  });
+}
+
 /**
  * Full health check with retry/backoff. A single transient blip (one dropped
  * connection, one slow DNS lookup) never immediately condemns a normally
@@ -1736,6 +1642,17 @@ async function probeTsStream(
  * between retries) are returned immediately without wasting attempts.
  */
 export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {}): Promise<HlsCheckResult> {
+  let origin = "";
+  try { origin = new URL(rawUrl).origin; } catch { /* The probe reports invalid URLs. */ }
+  return probeContext.run({ transport: options.transport, credentialOrigin: origin, mixedContent: false }, async () => {
+    const result = await checkHlsStreamInternal(rawUrl, options);
+    return probeContext.getStore()?.mixedContent
+      ? { ...result, browserBlocker: "MIXED_CONTENT" }
+      : result;
+  });
+}
+
+async function checkHlsStreamInternal(rawUrl: string, options: ProbeOptions): Promise<HlsCheckResult> {
   // Never point the server at an admin-supplied URL that names this machine, a
   // private network, or the link-local/metadata range (see lib/ssrfGuard.ts).
   // Reported as an invalid link rather than thrown, because every caller — the
@@ -1778,24 +1695,8 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
     });
   }
 
-  // The browser never sees the stored URL — it sees the one the app builds from
-  // it (`normalizeDirectPublicUrl`, used by the watch page's mirror ladder).
-  // Judge that address instead: a link the app silently upgrades to HTTPS would
-  // otherwise be tested as plain HTTP, which is the opposite of the failure the
-  // viewer runs into.
-  const url = browserPlaybackUrl(rawUrl);
-  const gateApplies = !isRelayedUrl(url);
-
-  if (gateApplies && url.toLowerCase().startsWith("http://")) {
-    // Nothing else to test. An HTTPS page may not load this and this app
-    // relays no media, so no viewer can play it however happily the origin
-    // answers a server-side request.
-    return asUnplayable(
-      baseResult({ status: "UNKNOWN", finalUrl: url, playlistType: null, isLive: true }),
-      "MIXED_CONTENT",
-      url
-    );
-  }
+  const url = rawUrl.trim();
+  const gateApplies = true;
 
   const merged = { ...DEFAULTS, ...options, headers: options.headers };
   const maxAttempts = Math.max(1, merged.maxAttempts);
@@ -1860,51 +1761,8 @@ export async function checkHlsStream(rawUrl: string, options: ProbeOptions = {})
   // 10-second budget. A link that is refused in 400ms is not "no evidence".
   final.deliveryMisses = deliveredMedia(final) ? 0 : Math.max(1, attemptsWithoutMedia);
 
-  // A chain Node cannot build is a fact about our trust store, not about the
-  // stream, and it is the one failure a viewer's browser routinely outgrows —
-  // which is how a channel playing happily in VLC and in the admin panel's own
-  // test player ends up filed as delivering nothing. So ask the same URL the way
-  // that browser does, before the miss is allowed to hide the link. Bounded
-  // three ways: only links the browser fetches itself (relayed sources keep their
-  // own rules), only over HTTPS, and never with stored per-link headers, because
-  // those are credentials and credentials do not travel on an unverified socket.
-  if (
-    final.deliveryMisses > 0 &&
-    gateApplies &&
-    final.errorCode === "TLS_CHAIN_UNVERIFIED" &&
-    url.toLowerCase().startsWith("https://") &&
-    !merged.headers
-  ) {
-    const verdict = await browserTrustDeliveryCheck(url, merged.deliveryDeadlineMs);
-    if (verdict.delivered) {
-      return applyBrowserGate(
-        baseResult({
-          status: "DEGRADED",
-          errorCode: "TLS_CHAIN_UNVERIFIED",
-          httpStatus: verdict.httpStatus,
-          // The playlist leg, not the whole walk: this number is compared against
-          // `SLOW_LATENCY_MS` and the ranking bands, which both describe one
-          // request everywhere else the checker reports a time.
-          responseTime: verdict.playlistMs,
-          finalUrl: url,
-          playlistType: verdict.playlistType,
-          isLive: verdict.isLive,
-          segmentCount: verdict.segmentCount,
-          browserCors: verdict.browserCors,
-          error:
-            `Media delivered (${verdict.detail}) once the chain was trusted the way a browser trusts it ` +
-            `(playlist ${verdict.playlistMs}ms, whole recovery walk ${verdict.ms}ms). ` +
-            "Viewers whose own trust store cannot fill the gap may still fail to play it.",
-        }),
-        url,
-        merged,
-        gateApplies
-      );
-    }
-    final.error = `${final.error || "Certificate chain incomplete"} — and the browser-tolerant re-check got no media either (${verdict.detail})`;
-  }
-
-  return applyBrowserGate(final, url, merged, gateApplies);
+  const recovered = await recoverChainUnverifiedMedia(final, url, merged, gateApplies);
+  return applyBrowserGate(recovered, url, merged, gateApplies);
 }
 
 /**

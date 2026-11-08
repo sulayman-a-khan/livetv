@@ -198,6 +198,8 @@ export function browserBlockerLabel(blocker: BrowserBlocker | null | undefined):
 /** Maps stored health to the eight admin-facing states. */
 export function classifyLinkHealth(link: LinkHealthInput): LinkHealthState {
   if (link.adminDisabled) return "disabled";
+  // Ahead of `dead` on purpose: a link the browser may never fetch is not a link
+  // that failed, and "the browser cannot load it" is the fact the admin needs.
   if (link.browserBlocker) return "unplayable";
   // Ahead of `dead` on purpose: a link hidden for delivery is stored `broken`
   // too, and "it would not deliver" is the more useful half of that story — it
@@ -279,25 +281,6 @@ export function decideStreamHealth(
       lastCheckedAt: checkedAt,
       latency: result.latency > 0 ? result.latency : 0,
       lastCountedFailureDay: null,
-      browserBlocker: null,
-      deliveryMisses: 0,
-      deliveryHidden: false,
-      lastDeliveryMissAt: null,
-    };
-  }
-
-  if (result.browserBlocker) {
-    // Structural, not a bad minute at the CDN: hiding it behind three daily
-    // checks would keep serving a link no viewer can ever play. The streak is
-    // parked at the hiding threshold rather than inflated, so the 72-hour purge
-    // still has to earn its own evidence before deleting anything.
-    return {
-      status: "broken",
-      failedAttempts: Math.max((previousFailedAttempts || 0) + 1, MAX_CONSECUTIVE_FAILURES),
-      firstFailedAt: previousFirstFailedAt || checkedAt,
-      lastCheckedAt: checkedAt,
-      latency: 0,
-      lastCountedFailureDay: utcDayKey(checkedAt),
       browserBlocker: result.browserBlocker,
       deliveryMisses: 0,
       deliveryHidden: false,
@@ -332,7 +315,7 @@ export function decideStreamHealth(
     lastCheckedAt: checkedAt,
     latency: 0,
     lastCountedFailureDay: alreadyCountedToday ? (previousCountedFailureDay ?? today) : today,
-    browserBlocker: null,
+    browserBlocker: result.browserBlocker,
     deliveryMisses,
     deliveryHidden,
     lastDeliveryMissAt:

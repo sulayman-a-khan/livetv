@@ -1003,7 +1003,7 @@ export default function AdminDashboard({ secretKey }: AdminDashboardProps) {
 
       setHealthCheckLog(
         `All pinned links checked: ${checked} tested (${active} Active, ${degraded} Degraded, ${broken} Broken${
-          unplayable > 0 ? `, ${unplayable} of them not playable in a browser — hidden from the UI` : ""
+          unplayable > 0 ? `, ${unplayable} of them not playable in a browser — hidden from the website` : ""
         }${
           notDelivering > 0
             ? `, ${notDelivering} gave no media on two looks — hidden until the next scheduled pass gets one`

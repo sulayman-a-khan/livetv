@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GET as channelsRoute } from "@/app/api/channels/route";
+import { GET as channelsRoute } from "@/app/api/app/channels/route";
 import { GET as fixturesRoute } from "@/app/api/fixtures/route";
 
 export const dynamic = "force-dynamic";

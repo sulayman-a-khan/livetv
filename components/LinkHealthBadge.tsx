@@ -15,7 +15,7 @@ const PRESENTATION: Record<LinkHealthState, { label: string; dot: string; text: 
   "temporarily-failed": { label: "Retrying", dot: "bg-amber-400", text: "text-amber-400" },
   "delivery-failed": { label: "Not delivering", dot: "bg-orange-500", text: "text-orange-400" },
   dead: { label: "Dead", dot: "bg-red-400", text: "text-red-400" },
-  "unplayable": { label: "Not playable", dot: "bg-rose-500", text: "text-rose-400" },
+  "unplayable": { label: "Browser-blocked", dot: "bg-rose-500", text: "text-rose-400" },
   disabled: { label: "Disabled", dot: "bg-slate-600", text: "text-slate-500" },
 };
 

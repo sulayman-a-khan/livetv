@@ -28,6 +28,7 @@
  * accurate, so the admin can see that the source lists it.
  */
 
+import { canonicalStreamUrl } from "./channelIdentity";
 import { decideStreamHealth, type StoredStreamStatus } from "./streamHealth";
 import type { BrowserBlocker, HlsCheckResult } from "./streamProbe";
 
@@ -101,6 +102,7 @@ export interface SyncGroup {
   /** New entries whose URL was seen before and has come back. */
   returningEntries: DesiredEntry[];
   changed: boolean;
+  entryRekeys: { _id: string; patch: { canonicalUrl: string } }[];
 }
 
 export interface PlaylistSyncPlan {
@@ -146,12 +148,42 @@ export interface PlannerInput {
 }
 
 /**
+ * Rebuild legacy keys from the original URL, never from the lossy persisted key.
+ * Preserve row IDs and history. Unexpected mixed-version collisions fail before
+ * applying any plan rather than deleting rows or overwriting another row's key.
+ */
+export function rekeyStoredEntries(stored: StoredEntry[]) {
+  const owners = new Map(stored.map((entry) => [entry.canonicalUrl, entry._id]));
+  const targets = new Set<string>();
+  const patches: { _id: string; patch: { canonicalUrl: string } }[] = [];
+  const entries = stored.map((entry) => {
+    const canonicalUrl = canonicalStreamUrl(entry.url);
+    const owner = owners.get(canonicalUrl);
+    if (targets.has(canonicalUrl) || (owner && owner !== entry._id)) {
+      throw new Error("Playlist entry identity conflict; existing rows were preserved");
+    }
+    targets.add(canonicalUrl);
+    if (canonicalUrl !== entry.canonicalUrl) {
+      patches.push({ _id: entry._id, patch: { canonicalUrl } });
+    }
+    return { ...entry, canonicalUrl };
+  });
+  patches.sort((a, b) => a._id.localeCompare(b._id));
+  return { entries, patches };
+}
+
+/**
  * Bundles stored state and playlist state per channel identity. A key can hold
  * several URLs at once (a channel listed twice with mirrors, or an old and a new
  * URL during a provider migration) — that is normal and is kept that way.
  */
 export function groupPlaylistEntries(input: PlannerInput): SyncGroup[] {
-  const { desired, storedEntries, channels } = input;
+  const desired = input.desired.map((entry) => ({ ...entry, canonicalUrl: canonicalStreamUrl(entry.url) }));
+  const { entries: storedEntries, patches: entryRekeys } = rekeyStoredEntries(input.storedEntries);
+  const channels = input.channels.map((channel) => ({
+    ...channel,
+    links: channel.links.map((link) => ({ ...link, canonicalUrl: canonicalStreamUrl(link.url) })),
+  }));
 
   const keys = new Set<string>();
   desired.forEach((d) => keys.add(d.channelKey));
@@ -190,6 +222,7 @@ export function groupPlaylistEntries(input: PlannerInput): SyncGroup[] {
       vanishedEntries,
       returningEntries,
       changed: newEntries.length > 0 || vanishedEntries.length > 0,
+      entryRekeys: entryRekeys.filter((patch) => groupStored.some((entry) => entry._id === patch._id)),
     });
   }
 
@@ -264,6 +297,7 @@ export function planPlaylistSync(
   };
 
   for (const group of groups) {
+    plan.entryPatches.push(...group.entryRekeys);
     // Fails closed: a playlist may only move links on a channel the admin has
     // pinned. An unknown identity (no channel yet) and an unpinned one are both
     // left alone — the sync never creates a channel and never pins one.

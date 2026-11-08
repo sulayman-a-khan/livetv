@@ -52,16 +52,19 @@ export function canonicalChannelKey(name: string): string {
 }
 
 /**
- * Normalizes a stream URL for duplicate detection: protocol and trailing
- * slashes are ignored so http:// and https:// variants of one link collapse.
+ * Normalize only the case-insensitive HTTP scheme and host. Protocol, credentials,
+ * path, query (including order) and fragment remain part of stream identity.
+ * Avoid URL serialization: it can rewrite signed paths and query strings.
  */
 export function canonicalStreamUrl(url: string): string {
   if (!url) return "";
-  return url
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/+$/, "")
-    .toLowerCase();
+  return url.trim().replace(
+    /^(https?):\/\/([^/?#]*)(.*)$/i,
+    (_, scheme: string, authority: string, rest: string) => {
+      const userInfoEnd = authority.lastIndexOf("@") + 1;
+      return `${scheme.toLowerCase()}://${authority.slice(0, userInfoEnd)}${authority.slice(userInfoEnd).toLowerCase()}${rest}`;
+    }
+  );
 }
 
 /* ------------------------------------------------------------------ *

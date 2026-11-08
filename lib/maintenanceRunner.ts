@@ -14,6 +14,7 @@
  */
 
 import { connectToDatabase } from "./db";
+import { canonicalStreamUrl } from "./channelIdentity";
 import Channel from "@/models/Channel";
 import StreamLink from "@/models/StreamLink";
 import PlaylistEntry from "@/models/PlaylistEntry";
@@ -127,8 +128,9 @@ export async function runMaintenance(): Promise<MaintenanceReport> {
     // StreamLink row is the only record that this source owns that link, so the
     // dead purge leaves it hidden instead of breaking that mapping.
     const listedCanonicalUrls = new Set(
-      (await PlaylistEntry.find({ status: "present" }).select("canonicalUrl").lean()).map((e) =>
-        String(e.canonicalUrl)
+      // Legacy persisted keys may not have been rekeyed by a source sync yet.
+      (await PlaylistEntry.find({ status: "present" }).select("url").lean()).map((e) =>
+        canonicalStreamUrl(e.url)
       )
     );
 

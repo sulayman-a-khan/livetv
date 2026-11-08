@@ -38,9 +38,25 @@ export async function POST(
     const { id } = params;
     const url = String(body.url || "").trim();
 
-    if (!/^https?:\/\//i.test(url)) {
+    // Same rule the edit endpoint applies: a real HTTP/HTTPS URL, never one that
+    // carries credentials. An embedded user:pass would be replayed by the prober
+    // and shipped to every viewer, and over HTTP it would travel in clear text.
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Not a URL at all; the guard below rejects it.
+    }
+    if (
+      !parsed ||
+      !/^https?:\/\//i.test(url) ||
+      !["http:", "https:"].includes(parsed.protocol) ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password
+    ) {
       return NextResponse.json(
-        { success: false, error: "A valid http(s) stream URL is required" },
+        { success: false, error: "A valid http(s) stream URL without embedded credentials is required" },
         { status: 400 }
       );
     }

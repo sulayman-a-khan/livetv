@@ -37,6 +37,7 @@ import { safeFetch, UnsafeUrlError } from "./safeFetch";
 import { refreshChannelLinks } from "./maintenanceRunner";
 import {
   groupPlaylistEntries,
+  rekeyStoredEntries,
   planPlaylistSync,
   selectProbeUrls,
   type ChannelState,
@@ -331,9 +332,19 @@ export async function syncPlaylistSource(
   }
 
   const hash = hashContent(content);
-  const storedCount = await PlaylistEntry.countDocuments({ sourceId });
+  const storedRows: StoredEntry[] = (await PlaylistEntry.find({ sourceId }).lean()).map((entry) => ({
+    _id: String(entry._id),
+    channelKey: entry.channelKey,
+    name: entry.name,
+    url: entry.url,
+    canonicalUrl: entry.canonicalUrl,
+    status: entry.status,
+  }));
+  const { entries: storedEntries, patches: rekeys } = rekeyStoredEntries(storedRows);
+  const storedCount = storedEntries.length;
 
-  if (!options.force && source.contentHash === hash && storedCount > 0) {
+  // Even byte-identical playlists must recover URLs collapsed by legacy keys.
+  if (!options.force && source.contentHash === hash && storedCount > 0 && rekeys.length === 0) {
     await PlaylistSource.updateOne(
       { _id: sourceId },
       {
@@ -374,23 +385,12 @@ export async function syncPlaylistSource(
 
   const desired = toDesiredEntries(parsed);
 
-  const storedEntries: StoredEntry[] = (
-    await PlaylistEntry.find({ sourceId }).lean()
-  ).map((entry) => ({
-    _id: String(entry._id),
-    channelKey: entry.channelKey,
-    name: entry.name,
-    url: entry.url,
-    canonicalUrl: entry.canonicalUrl,
-    status: entry.status,
-  }));
-
   const keys = Array.from(
     new Set([...desired.map((d) => d.channelKey), ...storedEntries.map((e) => e.channelKey)])
   );
   const channels = await loadChannelStates(keys, storedEntries);
 
-  const groups: SyncGroup[] = groupPlaylistEntries({ desired, storedEntries, channels });
+  const groups: SyncGroup[] = groupPlaylistEntries({ desired, storedEntries: storedRows, channels });
   const probeTargets = selectProbeUrls(groups);
 
   const urlByCanonical = new Map<string, string>();
@@ -420,6 +420,11 @@ export async function syncPlaylistSource(
     message: `Applying ${plan.linksToCreate.length} link(s) to pinned channels, ${plan.linksToDelete.length} retirement(s).`,
   });
 
+  // If interrupted after rekeying but before adding a previously collapsed URL,
+  // the next run must not take the old byte-identical content shortcut.
+  if (rekeys.length > 0) {
+    await PlaylistSource.updateOne({ _id: sourceId }, { $set: { contentHash: "" } });
+  }
   await applyPlan(sourceId, plan);
 
   // Entries the playlist still lists, that needed no change, only need a fresh

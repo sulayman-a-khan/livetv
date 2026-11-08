@@ -159,6 +159,10 @@ export function checkPublicUrlSafety(rawUrl: string): UrlSafetyVerdict {
     };
   }
 
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: "URL userinfo is not permitted" };
+  }
+
   if (isPrivateOrInternalHost(parsed.hostname)) {
     return {
       ok: false,

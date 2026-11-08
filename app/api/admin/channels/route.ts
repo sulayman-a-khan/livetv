@@ -45,9 +45,22 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-    if (!/^https?:\/\//i.test(url)) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      // Not a URL at all; the guard below rejects it.
+    }
+    if (
+      !parsed ||
+      !/^https?:\/\//i.test(url) ||
+      !["http:", "https:"].includes(parsed.protocol) ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password
+    ) {
       return NextResponse.json(
-        { success: false, error: "A valid http(s) M3U8 stream URL is required" },
+        { success: false, error: "A valid http(s) M3U8 stream URL without embedded credentials is required" },
         { status: 400 }
       );
     }

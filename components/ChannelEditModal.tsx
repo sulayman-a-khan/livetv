@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { CHANNEL_CATEGORIES, normalizeCategory, type ChannelCategory } from "@/lib/categories";
 import { isMpegTsUrl } from "@/lib/streamType";
-import { normalizeDirectPublicUrl } from "@/lib/freeChannelService";
+import { canonicalStreamUrl } from "@/lib/channelIdentity";
 import LinkHealthBadge, { linkHealthLabel, type LinkProbeDetail } from "@/components/LinkHealthBadge";
 import { DirectHlsPlayer } from "@/components/players";
 import MpegTsPlayer from "@/components/MpegTsPlayer";
@@ -68,6 +68,7 @@ interface Props {
  * links are probed server-side before being stored, so their latency feeds the
  * fastest-first ordering straight away.
  */
+const isHttpsStream = (url: string) => /^https:\/\//i.test(url.trim());
 export default function ChannelEditModal({ channel, secretKey, onClose, onSaved }: Props) {
   const [name, setName] = useState(channel.name);
   const [logo, setLogo] = useState(channel.logo || "");
@@ -81,6 +82,10 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
   const [newUrl, setNewUrl] = useState("");
   const [addingLink, setAddingLink] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editUrl, setEditUrl] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [savingUrl, setSavingUrl] = useState(false);
   const [linkActionId, setLinkActionId] = useState<string | null>(null);
   // Link currently open in the manual test player (null = closed).
   const [testStream, setTestStream] = useState<EditableStream | null>(null);
@@ -203,7 +208,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             : inService
             ? `Media arrives, but the checker could not grade the link fully healthy: ${data.probe?.reason || "verified with reservations"}. Link is now ${label.toLowerCase()} and stays in the viewer ladder.`
             : data.stream?.health === "unplayable"
-            ? `The origin serves it, but a viewer's browser cannot: ${data.probe?.reason || "blocked"}. Link is hidden from the UI now — no daily-failure streak needed.`
+            ? `The origin serves it, but a viewer's browser cannot: ${data.probe?.reason || "blocked"}. Link is hidden from the website now — the Android app still receives HTTP links.`
             : data.stream?.health === "delivery-failed"
             ? `It would not hand over media inside 10 seconds, twice: ${data.probe?.reason || "too slow"}. Hidden from viewers; the next scheduled pass puts it back the moment it delivers.`
             : `Probe failed: ${data.probe?.reason || "unreachable"}. Link is now ${label.toLowerCase()} — a single failure never removes it.`,
@@ -225,6 +230,49 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
       setMessage({ type: "err", text: err.message || "Network error." });
     } finally {
       setLinkActionId(null);
+    }
+  };
+
+  const handleSaveUrl = async () => {
+    if (!editingId || savingUrl) return;
+    const url = editUrl.trim();
+    try {
+      const parsed = new URL(url);
+      if (!/^https?:\/\//i.test(url) || !["http:", "https:"].includes(parsed.protocol) ||
+          !parsed.hostname || parsed.username || parsed.password) throw new Error();
+    } catch {
+      setEditError("Enter a valid HTTP/HTTPS URL without embedded credentials.");
+      return;
+    }
+    if (channel.streams.some((st) => st._id !== editingId && canonicalStreamUrl(st.url) === canonicalStreamUrl(url))) {
+      setEditError("This URL already exists in this channel.");
+      return;
+    }
+    setSavingUrl(true);
+    setEditError(null);
+    setMessage(null);
+    setTestStream(null);
+    try {
+      const res = await fetch(`/api/admin/streams/${editingId}`, {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({ action: "edit", url }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setEditError(data.error || "Could not save URL.");
+        return;
+      }
+      setEditingId(null);
+      setMessage({
+        type: "ok",
+        text: `URL saved as a manual link. Pin and disabled settings preserved. Servers re-ranked. ${data.probe?.ok ? "Probe passed." : `Probe: ${data.probe?.reason || "not fully healthy"}.`}`,
+      });
+      await onSaved();
+    } catch (err: any) {
+      setEditError(err.message || "Network error. Please retry.");
+    } finally {
+      setSavingUrl(false);
     }
   };
 
@@ -261,8 +309,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
    * changes — which turned every keystroke in the name field into a teardown
    * and a fresh request to the stream origin.
    *
-   * The URL goes through the same normaliser the viewer's ladder uses, so the
-   * admin sees exactly what a viewer would get from this link.
+   * Preserve the endpoint exactly. HTTP links never mount a browser player.
    */
   const testStreams = useMemo(
     () =>
@@ -270,7 +317,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
         ? [
             {
               _id: testStream._id,
-              url: normalizeDirectPublicUrl(testStream.url),
+              url: testStream.url,
               priority: 0,
               status: "active" as const,
               latency: testStream.latency || 0,
@@ -393,7 +440,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
               <p className="text-[11px] text-slate-500">No server links yet.</p>
             )}
             {sortedStreams.map((st, idx) => {
-              const busy = linkActionId !== null && linkActionId.startsWith(`${st._id}:`);
+              const busy = linkActionId !== null || savingUrl || deletingId !== null || editingId === st._id;
               return (
               <div
                 key={st._id}
@@ -409,14 +456,50 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                   #{idx + 1}
                 </span>
                 <LinkHealthBadge link={st} />
+                <span
+                  className={`shrink-0 rounded border px-1 text-[9px] font-bold uppercase tracking-wide ${
+                    isHttpsStream(st.url)
+                      ? "border-sky-500/30 bg-sky-500/15 text-sky-300"
+                      : "border-fuchsia-500/30 bg-fuchsia-500/15 text-fuchsia-300"
+                  }`}
+                  title={
+                    isHttpsStream(st.url)
+                      ? "HTTPS — playable on the website and in the Android app"
+                      : "HTTP — Android app only; the HTTPS website never exposes this link"
+                  }
+                >
+                  {isHttpsStream(st.url) ? "HTTPS" : "HTTP"}
+                </span>
                 {st.pinned ? (
                   <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/15 px-1 text-[9px] font-bold uppercase tracking-wide text-amber-300">
                     Pinned
                   </span>
                 ) : null}
-                <span className="flex-1 truncate text-[10px] text-slate-300" title={st.url}>
-                  {st.url.replace(/^https?:\/\//, "")}
-                </span>
+                {editingId === st._id ? (
+                  <form className="flex-1 min-w-0 space-y-2" onSubmit={(e) => { e.preventDefault(); void handleSaveUrl(); }}>
+                    <input
+                      aria-label="Stream URL"
+                      aria-invalid={Boolean(editError)}
+                      aria-describedby={editError ? `url-error-${st._id}` : undefined}
+                      autoFocus
+                      value={editUrl}
+                      disabled={savingUrl}
+                      onChange={(e) => { setEditUrl(e.target.value); setEditError(null); }}
+                      className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-xs text-white"
+                    />
+                    {editError && <p id={`url-error-${st._id}`} role="alert" className="text-xs text-red-300">{editError}</p>}
+                    <p className="text-[10px] text-slate-400">HTTP and HTTPS accepted. HTTP playback is Android-only. Saving re-probes the link.</p>
+                    <div className="flex gap-3 text-xs">
+                      <button type="submit" disabled={savingUrl} className="text-emerald-300 disabled:opacity-40">{savingUrl ? "Saving & probing..." : "Save URL"}</button>
+                      <button type="button" disabled={savingUrl} onClick={() => { setEditingId(null); setEditError(null); }} className="text-slate-300 disabled:opacity-40">Cancel</button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <span className="flex-1 truncate text-[10px] text-slate-300" title={st.url}>{st.url}</span>
+                    <button disabled={busy || editingId !== null} onClick={() => { setEditingId(st._id); setEditUrl(st.url); setEditError(null); setTestStream(null); }} className="text-xs text-brand-300 disabled:opacity-40">Edit URL</button>
+                  </>
+                )}
                 <span className="text-[10px] font-bold text-slate-500 shrink-0 flex items-center gap-0.5">
                   <Zap className="w-2.5 h-2.5" />
                   {st.latency || "—"}ms
@@ -491,7 +574,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
                 )}
                 <button
                   onClick={() => handleDeleteLink(st._id)}
-                  disabled={deletingId === st._id}
+                  disabled={busy}
                   className="text-red-400 hover:text-red-300 transition-colors shrink-0 disabled:opacity-40"
                   title="Delete this link"
                 >
@@ -506,7 +589,7 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
             <input
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
-              placeholder="https://example.com/live/stream.m3u8  or  .../stream.ts"
+              placeholder="https://… or http://… (HTTP plays in the Android app only)"
               className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:border-brand-500 outline-none"
             />
             <button
@@ -524,7 +607,8 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
           </div>
           <p className="text-[10px] text-slate-500">
             New links are probed before saving and marked as yours, so no playlist sync or dead-link purge can ever
-            remove them. A link is hidden from viewers after 3 failed daily checks and only deleted after 7.
+            remove them. HTTP and HTTPS are both accepted: HTTPS serves the website and the app, HTTP serves the app
+            only. A link is hidden from viewers after 3 failed daily checks and only deleted after 7.
           </p>
         </div>
       </div>
@@ -549,7 +633,11 @@ export default function ChannelEditModal({ channel, secretKey, onClose, onSaved 
               </button>
             </div>
             <div className="relative w-full aspect-video bg-black">
-              {isMpegTsUrl(testStream.url) ? (
+              {/^http:\/\//i.test(testStream.url.trim()) ? (
+                <div role="status" className="flex h-full items-center justify-center p-6 text-center text-sm text-amber-200">
+                  Android-only stream. HTTP playback is not available in this browser preview. The URL is kept unchanged; use the Android app to play it.
+                </div>
+              ) : isMpegTsUrl(testStream.url) ? (
                 <MpegTsPlayer channelName={channel.name} streams={testStreams} />
               ) : (
                 <DirectHlsPlayer

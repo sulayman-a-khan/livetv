@@ -25,7 +25,7 @@ export interface IPlaylistEntry extends Document {
   /** Display name from the playlist line this URL was read from. */
   name: string;
   url: string;
-  /** Protocol/case/slash-insensitive form — the duplicate-URL guard. */
+  /** Protocol-aware identity; path and query case are preserved. */
   canonicalUrl: string;
   status: PlaylistEntryStatus;
   firstSeenAt: Date;
@@ -43,7 +43,7 @@ const PlaylistEntrySchema = new Schema<IPlaylistEntry>(
     channelKey: { type: String, required: true, trim: true, lowercase: true },
     name: { type: String, default: "" },
     url: { type: String, required: true, trim: true },
-    canonicalUrl: { type: String, required: true, trim: true, lowercase: true },
+    canonicalUrl: { type: String, required: true, trim: true },
     status: {
       type: String,
       enum: ["present", "missing"],

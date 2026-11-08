@@ -125,6 +125,10 @@ export interface SafeFetchOptions {
   resolver?: HostResolver;
   /** Overrides the transport (tests). */
   fetchImpl?: typeof fetch;
+  /** Original credential owner, including when fetching derived playlist URLs. */
+  credentialOrigin?: string;
+  /** Observe validated hops for browser diagnostics. */
+  onRequest?: (url: string) => void;
 }
 
 /** Enough for the CDNs and playlist hosts in use; a longer chain is a loop. */
@@ -138,7 +142,18 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  * hand has to drop them too, or a stored credential would travel to a host
  * the admin never named.
  */
-const CROSS_ORIGIN_STRIPPED_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+// Only known non-secret transport/browser headers may cross a trust boundary.
+// An allowlist also covers custom API-key/token header names we cannot predict.
+const PUBLIC_HEADERS = new Set([
+  "accept", "accept-language", "accept-encoding", "user-agent", "origin",
+  "referer", "range", "if-range", "cache-control", "pragma",
+]);
+
+function stripSensitiveHeaders(headers: Headers): void {
+  for (const name of Array.from(headers.keys())) {
+    if (!PUBLIC_HEADERS.has(name)) headers.delete(name);
+  }
+}
 
 /**
  * `fetch` with every hop checked.
@@ -165,6 +180,12 @@ export async function safeFetch(
 
   for (let hop = 0; ; hop += 1) {
     const target = await assertSafeToFetch(current, resolver);
+    const parsed = new URL(target);
+    if (parsed.protocol === "http:" ||
+        (options.credentialOrigin && parsed.origin !== options.credentialOrigin)) {
+      stripSensitiveHeaders(headers);
+    }
+    options.onRequest?.(target);
 
     const response = await doFetch(target, {
       ...init,
@@ -202,7 +223,7 @@ export async function safeFetch(
 
     // A redirect to another origin does not get the credentials of this one.
     if (new URL(target).origin !== new URL(next.url as string).origin) {
-      for (const name of CROSS_ORIGIN_STRIPPED_HEADERS) headers.delete(name);
+      stripSensitiveHeaders(headers);
     }
 
     current = next.url as string;

@@ -42,7 +42,7 @@ export function parseM3uContent(content: string): ParsedM3uChannel[] {
       const displayName = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "";
 
       currentMeta.name = nameMatch && nameMatch[1] ? nameMatch[1] : displayName || "Unknown Channel";
-    } else if (line.startsWith("http://") || line.startsWith("https://")) {
+    } else if (/^https?:\/\//i.test(line)) {
       if (currentMeta && currentMeta.name) {
         const rawName = currentMeta.name;
 

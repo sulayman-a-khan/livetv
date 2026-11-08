@@ -13,6 +13,32 @@ import {
   type StoredStreamStatus,
 } from "@/lib/streamHealth";
 import type { BrowserBlocker } from "@/lib/streamProbe";
+import { canonicalStreamUrl } from "@/lib/channelIdentity";
+
+/** Reset endpoint health; credentials survive only same-origin HTTPS edits. */
+function editedEndpoint(stream: { url: string; headers?: Record<string, string> }, url: string) {
+  let keepHeaders = false;
+  try {
+    keepHeaders = new URL(url).protocol === "https:" &&
+      new URL(stream.url).origin === new URL(url).origin;
+  } catch { /* Legacy malformed URLs must not retain provider headers. */ }
+  return {
+    url,
+    headers: keepHeaders ? stream.headers : undefined,
+    manual: true,
+    status: "broken" as const,
+    latency: 0,
+    failedAttempts: 0,
+    firstFailedAt: null,
+    lastCheckedAt: null,
+    lastCountedFailureDay: null,
+    browserBlocker: null,
+    deliveryMisses: 0,
+    lastDeliveryMissAt: null,
+    deliveryHidden: false,
+    lastCheck: undefined,
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +98,9 @@ function linkView(link: {
 
 /**
  * PATCH /api/admin/streams/[id]
- *   { action: "test" | "disable" | "restore" | "pin" | "unpin" }
+ *   { action: "test" | "disable" | "restore" | "pin" | "unpin" | "edit", url?: string }
+ *   - `edit` replaces an HTTP/HTTPS endpoint, marks it manual and probes afresh,
+ *     preserving pin/disable intent and refreshing the channel ranking.
  *
  * The manual controls over one server link, which is the point where admin
  * intent beats automation:
@@ -102,11 +130,25 @@ export async function PATCH(
     const body = auth.body;
 
     const action = String(body.action || "").toLowerCase();
-    if (!["test", "disable", "restore", "pin", "unpin"].includes(action)) {
+    if (!["test", "disable", "restore", "pin", "unpin", "edit"].includes(action)) {
       return NextResponse.json(
-        { success: false, error: 'action must be "test", "disable", "restore", "pin" or "unpin"' },
+        { success: false, error: 'action must be "test", "disable", "restore", "pin", "unpin" or "edit"' },
         { status: 400 }
       );
+    }
+
+    const editedUrl = typeof body.url === "string" ? body.url.trim() : "";
+    if (action === "edit") {
+      try {
+        const parsed = new URL(editedUrl);
+        if (!/^https?:\/\//i.test(editedUrl) || !["http:", "https:"].includes(parsed.protocol) ||
+            !parsed.hostname || parsed.username || parsed.password) throw new Error("Invalid URL");
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "Enter a valid HTTP/HTTPS URL without embedded credentials." },
+          { status: 400 }
+        );
+      }
     }
 
     const { id } = params;
@@ -119,6 +161,14 @@ export async function PATCH(
       const stream = await StreamLink.findById(id);
       if (stream) {
         const channelId = String(stream.channelId);
+
+        if (action === "edit") {
+          const siblings = await StreamLink.find({ channelId: stream.channelId, _id: { $ne: stream._id } }).select("url").lean();
+          if (siblings.some((s) => canonicalStreamUrl(s.url) === canonicalStreamUrl(editedUrl))) {
+            return NextResponse.json({ success: false, error: "This URL already exists in this channel." }, { status: 409 });
+          }
+          Object.assign(stream, editedEndpoint(stream, editedUrl));
+        }
 
         // The pin is a label, not a health verdict: it changes nothing else about
         // the link, so it is saved on its own and no probe is run.
@@ -196,11 +246,21 @@ export async function PATCH(
       }
     }
 
+    // Never fall back to a different store for a missing Mongo record.
+    if (conn) return NextResponse.json({ success: false, error: "Stream link not found" }, { status: 404 });
+
     // ---- In-memory mode ----
-    const mem = inMemoryDb.getStreams().find((s) => s._id === id);
-    if (!mem) {
+    const stored = inMemoryDb.getStreams().find((s) => s._id === id);
+    if (!stored) {
       return NextResponse.json({ success: false, error: "Stream link not found" }, { status: 404 });
     }
+    if (action === "edit" && inMemoryDb.getStreams().some((s) =>
+      s._id !== id && s.channelId === stored.channelId && canonicalStreamUrl(s.url) === canonicalStreamUrl(editedUrl)
+    )) {
+      return NextResponse.json({ success: false, error: "This URL already exists in this channel." }, { status: 409 });
+    }
+    // Do not mutate live memory until the replacement probe completes.
+    const mem = action === "edit" ? { ...stored, ...editedEndpoint(stored, editedUrl) } : stored;
 
     if (action === "pin" || action === "unpin") {
       mem.pinned = action === "pin";
@@ -250,6 +310,12 @@ export async function PATCH(
     mem.deliveryMisses = decision.deliveryMisses;
     mem.lastDeliveryMissAt = decision.lastDeliveryMissAt;
     mem.deliveryHidden = decision.deliveryHidden;
+    mem.lastCheck = toLastCheckDetail(result);
+    // Commit only endpoint/probe fields, preserving concurrent pin/disable controls.
+    if (action === "edit") {
+      const { pinned: _pinned, adminDisabled: _disabled, ...replacement } = mem;
+      Object.assign(stored, replacement);
+    }
     inMemoryDb.saveState();
     await refreshChannelLinks(mem.channelId);
 

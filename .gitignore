@@ -58,6 +58,10 @@ scratch_channels.json
 # Throwaway verification scripts
 /.tmp-verify
 
+# Credential-URL cleanup backups. They contain the original addresses and any
+# credentials in them, so they must never reach the repository.
+/backups/
+
 # Compiled output of `npm run test:ranking` (see tsconfig.tests.json)
 /.tmp-tests
 

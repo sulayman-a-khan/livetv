@@ -97,7 +97,11 @@ const FIXTURE_INPUT = {
   visible: false,
 };
 
-test("a card is written to the database and read back from it", async () => {
+test("a card is written to the database and read back from it", async (t) => {
+  // The phase is derived from the clock, so pin the clock before kick-off. Without this the
+  // badge assertion below would start failing the day after the fixture's fixed date.
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-05T10:00:00.000Z") });
+
   const created = await store.createFixture(FIXTURE_INPUT);
 
   // The row is in the database, not in a file: the store's own table is the only copy there is.

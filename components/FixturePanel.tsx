@@ -119,6 +119,39 @@ function rowPhase(row: FixtureRow, now: number): FixtureRow["phase"] {
 }
 
 /**
+ * Whether a broadcast link can actually be played from this site, asked before it is saved.
+ *
+ * Playback is a cross-origin request: hls.js has to fetch the manifest and every segment from
+ * the origin, so the origin must answer with `Access-Control-Allow-Origin` for this site. A
+ * link that does not — a SonyLIV/Akamai token issued for that site's own player, for example —
+ * looks perfectly valid but cannot play a single frame here. The browser makes this same request
+ * at playback time, from this same origin, so a save that passes here is the check a viewer will
+ * repeat rather than a guess about it.
+ *
+ * Returns the reason it cannot be saved, or null when the link answered.
+ */
+async function probeBroadcastLink(raw: string): Promise<string | null> {
+  const value = raw.trim();
+  if (!value) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const res = await fetch(value, { cache: "no-store", signal: controller.signal });
+    if (!res.ok) {
+      return `The broadcast link answered HTTP ${res.status}. Check that it is live and has not expired.`;
+    }
+    return null;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      return "The broadcast link did not answer within 12 seconds. Check that it is live.";
+    }
+    return "The broadcast link's host refuses playback from this site (no CORS header), so it cannot play here. Use a link from a host that allows cross-origin playback — the stream-proxy or worker URLs this catalogue already uses do.";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * The cards the board itself would be showing right now.
  *
  * The board keeps a published card that has a channel and a kickoff inside its window,
@@ -518,6 +551,11 @@ export default function FixturePanel({
     setSaving(true);
     setMessage(null);
     try {
+      const linkProblem = await probeBroadcastLink(form.directUrl);
+      if (linkProblem) {
+        setMessage(linkProblem);
+        return;
+      }
       // The end the admin typed is the match's length: a match is finished when it reaches its
       // end, and that end is what the card is judged by. Two hours is the length of a match that
       // was given no end.
@@ -754,8 +792,8 @@ export default function FixturePanel({
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
                   Plays on the card as its own option, beside the linked channels. Use an HLS
-                  (.m3u8) https:// address — the board is served over HTTPS, and both a
-                  plain-http stream and a non-HLS one would fail to play.
+                  (.m3u8) https:// address whose host allows this site to play it — it is tested
+                  when you save, and a host that only serves its own player is refused.
                 </p>
               </div>
               <div className="sm:col-span-2 space-y-2.5">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft } from "lucide-react";
@@ -27,17 +27,26 @@ function playableHref(raw: string): string | null {
   }
 }
 
+/** What the browser found when it asked the link for its manifest. */
+type LinkStatus = "checking" | "ready" | "invalid" | "blocked" | "timeout" | "http-error";
+
 /**
  * The player a match card's own broadcast link opens.
  *
  * The link is one address, so the ladder is one mirror: there is nothing to fail over to and
- * nothing about the catalogue's ranking to apply. Every other promise of the player — first-frame
- * proof, stall recovery, the tuning overlays — is unchanged, because this is the same component
- * the watch page uses.
+ * nothing about the catalogue's ranking to apply.
+ *
+ * The manifest is asked for before the player is mounted, with the same cross-origin request
+ * hls.js is about to make. If the origin refuses it — a token issued for another site's player
+ * is the common case — the page says so, instead of tuning forever and then reporting a weak
+ * signal for a link that was never going to deliver a frame.
  */
 function DirectLinkPlayer() {
   const src = useSearchParams().get("src") || "";
   const href = playableHref(src);
+  const [status, setStatus] = useState<LinkStatus>("checking");
+  const [httpStatus, setHttpStatus] = useState(0);
+
   const streams = useMemo<FreeStreamMirror[]>(
     () =>
       href
@@ -45,6 +54,58 @@ function DirectLinkPlayer() {
         : [],
     [href]
   );
+
+  useEffect(() => {
+    if (!href) {
+      setStatus("invalid");
+      return;
+    }
+    let live = true;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    setStatus("checking");
+    fetch(href, { cache: "no-store", signal: controller.signal })
+      .then((res) => {
+        if (!live) return;
+        setHttpStatus(res.status);
+        setStatus(res.ok ? "ready" : "http-error");
+      })
+      .catch((err: any) => {
+        if (!live) return;
+        setStatus(err?.name === "AbortError" ? "timeout" : "blocked");
+      })
+      .finally(() => clearTimeout(timer));
+
+    return () => {
+      live = false;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [href]);
+
+  const failure =
+    status === "invalid"
+      ? {
+          title: "This match link cannot be played",
+          detail: "The link is missing, or it is not an HTTPS address.",
+        }
+      : status === "blocked"
+        ? {
+            title: "This match link cannot be played here",
+            detail:
+              "Its host blocks playback from other websites (CORS), so it only works inside the site that issued it.",
+          }
+        : status === "timeout"
+          ? {
+              title: "The match link did not answer",
+              detail: "The host may be down, or the link may have expired.",
+            }
+          : status === "http-error"
+            ? {
+                title: `The match link is unavailable (HTTP ${httpStatus})`,
+                detail: "It may have expired, or the match may not have started yet.",
+              }
+            : null;
 
   return (
     <main className="min-h-[100dvh] bg-[#05080f] text-white">
@@ -60,15 +121,24 @@ function DirectLinkPlayer() {
         </Link>
 
         <div className="mt-3 overflow-hidden rounded-xl border border-slate-800 bg-black">
-          {streams.length === 1 ? (
+          {status === "ready" && streams.length === 1 ? (
             <DirectHlsPlayer channelName="Live match" streams={streams} />
           ) : (
             <div className="aspect-video w-full flex flex-col items-center justify-center gap-2 px-6 text-center">
-              <AlertCircle className="w-9 h-9 text-slate-500" />
-              <p className="text-sm font-black text-white">This match link cannot be played</p>
-              <p className="text-xs text-slate-400">
-                The link is missing, or it is not an HTTPS address.
-              </p>
+              {failure ? (
+                <>
+                  <AlertCircle className="w-9 h-9 text-slate-500" />
+                  <p className="text-sm font-black text-white">{failure.title}</p>
+                  <p className="text-xs text-slate-400 max-w-sm">{failure.detail}</p>
+                </>
+              ) : (
+                <>
+                  {/* A load indicator inside the player's own frame, never a page-wide screen:
+                      the frame is already where the picture will appear. */}
+                  <span className="w-6 h-6 rounded-full border-2 border-slate-600 border-t-emerald-400 animate-spin" />
+                  <p className="text-xs font-bold text-slate-400">Checking the match link…</p>
+                </>
+              )}
             </div>
           )}
         </div>

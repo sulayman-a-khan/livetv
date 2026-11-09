@@ -11,10 +11,11 @@ import {
  * The pure rules of a match card: what a valid admin entry looks like, and how a
  * fixture's clock maps to the badge a card shows.
  *
- * A card names channels from the Direct HLS catalogue and nothing else, so this
- * module knows nothing about the premium tier, the stream box or a local store
- * file: it is the vocabulary the editor, the admin API and the public board all
- * speak, and the storing half lives in `lib/fixtureStore.ts`.
+ * A card names channels from the Direct HLS catalogue, and may also carry one broadcast
+ * address the admin typed for the match itself, so this module knows nothing about the
+ * premium tier, the stream box or a local store file: it is the vocabulary the editor, the
+ * admin API and the public board all speak, and the storing half lives in
+ * `lib/fixtureStore.ts`.
  */
 
 /** The only sports a fixture card is entered for. */
@@ -78,6 +79,11 @@ export interface FixtureInput {
   durationMinutes: number;
   /** Every channel this match can be watched on, in the order the admin picked them. */
   channels: FixtureChannelRef[];
+  /**
+   * An https address the admin entered for this match itself. Empty when the card is
+   * watched on its linked channels only; absent on a patch that does not change it.
+   */
+  directUrl?: string;
   visible: boolean;
 }
 
@@ -93,6 +99,40 @@ function toStartDate(raw: unknown, errors: string[]): Date | null {
     return null;
   }
   return date;
+}
+
+/**
+ * The broadcast address a card may carry, read from a payload that may have come from anywhere.
+ *
+ * The board is served over HTTPS, so a plain-http address would be blocked as mixed content the
+ * moment a viewer pressed play: it is refused here rather than stored as a link that cannot work.
+ * Credentials are refused for the same reason they are refused on a channel link — the address is
+ * published on a card, and a password in it would be published with it.
+ */
+function toDirectUrl(raw: unknown, errors: string[]): string {
+  const value = typeof raw === "string" ? raw.trim() : "";
+  if (!value) return "";
+  if (value.length > 2048) {
+    errors.push("Direct broadcast link is too long");
+    return "";
+  }
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    errors.push("Direct broadcast link must be an https:// address");
+    return "";
+  }
+  if (url.protocol !== "https:" || !url.hostname) {
+    errors.push("Direct broadcast link must be an https:// address");
+    return "";
+  }
+  if (url.username || url.password) {
+    errors.push("Direct broadcast link must not carry a username or password");
+    return "";
+  }
+  return value;
 }
 
 /**
@@ -262,6 +302,10 @@ export function validateFixtureInput(
       creating && body.channels === undefined
         ? []
         : toChannelRefs(body.channels, "Linked channel", errors, carried);
+  }
+
+  if (creating || has("directUrl")) {
+    value.directUrl = toDirectUrl(body.directUrl, errors);
   }
 
   // The single-channel field this tier shipped with is gone from the write path on purpose:

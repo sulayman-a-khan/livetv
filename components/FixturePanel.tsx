@@ -38,6 +38,7 @@ interface FixtureRow {
   startsAt: string;
   durationMinutes: number;
   channels: ChannelRef[];
+  directUrl: string;
   visible: boolean;
   phase: "upcoming" | "live" | "finished";
 }
@@ -69,6 +70,7 @@ interface FormState {
   /** The estimated end, in the same local wall clock the kickoff uses. */
   endsAt: string;
   channels: ChannelRef[];
+  directUrl: string;
   visible: boolean;
   /** Whether the team fields are still following the title rather than the admin's own typing. */
   autoTeams: boolean;
@@ -84,6 +86,7 @@ const EMPTY_FORM: FormState = {
   startsAt: "",
   endsAt: "",
   channels: [],
+  directUrl: "",
   visible: false,
   autoTeams: true,
 };
@@ -409,6 +412,7 @@ export default function FixturePanel({
       startsAt,
       endsAt: endTimeAfter(startsAt, row.durationMinutes),
       channels: row.channels.map((ref) => ({ ...ref })),
+      directUrl: row.directUrl || "",
       visible: row.visible,
       // A card whose title already names its two teams keeps following that title, so a corrected
       // title corrects the teams with it. One whose teams were typed apart from the title does not.
@@ -529,6 +533,7 @@ export default function FixturePanel({
         startsAt: form.startsAt ? new Date(form.startsAt).toISOString() : "",
         durationMinutes,
         channels: form.channels,
+        directUrl: form.directUrl,
         visible: form.visible,
       };
       const res = await fetch(editingId ? `/api/admin/fixtures/${editingId}` : "/api/admin/fixtures", {
@@ -738,6 +743,21 @@ export default function FixturePanel({
                   The match is finished — and the card disappears — when it reaches its end time.
                 </p>
               </div>
+              <div className="sm:col-span-2">
+                <label className={LABEL_CLASS}>Direct broadcast link (optional)</label>
+                <input
+                  className={FIELD_CLASS}
+                  value={form.directUrl}
+                  onChange={(e) => setForm({ ...form, directUrl: e.target.value })}
+                  placeholder="https://…"
+                  inputMode="url"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Plays on the card as its own option, beside the linked channels. Use an HLS
+                  (.m3u8) https:// address — the board is served over HTTPS, and both a
+                  plain-http stream and a non-HLS one would fail to play.
+                </p>
+              </div>
               <div className="sm:col-span-2 space-y-2.5">
                 <p className={LABEL_CLASS}>
                   Watch on · {form.channels.length} linked
@@ -857,6 +877,7 @@ export default function FixturePanel({
                     {row.channels.length
                       ? ` · ${row.channels.map(channelName).join(" · ")}`
                       : ""}
+                    {row.directUrl ? " · Direct link" : ""}
                   </p>
                   {screenHint(row, onScreen.has(row._id), now)}
                 </div>

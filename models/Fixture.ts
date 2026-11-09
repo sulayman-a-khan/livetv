@@ -42,6 +42,12 @@ export interface IFixture extends Document {
    */
   channels: FixtureChannelRef[];
   /**
+   * A broadcast address the admin typed for this match itself, played beside the linked
+   * channels. It is the one URL a public card may carry, and it is published on purpose:
+   * a match-specific link is only useful if the viewer can open it.
+   */
+  directUrl: string;
+  /**
    * The one premium channel this match was tied to, before a card could name several. Reads
    * still honour it (see `toFixtureRecord`), writes never set it, and nothing reads it back.
    */
@@ -73,6 +79,7 @@ const FixtureSchema = new Schema<IFixture>(
       ],
       default: [],
     },
+    directUrl: { type: String, default: "", trim: true },
     premiumChannelId: { type: String, default: null },
     visible: { type: Boolean, default: false, index: true },
   },

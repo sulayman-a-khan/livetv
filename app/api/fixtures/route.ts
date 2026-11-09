@@ -21,8 +21,10 @@ const BOARD_CACHE = "public, s-maxage=15";
  * The public projection of the match board: teams, competition, kickoff clock and the channels a
  * card can be watched on, each with the route that opens it or the reason it has none.
  *
- * Source URLs and upstream headers are not in this response, and there is no way to ask for them
- * through it: a choice is an id, a name, a category, a picture and this site's own address.
+ * Catalogue source URLs and upstream headers are not in this response, and there is no way to ask
+ * for them through it: a choice is an id, a name, a category, a picture and this site's own address.
+ * The one URL a card may carry is `directUrl`: the broadcast address the admin typed for the match
+ * itself and chose to publish on the card.
  *
  * A link whose channel has been deleted is in it as a count, not an id. The board has no name for
  * such a reference and will not print a raw one it cannot check, so the card says that one of its

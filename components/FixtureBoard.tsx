@@ -4,7 +4,12 @@ import { ReactNode, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Goal, Play } from "lucide-react";
 import FixtureChannelDialog, { unavailableText } from "./FixtureChannelDialog";
-import { offersOf, type FixtureChoice, type PublicFixture } from "@/lib/fixtureBoard";
+import {
+  directWatchPath,
+  offersOf,
+  type FixtureChoice,
+  type PublicFixture,
+} from "@/lib/fixtureBoard";
 import { teamFlagUrl } from "@/lib/teamFlags";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -195,6 +200,10 @@ function FixtureCard({
 }) {
   const live = fixture.phase === "live";
   const offers = offersOf(fixture.choices);
+  // The admin's own broadcast link is one more thing the card can open, so it counts beside the
+  // channels when deciding whether a tap goes straight in or has to ask.
+  const directPath = fixture.directUrl ? directWatchPath(fixture.directUrl) : null;
+  const offerCount = offers.length + (directPath ? 1 : 0);
   const startsAt = new Date(fixture.startsAt).getTime();
   const kickoff = kickoffParts(startsAt);
   const day = dayWord(startsAt, now);
@@ -205,7 +214,7 @@ function FixtureCard({
   const competition = fixture.competition.trim();
   // A live match whose channels are all shut says so on its face: a red badge would promise a
   // stream the card cannot open.
-  const noOffer = live && offers.length === 0 ? noOfferText(fixture.choices) : "";
+  const noOffer = live && offerCount === 0 ? noOfferText(fixture.choices) : "";
 
   const card = (
     <article
@@ -326,7 +335,7 @@ function FixtureCard({
     );
   }
 
-  if (offers.length > 1) {
+  if (offerCount > 1) {
     return (
       <button
         type="button"

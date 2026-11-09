@@ -4,8 +4,10 @@
  * no MongoDB, no network, no React — so `npm run test:fixtures` executes
  * the same rules the homepage renders.
  *
- * A projected card never carries a source URL or an upstream header. Those live
- * on the admin record, and this module is the only path a viewer takes.
+ * A projected card never carries a catalogue source URL or an upstream header. Those live
+ * on the admin record, and this module is the only path a viewer takes. The one address a
+ * card may carry is `directUrl`: the broadcast link the admin typed for the match itself,
+ * which is published on purpose because that is the whole use of it.
  */
 
 import type { FixtureChannelRef, FixturePhase, FixtureSourceType, FixtureSport } from "./fixtures";
@@ -36,6 +38,8 @@ export interface BoardFixture {
   durationMinutes: number;
   /** Every channel the admin linked, each naming the tier it comes from. */
   channels: FixtureChannelRef[];
+  /** The admin's own broadcast address for the match, when they entered one. */
+  directUrl?: string;
   visible: boolean;
   phase: FixturePhase;
 }
@@ -117,6 +121,13 @@ export interface PublicFixture {
   durationMinutes: number;
   phase: FixturePhase;
   /**
+   * The broadcast address the admin entered for the match itself, or an empty string.
+   *
+   * This is the one URL a card may carry, and it is deliberate: the admin entered it so a
+   * viewer could open it. Catalogue source URLs remain absent for every channel on the card.
+   */
+  directUrl: string;
+  /**
    * Every linked channel this board can still name, in the order the admin picked them, each saying
    * whether it can be opened now.
    */
@@ -131,9 +142,10 @@ export interface PublicFixture {
    */
   staleReferences: number;
   /**
-   * Where a tap goes, or null. Non-null only when exactly one choice can be opened, which is the
-   * whole difference between a card that plays and a card that has to ask: one answer needs no
-   * dialog, two need the viewer to pick, none leave it a poster.
+   * Where a tap goes, or null. Non-null only when exactly one thing can be opened — one
+   * channel, or the card's own broadcast link — which is the whole difference between a
+   * card that plays and a card that has to ask: one answer needs no dialog, two need the
+   * viewer to pick, none leave it a poster.
    */
   watchPath: string | null;
 }
@@ -264,6 +276,15 @@ export function nextFallbackChannel(
 }
 
 /**
+ * The address a card's own broadcast link opens on: this site's player, with the admin's
+ * address handed to it. Kept here so the projection, the card and the dialog cannot spell
+ * the same route three different ways.
+ */
+export function directWatchPath(url: string): string {
+  return `/watch/direct?src=${encodeURIComponent(url)}`;
+}
+
+/**
  * Live matches first (soonest kickoff among them), then upcoming ones in kickoff
  * order, capped at the slots the slot can hold.
  *
@@ -299,9 +320,11 @@ export function projectFixtures(
     .filter((fixture) => fixture.visible && fixture.phase !== "finished")
     .map((fixture) => {
       const refs = dedupeRefs(fixture.channels);
-      // Nothing linked is the one case a card has no voice for. Every link gone stale is a
-      // different fact — the match is real and published, and its channels are what is missing —
-      // so it stays on the board and says that.
+      const directUrl = typeof fixture.directUrl === "string" ? fixture.directUrl.trim() : "";
+      // Nothing linked is the one case a card has no voice for. The broadcast link rides
+      // beside the linked channels; it does not put a card on the board on its own. Every link
+      // gone stale is a different fact — the match is real and published, and its channels are
+      // what is missing — so it stays on the board and says that.
       if (refs.length === 0) return null;
       const choices: FixtureChoice[] = [];
       for (const ref of refs) {
@@ -310,13 +333,17 @@ export function projectFixtures(
       }
       const startsAt = new Date(fixture.startsAt).getTime();
       if (fixture.phase === "upcoming" && startsAt > cutoff) return null;
-      return { fixture, choices, staleReferences: refs.length - choices.length };
+      return { fixture, choices, directUrl, staleReferences: refs.length - choices.length };
     })
     .filter(
       (
         entry
-      ): entry is { fixture: BoardFixture; choices: FixtureChoice[]; staleReferences: number } =>
-        entry !== null
+      ): entry is {
+        fixture: BoardFixture;
+        choices: FixtureChoice[];
+        directUrl: string;
+        staleReferences: number;
+      } => entry !== null
     )
     .sort((a, b) => {
       if (a.fixture.phase !== b.fixture.phase) return a.fixture.phase === "live" ? -1 : 1;
@@ -324,11 +351,14 @@ export function projectFixtures(
     })
     .slice(0, MAX_CARDS);
 
-  return shown.map(({ fixture, choices, staleReferences }) => {
+  return shown.map(({ fixture, choices, directUrl, staleReferences }) => {
     // The card's own link is the rule the card is drawn by: exactly one thing to offer means a
     // tap can go straight to it, more than one means the viewer has to choose, so the answer to
-    // "is this a link?" is computed here once rather than re-derived in the markup.
+    // "is this a link?" is computed here once rather than re-derived in the markup. The
+    // broadcast link counts as one more thing to offer, whether or not channels are linked.
     const offers = offersOf(choices);
+    const directPath = directUrl ? directWatchPath(directUrl) : null;
+    const openable = offers.length + (directPath ? 1 : 0);
     return {
       id: fixture._id,
       title: fixture.title || "",
@@ -341,9 +371,11 @@ export function projectFixtures(
       startsAt: fixture.startsAt,
       durationMinutes: fixture.durationMinutes,
       phase: fixture.phase,
+      directUrl,
       choices,
       staleReferences,
-      watchPath: offers.length === 1 ? offers[0].watchPath : null,
+      watchPath:
+        openable === 1 ? (offers.length === 1 ? offers[0].watchPath : directPath) : null,
     };
   });
 }

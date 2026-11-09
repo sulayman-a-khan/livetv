@@ -10,9 +10,10 @@
  * `npm run test:fixture-store`.
  *
  * A card names channels from the Direct HLS catalogue, so a new link may only be a catalogue
- * channel. The board still renders the links of cards written before that rule — the secured
- * half of the projection is unchanged — which is why the projection tests below still speak of
- * premium channels.
+ * channel, and may add one https broadcast address the admin typed for the match itself. The
+ * board still renders the links of cards written before that rule — the secured half of the
+ * projection is unchanged — which is why the projection tests below still speak of premium
+ * channels.
  */
 
 import assert from "node:assert/strict";
@@ -115,6 +116,33 @@ test("a fixture is football or cricket, needs both teams and a real kickoff", ()
 /** The first error a payload produced, which is what the admin reads on screen. */
 const firstError = (body: Record<string, unknown>) =>
   validateFixtureInput({ ...GOOD_FIXTURE, channels: body.channels }, true).errors;
+
+test("the broadcast link is optional, and must be an https address with no credentials", () => {
+  const accepted = validateFixtureInput(
+    { ...GOOD_FIXTURE, directUrl: "https://cdn.example/live.m3u8" },
+    true
+  );
+  assert.deepEqual(accepted.errors, []);
+  assert.equal(accepted.value.directUrl, "https://cdn.example/live.m3u8");
+
+  // Absent on a create is the same answer as empty: the card is watched on its channels.
+  assert.equal(validateFixtureInput(GOOD_FIXTURE, true).value.directUrl, "");
+
+  const rejects = (directUrl: string) =>
+    validateFixtureInput({ ...GOOD_FIXTURE, directUrl }, true).errors;
+  // A plain-http stream would be blocked as mixed content the moment a viewer pressed play,
+  // so it is refused at entry instead of stored as a link that cannot work.
+  assert.deepEqual(rejects("http://cdn.example/live.m3u8"), [
+    "Direct broadcast link must be an https:// address",
+  ]);
+  assert.deepEqual(rejects("not a link"), [
+    "Direct broadcast link must be an https:// address",
+  ]);
+  // The address is published on a card, so a credential in it would be published with it.
+  assert.deepEqual(rejects("https://user:pass@cdn.example/live.m3u8"), [
+    "Direct broadcast link must not carry a username or password",
+  ]);
+});
 
 test("a card links catalogue channels, and only catalogue channels", () => {
   const directOnly = validateFixtureInput(
@@ -548,6 +576,7 @@ test("the projection names the channels but carries no source or header", () => 
   const CARD_KEYS = [
     "choices",
     "competition",
+    "directUrl",
     "durationMinutes",
     "id",
     "phase",
@@ -1166,6 +1195,43 @@ test("the board asks each tier once, for the ids its cards actually name", () =>
     board.map((card) => card.staleReferences),
     [0, 1, 0, 1]
   );
+});
+
+test("a direct broadcast link is one more option beside the linked channels", () => {
+  const now = new Date("2026-10-25T12:00:00.000Z");
+  const base: BoardFixture = {
+    _id: "fx_direct",
+    sport: "football",
+    teamA: "Team A",
+    teamB: "Team B",
+    teamALogo: "",
+    teamBLogo: "",
+    competition: "Test Cup",
+    startsAt: new Date("2026-10-25T14:00:00.000Z").toISOString(),
+    durationMinutes: 120,
+    channels: [direct(DIRECT_ONE._id)],
+    directUrl: "https://cdn.example/live.m3u8",
+    visible: true,
+    phase: "upcoming",
+  };
+
+  // The link is a second thing to offer beside the channel, so the card asks rather than
+  // choosing for the viewer — the same rule that governs several channels.
+  const [card] = READY_BOARD([base], [], now, [DIRECT_ONE]);
+  assert.equal(card.directUrl, "https://cdn.example/live.m3u8");
+  assert.equal(card.choices.length, 1);
+  assert.equal(card.watchPath, null);
+
+  // When the linked channel goes stale the link is still openable, so the card it belongs to
+  // survives and leads somewhere: a dead channel does not take the match off the board.
+  const [rescued] = READY_BOARD([base], [], now, []);
+  assert.equal(rescued.choices.length, 0);
+  assert.equal(rescued.staleReferences, 1);
+  assert.equal(rescued.watchPath, "/watch/direct?src=https%3A%2F%2Fcdn.example%2Flive.m3u8");
+
+  // A link alone does not put a card on the board: the board still names a match by the
+  // channels it can be watched on, which is also what the app's fixture tab can open.
+  assert.equal(READY_BOARD([{ ...base, channels: [] }], [], now).length, 0);
 });
 
 test("a channel that cannot play moves to the next one on the card, in the card's order", () => {

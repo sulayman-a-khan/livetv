@@ -85,6 +85,7 @@ export async function POST(req: NextRequest) {
       startsAt: value.startsAt!,
       durationMinutes: value.durationMinutes ?? 120,
       channels: value.channels ?? [],
+      directUrl: value.directUrl ?? "",
       visible: value.visible === true,
     });
 

@@ -2,17 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import type { ChoiceState, FixtureChoice, PublicFixture } from "@/lib/fixtureBoard";
+import {
+  directWatchPath,
+  type ChoiceState,
+  type FixtureChoice,
+  type PublicFixture,
+} from "@/lib/fixtureBoard";
 
 /**
  * The channel picker a fixture card opens when the match is linked to more than one channel.
  *
  * It does not play anything and it does not fetch anything: every row is either a link to a route
  * that already exists — `/watch/…` for a direct channel, `/premium/…` for a secured one — or the
- * channel named with the reason it cannot be opened right now. A link whose channel has been deleted
- * is not a row at all; it is the one line under them, counted. So the dialog cannot invent a second
- * delivery path, cannot reach the stream box, and cannot learn a source line even if it wanted to:
- * the payload it is handed has none.
+ * admin's own broadcast link, which opens on the site's direct player. A link whose channel has
+ * been deleted is not a row at all; it is the one line under them, counted. So the dialog cannot
+ * invent a second delivery path, cannot reach the stream box, and cannot learn a catalogue source
+ * line even if it wanted to: the payload it is handed carries none. The one address it does carry
+ * is `directUrl`, which the admin entered to be published.
  */
 
 /** The reason a choice is on the card but not openable, in the words a viewer reads. */
@@ -122,6 +128,34 @@ function ChoiceMark({
 }
 
 /**
+ * The admin's own broadcast link, as one more way to watch the match.
+ *
+ * It is the only row here that takes the viewer somewhere other than a channel page: the
+ * site's direct player, which the link opens. It sits after the channels so the admin's
+ * channel order keeps the numbers it was given.
+ */
+function DirectLinkRow({ href, order }: { href: string; order: number }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-2.5 rounded-xl border border-slate-700/70 bg-white/[0.04] p-2.5 transition-colors active:bg-white/[0.08]"
+    >
+      <span className="text-[10px] font-black text-slate-500 w-3 shrink-0 text-center">{order}</span>
+      <span className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/40 shrink-0 flex items-center justify-center text-[11px] text-emerald-400">
+        ▶
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[12px] font-bold text-slate-100 truncate">
+          Direct broadcast
+        </span>
+        <span className="block text-[10px] font-bold text-slate-400 truncate">Match link</span>
+      </span>
+      <span className="text-[11px] font-black text-emerald-400 shrink-0">▶</span>
+    </Link>
+  );
+}
+
+/**
  * The card's dead links, as one line.
  *
  * Reachable by keyboard for the same reason a disabled row is: the viewer is told the match has a
@@ -223,7 +257,7 @@ export default function FixtureChannelDialog({
               id="fixture-chooser-match"
               className="text-sm font-black text-white truncate"
             >{`${fixture.teamA} vs ${fixture.teamB}`}</h2>
-            <p className="text-[11px] font-bold text-slate-400">কোন চ্যানেলে দেখবেন?</p>
+            <p className="text-[11px] font-bold text-slate-400">কোথায় দেখবেন?</p>
           </div>
           <button
             type="button"
@@ -239,6 +273,12 @@ export default function FixtureChannelDialog({
           {fixture.choices.map((choice, index) => (
             <ChoiceRow key={`${choice.sourceType}:${choice.channelId}`} choice={choice} order={index + 1} />
           ))}
+          {fixture.directUrl ? (
+            <DirectLinkRow
+              href={directWatchPath(fixture.directUrl)}
+              order={fixture.choices.length + 1}
+            />
+          ) : null}
           {fixture.staleReferences > 0 ? <StaleRow count={fixture.staleReferences} /> : null}
         </div>
       </div>

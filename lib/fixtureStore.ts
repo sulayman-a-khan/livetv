@@ -34,6 +34,8 @@ export interface FixtureRecord {
   durationMinutes: number;
   /** Every channel this match can be watched on, each naming the tier it comes from. */
   channels: FixtureChannelRef[];
+  /** The admin's own broadcast address for the match, or an empty string. */
+  directUrl: string;
   visible: boolean;
   /** Derived from the kickoff clock, so the admin sees the badge a card would show. */
   phase: "upcoming" | "live" | "finished";
@@ -91,6 +93,7 @@ function toFixtureRecord(
     startsAt?: Date;
     durationMinutes?: number;
     channels?: unknown;
+    directUrl?: string;
     premiumChannelId?: string | null;
     visible?: boolean;
     createdAt?: Date;
@@ -112,6 +115,7 @@ function toFixtureRecord(
     startsAt: startsAt.toISOString(),
     durationMinutes: duration,
     channels: readFixtureChannels(row),
+    directUrl: row.directUrl || "",
     visible: row.visible === true,
     phase: fixturePhase(startsAt, duration, now),
     createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
@@ -163,6 +167,7 @@ export async function createFixture(input: FixtureInput): Promise<FixtureRecord>
     startsAt: input.startsAt,
     durationMinutes: input.durationMinutes,
     channels: input.channels,
+    directUrl: input.directUrl ?? "",
     visible: input.visible,
   });
   return toFixtureRecord(created.toObject(), now);

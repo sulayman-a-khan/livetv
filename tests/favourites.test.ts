@@ -204,9 +204,25 @@ test("the route answers with the list the site holds under the key", async () =>
   assert.equal(answer.cacheControl, "no-store");
 });
 
-test("a key that holds no list is answered with an empty list, not with a failure", async () => {
+test("a key the site holds no record of is answered with a failure, not with an empty list", async () => {
   const answer = await read("/api/app/favourites?key=ZZZZZZZZ");
 
+  // There is no list under that key. An empty list would be read as "this
+  // viewer keeps no channels", and the app would take the list off the device
+  // that still has it, so the site says it holds nothing instead.
+  assert.equal(answer.status, 404);
+  assert.equal(answer.body.success, false);
+  assert.equal(answer.body.ids, undefined);
+  assert.equal(answer.cacheControl, "no-store");
+});
+
+test("a key the site holds an empty list under is answered with an empty list", async () => {
+  await store.writeFavouriteList("EMPTYLST", []);
+
+  const answer = await read("/api/app/favourites?key=EMPTYLST");
+
+  // The list is there and it is empty because the viewer emptied it: that is an
+  // answer, and it is not the same answer as no list at all.
   assert.equal(answer.status, 200);
   assert.equal(answer.body.success, true);
   assert.deepEqual(answer.body.ids, []);
@@ -246,6 +262,38 @@ test("the list the device writes is the list the other device reads", async () =
 
   const readBack = await read("/api/app/favourites?key=SYNCKEYS");
   assert.deepEqual(readBack.body.ids, ["c1", "c2"]);
+});
+
+test("a write that lost the race is landed by the second attempt, not answered as an empty list", async () => {
+  // Two devices writing the same key for the first time at the same moment: the
+  // second write is refused by the unique index, and the first one has left the
+  // row behind. The refused write is made again, and the list lands.
+  db.model.failNextWritesWithDuplicateKey(1);
+
+  const answer = await read("/api/app/favourites", { key: "RACEDKEY", ids: ["c1", "c2"] });
+
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.success, true);
+  assert.deepEqual(answer.body.ids, ["c1", "c2"]);
+
+  const readBack = await read("/api/app/favourites?key=RACEDKEY");
+  assert.equal(readBack.status, 200);
+  assert.deepEqual(readBack.body.ids, ["c1", "c2"]);
+});
+
+test("a write that is refused twice is answered as a failure, not as an empty list", async () => {
+  // The second attempt is refused as well, so nothing was written. Answering
+  // with an empty list would tell the app the viewer keeps no channels and
+  // would take the list off the device that still has it.
+  db.model.failNextWritesWithDuplicateKey(2);
+
+  const answer = await read("/api/app/favourites", { key: "REFUSED2", ids: ["c1"] });
+
+  assert.equal(answer.status, 503);
+  assert.equal(answer.body.success, false);
+  assert.equal(answer.body.ids, undefined);
+  // What failed is said and nothing about the database behind it is.
+  assert.equal(answer.body.error, "Failed to save the list");
 });
 
 test("a write that is refused writes nothing", async () => {
@@ -299,6 +347,8 @@ test("a site that cannot be reached says so instead of emptying the list", async
     const answer = await read("/api/app/favourites?key=ABCDEFGH");
     assert.equal(answer.status, 503);
     assert.equal(answer.body.success, false);
+    // What failed is said and nothing about the database behind it is.
+    assert.equal(answer.body.error, "Failed to read the saved list");
   } finally {
     dbModule.connectToDatabase = originalConnect;
   }

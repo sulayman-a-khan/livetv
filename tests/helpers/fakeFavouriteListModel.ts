@@ -25,18 +25,47 @@ const clone = (row: FakeFavouriteRow): FakeFavouriteRow => ({
 });
 
 /**
+ * The model as the store calls it.
+ *
+ * `findOne` reads a row and `findOneAndUpdate` writes one, with an insert when
+ * the row is not there yet — which is how a list is written the first time and
+ * replaced afterwards.
+ */
+export interface FakeFavouriteListModel {
+  /** The rows the model holds. */
+  rows: FakeFavouriteRow[];
+  /**
+   * Makes the next `count` writes fail the way a racing insert fails: the write
+   * is refused with the duplicate-key error the unique index raises, and no row
+   * is written.
+   */
+  failNextWritesWithDuplicateKey: (count: number) => void;
+  findOne: (filter: { key?: string }) => { lean: () => Promise<FakeFavouriteRow | null> };
+  findOneAndUpdate: (
+    filter: { key?: string },
+    update: { key: string; ids: string[] },
+    options?: { upsert?: boolean; new?: boolean }
+  ) => { lean: () => Promise<FakeFavouriteRow | null> };
+}
+
+/**
  * The list rows, as the store reads and writes them.
  *
  * `findOneAndUpdate` with an insert is how a list is written the first time, and the
  * same call without one is how it is replaced afterwards — so the fake answers both.
  */
-export function createFakeFavouriteListModel(rows: FakeFavouriteRow[] = []) {
+export function createFakeFavouriteListModel(rows: FakeFavouriteRow[] = []): FakeFavouriteListModel {
   let counter = 0;
+  /** How many of the next writes are refused with a duplicate-key error. */
+  let duplicateFailures = 0;
   /** A real ObjectId shape, because the row carries one. */
   const nextId = () => `65b5c72de29c995275489${(counter++).toString(16).padStart(3, "0")}`;
 
   return {
     rows,
+    failNextWritesWithDuplicateKey(count: number) {
+      duplicateFailures = count;
+    },
     findOne(filter: { key?: string }) {
       return {
         lean: async () => {
@@ -52,6 +81,15 @@ export function createFakeFavouriteListModel(rows: FakeFavouriteRow[] = []) {
     ) {
       return {
         lean: async () => {
+          if (duplicateFailures > 0) {
+            duplicateFailures -= 1;
+            const error: any = new Error(
+              "E11000 duplicate key error collection: freetv.favouritelists index: key_1"
+            );
+            error.code = 11000;
+            throw error;
+          }
+
           const index = rows.findIndex((entry) => entry.key === filter?.key);
           const now = new Date().toISOString();
 
@@ -85,6 +123,8 @@ export function createFakeFavouriteListModel(rows: FakeFavouriteRow[] = []) {
 export interface FakeFavouriteDatabase {
   /** The list rows the store will read and write. */
   lists: FakeFavouriteRow[];
+  /** The model standing in for MongoDB, so a test can make a write fail. */
+  model: FakeFavouriteListModel;
   /** Puts the real modules back. */
   restore: () => void;
 }
@@ -109,12 +149,14 @@ export function installFakeFavouriteDatabase(
   const originalList = listModule.default;
 
   const lists = options.lists ?? [];
+  const model = createFakeFavouriteListModel(lists);
 
   dbModule.connectToDatabase = async () => ({ fake: true });
-  listModule.default = createFakeFavouriteListModel(lists);
+  listModule.default = model;
 
   return {
     lists,
+    model,
     restore() {
       dbModule.connectToDatabase = originalConnect;
       listModule.default = originalList;

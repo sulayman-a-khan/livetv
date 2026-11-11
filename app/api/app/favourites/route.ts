@@ -33,10 +33,14 @@ const NO_STORE = { "Cache-Control": "no-store" };
  * GET /api/app/favourites?key=…
  * The ids the site holds under that key.
  *
- * A key that holds no list yet is answered with an empty list and not with a
- * failure: the site answered, and what it holds under that key is nothing.
- * A key that is not one the app could have written is refused, because a list
- * under a key nobody typed is not a list anybody can read back.
+ * A key the site holds no record of is answered with a failure and not with an
+ * empty list: there is no list there, and an empty list would be read as "this
+ * viewer keeps no channels" and would take the list off the device that still
+ * has it. The app reads a failure as "the site has nothing for me" and keeps
+ * what it holds.
+ *
+ * A key the site holds a record of is answered with what is in it, and a list
+ * that is empty because the viewer emptied it is an empty list.
  */
 export async function GET(req: NextRequest) {
   const key = normaliseFavouriteKey(new URL(req.url).searchParams.get("key"));
@@ -49,20 +53,27 @@ export async function GET(req: NextRequest) {
 
   try {
     const list = await readFavouriteList(key);
+    if (!list) {
+      return NextResponse.json(
+        { success: false, error: "There is no saved list under that key." },
+        { status: 404, headers: NO_STORE }
+      );
+    }
     return NextResponse.json(
       {
         success: true,
-        ids: list?.ids ?? [],
-        updatedAt: list?.updatedAt ?? "",
+        ids: list.ids,
+        updatedAt: list.updatedAt,
       },
       { status: 200, headers: NO_STORE }
     );
   } catch (error: any) {
     console.error("GET /api/app/favourites error:", error);
     // Failure is not emptiness: the app keeps the list on the device when the
-    // site cannot be asked, and an empty list would take it away.
+    // site cannot be asked, and an empty list would take it away. What failed
+    // is said and nothing about the database behind it is.
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to read the saved list" },
+      { success: false, error: "Failed to read the saved list" },
       { status: 503, headers: NO_STORE }
     );
   }
@@ -108,8 +119,11 @@ export async function POST(req: NextRequest) {
     );
   } catch (error: any) {
     console.error("POST /api/app/favourites error:", error);
+    // A write that did not land is a failure and not an empty list: the app
+    // keeps the list on the device and pushes it again later. What failed is
+    // said and nothing about the database behind it is.
     return NextResponse.json(
-      { success: false, error: error?.message || "Failed to save the list" },
+      { success: false, error: "Failed to save the list" },
       { status: 503, headers: NO_STORE }
     );
   }

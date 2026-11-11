@@ -22,6 +22,9 @@ export interface FavouriteListRecord {
   updatedAt: string;
 }
 
+/** The sentence a write that did not land is failed with. */
+const WRITE_REFUSED = "the saved list was not written";
+
 /** A stored row as the route reads it. */
 function toFavouriteListRecord(row: {
   key?: unknown;
@@ -56,6 +59,11 @@ export async function readFavouriteList(key: string): Promise<FavouriteListRecor
  *
  * The list that is written last is the list that is kept: the app has no
  * account and no way to merge two copies, so a write is the whole truth.
+ *
+ * A write that did not land is a failure and not an empty list. The store
+ * refuses to answer with one, because an empty list would tell the app that
+ * the viewer keeps no channels, and the app would take the list off the device
+ * that still has it.
  */
 export async function writeFavouriteList(
   key: string,
@@ -70,17 +78,22 @@ export async function writeFavouriteList(
       { key, ids },
       { upsert: true, new: true }
     ).lean();
+    if (!row) throw new Error(WRITE_REFUSED);
     return toFavouriteListRecord(row);
   } catch (error: any) {
     // Two devices writing the same key for the first time at the same moment
     // both try to create the row, and the second one is refused by the unique
-    // index. The row exists now, so the same write without the insert lands.
+    // index. The row exists now, so the same write lands on it.
     if (error?.code !== 11000) throw error;
     const row = await FavouriteListModel.findOneAndUpdate(
       { key },
       { key, ids },
-      { new: true }
+      { upsert: true, new: true }
     ).lean();
+    // The second attempt is refused as well, or it finds no row to write: either
+    // way nothing was written, and that is said rather than answered as an
+    // empty list.
+    if (!row) throw new Error(WRITE_REFUSED);
     return toFavouriteListRecord(row);
   }
 }
